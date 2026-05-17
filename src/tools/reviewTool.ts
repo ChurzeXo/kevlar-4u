@@ -4,7 +4,7 @@ import { loadAllPersonas, loadPersonaById, Persona } from "../utils/parser.js";
 export const reviewToolDefinition: Tool = {
   name: "review_content",
   description:
-    "核心功能：将你的文案/剧本/内容交给多个独立的批评人设进行压力测试。每个人设会独立阅读并给出犀利的评论，最终汇总成一份结构化报告。这是你发布到互联网之前的最后一道防线。",
+    "核心功能：将文案交给多个独立的批评人设进行压力测试。使用前必须先调用 list_personas 展示可用评论员让用户选择（默认全选），再将选中的 ID 通过 persona_ids 传入。评测完成后，如还有未参与的评论员，应向用户确认是否延续测试。",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -16,7 +16,7 @@ export const reviewToolDefinition: Tool = {
         type: "array",
         items: { type: "string" },
         description:
-          "指定要激活的人设 ID 列表（通过 list_personas 获取）。留空则默认激活所有可用人设。",
+          "用户选中的评论员 ID 列表（通过 list_personas 展示让用户勾选）。留空则使用全部角色。",
       },
       context: {
         type: "string",
@@ -44,6 +44,9 @@ export async function handleReviewContent(
   skillsDir: string,
   input: ReviewInput
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
+  // Load all available personas (for continuation tracking)
+  const allPersonas = loadAllPersonas(skillsDir);
+
   // Load requested personas (or all of them)
   let personas: Persona[];
 
@@ -66,7 +69,7 @@ export async function handleReviewContent(
       };
     }
   } else {
-    personas = loadAllPersonas(skillsDir);
+    personas = allPersonas;
   }
 
   if (personas.length === 0) {
@@ -80,17 +83,19 @@ export async function handleReviewContent(
     };
   }
 
+  // Track unselected personas for continuation flow
+  const activeIds = new Set(personas.map((p) => p.meta.id));
+  const remainingPersonas = allPersonas.filter((p) => !activeIds.has(p.meta.id));
+
   const contextNote = input.context
     ? `\n\n**发布平台 & 目标受众背景**：${input.context}`
     : "";
 
   // ── Orchestration prompt ──────────────────────────────────────────────────
-  // This prompt is returned to the host AI client. The client (e.g. Claude Desktop)
-  // reads it and spawns separate inference calls per persona, keeping their
-  // "personalities" isolated from each other — the Multi-Agent flow described in README.
   const orchestrationPrompt = buildOrchestrationPrompt(
     input.content,
     personas,
+    remainingPersonas,
     contextNote
   );
 
@@ -109,11 +114,25 @@ export async function handleReviewContent(
 function buildOrchestrationPrompt(
   content: string,
   personas: Persona[],
+  remainingPersonas: Persona[],
   contextNote: string
 ): string {
   const personaBlocks = personas
     .map((p, i) => buildPersonaBlock(p, i + 1, content, contextNote))
     .join("\n\n---\n\n");
+
+  const remainingBlock =
+    remainingPersonas.length > 0
+      ? `\n## 🔄 延续测试说明
+
+本轮有 **${remainingPersonas.length} 个人设未参与评测**：${remainingPersonas.map((p) => `\`${p.meta.id}\`（${p.meta.name}）`).join("、")}。
+
+**完成本轮的汇总报告后，请执行以下操作：**
+1. 向用户展示汇总报告
+2. 询问用户："还有 ${remainingPersonas.length} 个评论员未参与评测（${remainingPersonas.map((p) => p.meta.name).join("、")}），是否继续测试？"
+3. 如果用户同意，调用 \`review_content\` 并将 \`persona_ids\` 设为 [${remainingPersonas.map((p) => `"${p.meta.id}"`).join(", ")}]，复用本次内容即可
+4. 如果用户拒绝，结束本次评测`
+      : "";
 
   return `# 🛡️ Kevlar 压力测试任务派发
 
@@ -155,7 +174,7 @@ ${personaBlocks}
 #### 一句话总评
 
 （一句最犀利的总结：这份内容现在能不能发？）
-
+${remainingBlock}
 ---
 *由 Kevlar MCP Server 驱动 · 本地多智能体内容防弹衣*`;
 }

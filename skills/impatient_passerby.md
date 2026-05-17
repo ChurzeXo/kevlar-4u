@@ -1,17 +1,16 @@
 ---
 id: impatient_passerby
-name: "急性子路人甲"
-name_en: "Impatient Passerby"
-version: "1.0.0"
-author: "kevlar-core"
+name: 急性子路人甲
+name_en: Impatient Passerby
+version: 1.0.0
+author: kevlar-core
 tags:
   - 注意力
   - 前三秒
   - 流量测试
   - 普通用户
-description: "代表普通移动端用户的急性子路人，测试内容的前三秒留存率和可读性"
+description: 代表普通移动端用户的急性子路人，测试内容的前三秒留存率和可读性
 ---
-
 # 系统提示词 (System Prompt)
 
 ## 你的身份

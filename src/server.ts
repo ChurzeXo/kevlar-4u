@@ -5,6 +5,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
+import { fileURLToPath } from "url";
 
 import {
   listPersonasToolDefinition,
@@ -13,6 +14,12 @@ import {
   handleCreatePersona,
   reviewToolDefinition,
   handleReviewContent,
+  deletePersonaToolDefinition,
+  handleDeletePersona,
+  resetPersonasToolDefinition,
+  handleResetPersonas,
+  helpToolDefinition,
+  handleHelp,
   CreatePersonaInput,
   ReviewInput,
 } from "./tools/index.js";
@@ -25,8 +32,11 @@ function resolveSkillsDir(): string {
   if (process.env.KEVLAR_SKILLS_DIR) {
     return path.resolve(process.env.KEVLAR_SKILLS_DIR);
   }
-  // __dirname is dist/ after compilation; go up two levels to repo root
-  const repoRoot = path.resolve(__dirname, "..", "..");
+  // __dirname equivalent in ESM
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  // dist/ after compilation; go up one level to repo root
+  const repoRoot = path.resolve(__dirname, "..");
   return path.join(repoRoot, "skills");
 }
 
@@ -61,7 +71,10 @@ export function createKevlarServer(): Server {
       tools: [
         listPersonasToolDefinition,
         createPersonaToolDefinition,
+        deletePersonaToolDefinition,
+        resetPersonasToolDefinition,
         reviewToolDefinition,
+        helpToolDefinition,
       ],
     };
   });
@@ -83,6 +96,25 @@ export function createKevlarServer(): Server {
           return await handleCreatePersona(skillsDir, args as unknown as CreatePersonaInput);
         }
 
+        case "delete_persona": {
+          if (!args || typeof args !== "object") {
+            throw new Error("delete_persona requires arguments");
+          }
+          const delInput = args as unknown as { id: string; confirm: boolean };
+          if (!delInput.id) {
+            throw new Error("delete_persona requires a `id` string");
+          }
+          return await handleDeletePersona(skillsDir, delInput);
+        }
+
+        case "reset_personas": {
+          if (!args || typeof args !== "object") {
+            throw new Error("reset_personas requires arguments");
+          }
+          const resetInput = args as unknown as { confirm: boolean };
+          return await handleResetPersonas(skillsDir, resetInput);
+        }
+
         case "review_content": {
           if (!args || typeof args !== "object") {
             throw new Error("review_content requires arguments");
@@ -92,6 +124,10 @@ export function createKevlarServer(): Server {
             throw new Error("review_content requires a non-empty `content` string");
           }
           return await handleReviewContent(skillsDir, input);
+        }
+
+        case "kevlar_help": {
+          return await handleHelp();
         }
 
         default:

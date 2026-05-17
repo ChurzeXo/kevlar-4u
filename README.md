@@ -1,4 +1,4 @@
-# 🛡️ Kevlar (凯夫拉)
+# Kevlar MCP Server
 
 > **Kevlar: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.**
 > （Kevlar：一个遵循 MCP 规范的本地多智能体内容防弹衣。在真实的互联网恶评攻击你之前，先在本地完成内容的压力测试。）

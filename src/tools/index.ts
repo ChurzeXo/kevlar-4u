@@ -3,3 +3,6 @@ export { createPersonaToolDefinition, handleCreatePersona } from "./createPerson
 export type { CreatePersonaInput } from "./createPersonaTool.js";
 export { reviewToolDefinition, handleReviewContent } from "./reviewTool.js";
 export type { ReviewInput } from "./reviewTool.js";
+export { deletePersonaToolDefinition, handleDeletePersona } from "./deletePersonaTool.js";
+export { resetPersonasToolDefinition, handleResetPersonas } from "./resetPersonasTool.js";
+export { helpToolDefinition, handleHelp } from "./helpTool.js";

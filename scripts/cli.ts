@@ -331,6 +331,41 @@ async function runCLI() {
   ${BRAND("🛡️  Content Stress-Test Armor")} ${DIM("｜")} ${DIM("v" + VERSION)}
   `);
 
+  // ── Use case showcase ──────────────────────────────────────────
+
+  console.log(`
+  ${chalk.bold("适合这样的你")}
+
+  ${DIM("📝  自媒体 · 内容创作者")}
+  ${DIM("      发帖前模拟真实读者反应，检测文案是否说清楚了产品价值")}
+
+  ${DIM("📰  公关 · 舆情红队")}
+  ${DIM("      发布声明、通稿前预扫舆论雷区，扮演挑剔记者、对立视角")}
+
+  ${DIM("📱  产品评测")}
+  ${DIM("      模拟参数党、品牌粉、性价比警察，预检评测公正性")}
+
+  ${DIM("🎬  编剧 · 剧本杀")}
+  ${DIM("      测试剧情漏洞、角色动机、玩家体验，提前拆弹")}
+  `);
+
+  console.log(
+    `  ${DIM("━".repeat(48))}\n`
+  );
+
+  const proceed = await select({
+    message: `  ${CYAN("λ")} 按 ${chalk.bold("Enter")} 开始安装，或 Cancel 退出`,
+    choices: [
+      { name: `${GREEN("▶")}  开始安装 Kevlar MCP 服务`, value: "go" },
+      { name: "Cancel", value: "cancel" },
+    ],
+  });
+
+  if (proceed === "cancel") {
+    console.log(DIM("\n  安装已取消。下次运行：npm run install-mcp\n"));
+    process.exit(0);
+  }
+
   console.log(`  ${CYAN("→")} Scanning for installed AI clients...\n`);
 
   const detectionResults = await Promise.all(
