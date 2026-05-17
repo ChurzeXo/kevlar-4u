@@ -4,7 +4,7 @@ import { loadAllPersonas, loadPersonaById, Persona } from "../utils/parser.js";
 export const reviewToolDefinition: Tool = {
   name: "review_content",
   description:
-    "核心功能：将文案交给多个独立的批评人设进行压力测试。使用前必须先调用 list_personas 展示可用评论员让用户选择（默认全选），再将选中的 ID 通过 persona_ids 传入。评测完成后，如还有未参与的评论员，应向用户确认是否延续测试。",
+    "核心功能：将文案交给多个独立的批评人设进行压力测试。使用前先展示可用评论员让用户选择（默认全选）。评测完成后如有未参与的评论员，应询问用户是否延续测试。",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -16,7 +16,7 @@ export const reviewToolDefinition: Tool = {
         type: "array",
         items: { type: "string" },
         description:
-          "用户选中的评论员 ID 列表（通过 list_personas 展示让用户勾选）。留空则使用全部角色。",
+          "用户选中的人设 ID。留空则使用全部角色。",
       },
       context: {
         type: "string",
@@ -63,7 +63,7 @@ export async function handleReviewContent(
         content: [
           {
             type: "text",
-            text: `❌ 找不到以下人设 ID：${missing.map((id) => `\`${id}\``).join(", ")}。\n\n请先调用 \`list_personas\` 查看所有可用人设。`,
+            text: "❌ 找不到部分选中的评论员。请先查看可用评论员列表。",
           },
         ],
       };
@@ -77,7 +77,7 @@ export async function handleReviewContent(
       content: [
         {
           type: "text",
-          text: "⚠️ 没有找到任何可用人设。请确认 skills/ 目录下有有效的 .md 文件，或先调用 create_persona 创建新人设。",
+          text: "⚠️ 当前没有可用评论员。请先创建自定义评论员。",
         },
       ],
     };
@@ -121,17 +121,19 @@ function buildOrchestrationPrompt(
     .map((p, i) => buildPersonaBlock(p, i + 1, content, contextNote))
     .join("\n\n---\n\n");
 
+  const remainingNames = remainingPersonas.map((p) => p.meta.name).join("、");
+
   const remainingBlock =
     remainingPersonas.length > 0
-      ? `\n## 🔄 延续测试说明
+      ? `\n## 🔄 延续测试
 
-本轮有 **${remainingPersonas.length} 个人设未参与评测**：${remainingPersonas.map((p) => `\`${p.meta.id}\`（${p.meta.name}）`).join("、")}。
+本轮有 **${remainingPersonas.length} 个人设未参与评测**：${remainingNames}。
 
-**完成本轮的汇总报告后，请执行以下操作：**
-1. 向用户展示汇总报告
-2. 询问用户："还有 ${remainingPersonas.length} 个评论员未参与评测（${remainingPersonas.map((p) => p.meta.name).join("、")}），是否继续测试？"
-3. 如果用户同意，调用 \`review_content\` 并将 \`persona_ids\` 设为 [${remainingPersonas.map((p) => `"${p.meta.id}"`).join(", ")}]，复用本次内容即可
-4. 如果用户拒绝，结束本次评测`
+**完成汇总报告后：**
+1. 向用户展示报告
+2. 询问是否要用剩余评论员（${remainingNames}）继续评测
+3. 用户同意则启动新一轮评测（复用本次内容）
+4. 用户拒绝则结束`
       : "";
 
   return `# 🛡️ Kevlar 压力测试任务派发
@@ -187,7 +189,6 @@ function buildPersonaBlock(
 ): string {
   return `## 第 ${index} 号子代理：${persona.meta.name}
 
-**人设 ID**：\`${persona.meta.id}\`
 **角色描述**：${persona.meta.description}
 
 **指令**：请你完全进入以下系统人设，用这个角色的思维方式、语言风格和批判标准，独立阅读下方内容并给出评论。

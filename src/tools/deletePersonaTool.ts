@@ -6,7 +6,7 @@ import { loadPersonaById } from "../utils/parser.js";
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
   description:
-    "删除一个已存在的批评人设。AI 会先列出所有评论员供用户选择，二次确认后执行删除。系统内置角色（作者为 kevlar-core 的）同样可以删除，之后可通过 reset_personas 恢复。",
+    "删除一个已存在的批评人设。AI 会先列出所有评论员供用户选择，二次确认后执行删除。系统内置角色同样可以删除，之后可以恢复。",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -29,14 +29,14 @@ export async function handleDeletePersona(
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   if (!input.confirm) {
     return {
-      content: [{ type: "text", text: "⚠️ 删除操作需要确认，请将 confirm 设为 true。" }],
+      content: [{ type: "text", text: "⚠️ 删除操作需要二次确认，请确认你要删除这个评论员。" }],
     };
   }
 
   const persona = loadPersonaById(skillsDir, input.id);
   if (!persona) {
     return {
-      content: [{ type: "text", text: `❌ 找不到人设 \`${input.id}\`。` }],
+      content: [{ type: "text", text: "❌ 找不到这个评论员。" }],
     };
   }
 
@@ -52,12 +52,12 @@ export async function handleDeletePersona(
   }
 
   const lines: string[] = [
-    `✅ 人设「${persona.meta.name}」（\`${input.id}\`）已删除。`,
+    `✅ 人设「${persona.meta.name}」已删除。`,
   ];
 
   if (isBuiltIn) {
     lines.push("");
-    lines.push("📌 这是系统内置角色，如需恢复请执行 reset_personas。");
+    lines.push("📌 这是系统内置角色，如需恢复可以告诉我。");
   }
 
   return {

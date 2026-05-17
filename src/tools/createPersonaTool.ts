@@ -6,7 +6,7 @@ import matter from "gray-matter";
 export const createPersonaToolDefinition: Tool = {
   name: "create_persona",
   description:
-    "动态创建并保存一个新的批评人设到本地 skills/ 目录。当你对 AI 说「帮我创建一个XXX人设」时，AI 会生成完整的角色 Prompt 并通过此工具写入本地文件，之后即可在 review_content 中使用。",
+    "动态创建并保存一个新的批评人设。当你对 AI 说「帮我创建一个XXX人设」时，AI 会生成完整的角色 Prompt 并保存，之后即可在评测中使用。",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -66,7 +66,7 @@ export async function handleCreatePersona(
       content: [
         {
           type: "text",
-          text: `❌ 错误：人设 ID \`${input.id}\` 格式不合法。ID 只能包含小写字母、数字和下划线（_）。`,
+          text: `❌ 名称格式不合法，只能包含小写英文字母、数字和下划线。`,
         },
       ],
     };
@@ -81,7 +81,7 @@ export async function handleCreatePersona(
       content: [
         {
           type: "text",
-          text: `⚠️ 人设 \`${input.id}\` 已存在（路径：${filePath}）。\n\n若要覆盖，请先手动删除旧文件后重试。`,
+          text: `⚠️ 这个评论员名称已存在。请换个名称，或先删除旧的再创建。`,
         },
       ],
     };
@@ -120,11 +120,9 @@ export async function handleCreatePersona(
         text: [
           `✅ 人设「${input.name}」已成功创建！`,
           "",
-          `- **ID**: \`${input.id}\``,
-          `- **文件路径**: \`${filePath}\``,
-          `- **描述**: ${input.description}`,
+          `描述：${input.description}`,
           "",
-          `现在你可以在 \`review_content\` 工具的 \`persona_ids\` 参数中传入 \`"${input.id}"\` 来激活这个角色。`,
+          "现在即可在评测中选择使用这个评论员。",
         ].join("\n"),
       },
     ],

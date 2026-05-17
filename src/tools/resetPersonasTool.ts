@@ -199,7 +199,7 @@ export async function handleResetPersonas(
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
   if (!input.confirm) {
     return {
-      content: [{ type: "text", text: "⚠️ 恢复操作需要确认，请将 confirm 设为 true。" }],
+      content: [{ type: "text", text: "⚠️ 恢复操作需要二次确认，请确认你要恢复默认评论员。" }],
     };
   }
 
@@ -217,11 +217,11 @@ export async function handleResetPersonas(
         description: builtin.description,
       };
 
-      const filePath = writePersonaFile(skillsDir, meta, builtin.systemPrompt);
-      results.push(`✅ ${builtin.name}（\`${builtin.id}\`）→ ${filePath}`);
+      writePersonaFile(skillsDir, meta, builtin.systemPrompt);
+      results.push(`✅ ${builtin.name} 已恢复`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      results.push(`❌ ${builtin.name}（\`${builtin.id}\`）失败：${message}`);
+      results.push(`❌ ${builtin.name} 恢复失败：${message}`);
     }
   }
 
@@ -233,7 +233,7 @@ export async function handleResetPersonas(
           `## 系统人设恢复完成\n`,
           ...results,
           "",
-          `💡 现在可以调用 list_personas 查看恢复后的列表。`,
+          `💡 现在可以查看评论员列表确认恢复结果。`,
         ].join("\n"),
       },
     ],

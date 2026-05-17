@@ -91,25 +91,25 @@ export function createKevlarServer(): Server {
 
         case "create_persona": {
           if (!args || typeof args !== "object") {
-            throw new Error("create_persona requires arguments");
+            throw new Error("创建评论员需要提供参数");
           }
           return await handleCreatePersona(skillsDir, args as unknown as CreatePersonaInput);
         }
 
         case "delete_persona": {
           if (!args || typeof args !== "object") {
-            throw new Error("delete_persona requires arguments");
+            throw new Error("删除评论员需要提供参数");
           }
           const delInput = args as unknown as { id: string; confirm: boolean };
           if (!delInput.id) {
-            throw new Error("delete_persona requires a `id` string");
+            throw new Error("请指定要删除的评论员");
           }
           return await handleDeletePersona(skillsDir, delInput);
         }
 
         case "reset_personas": {
           if (!args || typeof args !== "object") {
-            throw new Error("reset_personas requires arguments");
+            throw new Error("恢复操作需要提供参数");
           }
           const resetInput = args as unknown as { confirm: boolean };
           return await handleResetPersonas(skillsDir, resetInput);
@@ -117,11 +117,11 @@ export function createKevlarServer(): Server {
 
         case "review_content": {
           if (!args || typeof args !== "object") {
-            throw new Error("review_content requires arguments");
+            throw new Error("评测需要提供文案内容");
           }
           const input = args as unknown as ReviewInput;
           if (!input.content || typeof input.content !== "string") {
-            throw new Error("review_content requires a non-empty `content` string");
+            throw new Error("请提供要评测的文案内容");
           }
           return await handleReviewContent(skillsDir, input);
         }
@@ -139,7 +139,7 @@ export function createKevlarServer(): Server {
         content: [
           {
             type: "text",
-            text: `❌ Kevlar 内部错误：${message}`,
+            text: `❌ 操作失败：${message}`,
           },
         ],
         isError: true,
