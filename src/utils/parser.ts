@@ -19,6 +19,15 @@ export interface Persona {
 }
 
 /**
+ * 安全验证：确保路径在指定目录内，防止路径遍历攻击
+ */
+function validatePath(filePath: string, baseDir: string): boolean {
+  const resolvedPath = path.resolve(filePath);
+  const resolvedBase = path.resolve(baseDir);
+  return resolvedPath.startsWith(resolvedBase + path.sep);
+}
+
+/**
  * Parse a single persona .md file.
  * Returns null if the file is a template or lacks required frontmatter.
  */
@@ -37,7 +46,15 @@ export function parsePersonaFile(filePath: string): Persona | null {
     return null;
   }
 
-  const { data, content } = matter(raw);
+  let parsed: matter.GrayMatterFile<string>;
+  try {
+    parsed = matter(raw);
+  } catch (err) {
+    console.warn(`[Kevlar] Failed to parse ${filePath}:`, err);
+    return null;
+  }
+
+  const data = parsed.data;
 
   // Validate required fields
   if (!data.id || !data.name) {
@@ -56,7 +73,7 @@ export function parsePersonaFile(filePath: string): Persona | null {
 
   return {
     meta,
-    systemPrompt: content.trim(),
+    systemPrompt: parsed.content.trim(),
     filePath,
   };
 }
@@ -85,13 +102,53 @@ export function loadAllPersonas(skillsDir: string): Persona[] {
 
 /**
  * Load a single persona by its id.
+ * Optimized: loads only the specific file instead of all personas.
  */
 export function loadPersonaById(
   skillsDir: string,
   id: string
 ): Persona | null {
+  // Sanitize ID to prevent path traversal
+  const sanitizedId = id.replace(/[^a-z0-9_]/gi, "");
+  if (!sanitizedId || sanitizedId !== id) {
+    return null;
+  }
+
+  const fileName = `${sanitizedId}.md`;
+  const filePath = path.join(skillsDir, fileName);
+
+  // Security check: ensure file is within skillsDir
+  if (!validatePath(filePath, skillsDir)) {
+    return null;
+  }
+
+  return parsePersonaFile(filePath);
+}
+
+/**
+ * Load multiple personas by their ids efficiently.
+ * Single directory scan for all requested personas.
+ */
+export function loadPersonasByIds(
+  skillsDir: string,
+  ids: string[]
+): Persona[] {
   const all = loadAllPersonas(skillsDir);
-  return all.find((p) => p.meta.id === id) ?? null;
+  const idSet = new Set(ids.map((id) => id.replace(/[^a-z0-9_]/gi, "")));
+  return all.filter((p) => idSet.has(p.meta.id));
+}
+
+/**
+ * Validate that a file path is safe to write/delete within skillsDir.
+ */
+export function validateWritePath(
+  filePath: string,
+  skillsDir: string
+): boolean {
+  // Ensure parent directory is skillsDir
+  const resolvedPath = path.resolve(filePath);
+  const resolvedDir = path.resolve(skillsDir);
+  return resolvedPath.startsWith(resolvedDir + path.sep);
 }
 
 /**
@@ -105,6 +162,11 @@ export function writePersonaFile(
 ): string {
   const fileName = `${meta.id}.md`;
   const filePath = path.join(skillsDir, fileName);
+
+  // Security check
+  if (!validateWritePath(filePath, skillsDir)) {
+    throw new Error("Invalid file path: path traversal detected");
+  }
 
   const frontmatter = matter.stringify(systemPrompt, meta as unknown as Record<string, unknown>);
 

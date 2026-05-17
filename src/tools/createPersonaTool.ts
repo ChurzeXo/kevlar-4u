@@ -2,6 +2,10 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
 import matter from "gray-matter";
+import { validateWritePath, PersonaMeta } from "../utils/parser.js";
+
+// 统一返回类型定义
+type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
 
 export const createPersonaToolDefinition: Tool = {
   name: "create_persona",
@@ -59,7 +63,7 @@ export interface CreatePersonaInput {
 export async function handleCreatePersona(
   skillsDir: string,
   input: CreatePersonaInput
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+): Promise<ToolResult> {
   // Validate ID format
   if (!/^[a-z0-9_]+$/.test(input.id)) {
     return {
@@ -69,11 +73,25 @@ export async function handleCreatePersona(
           text: `❌ 名称格式不合法，只能包含小写英文字母、数字和下划线。`,
         },
       ],
+      isError: true,
     };
   }
 
   const fileName = `${input.id}.md`;
   const filePath = path.join(skillsDir, fileName);
+
+  // Security check: validate path is within skillsDir
+  if (!validateWritePath(filePath, skillsDir)) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 非法路径访问被拒绝。`,
+        },
+      ],
+      isError: true,
+    };
+  }
 
   // Check for existing file
   if (fs.existsSync(filePath)) {
@@ -84,10 +102,12 @@ export async function handleCreatePersona(
           text: `⚠️ 这个评论员名称已存在。请换个名称，或先删除旧的再创建。`,
         },
       ],
+      isError: true,
     };
   }
 
-  const meta = {
+  // Define proper Frontmatter type
+  const meta: PersonaMeta = {
     id: input.id,
     name: input.name,
     name_en: input.name_en ?? "",
@@ -99,7 +119,7 @@ export async function handleCreatePersona(
 
   try {
     fs.mkdirSync(skillsDir, { recursive: true });
-    const fileContent = matter.stringify(input.system_prompt, meta as unknown as Record<string, unknown>);
+    const fileContent = matter.stringify(input.system_prompt, meta);
     fs.writeFileSync(filePath, fileContent, "utf-8");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -110,6 +130,7 @@ export async function handleCreatePersona(
           text: `❌ 写入文件失败：${message}`,
         },
       ],
+      isError: true,
     };
   }
 

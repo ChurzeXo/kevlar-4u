@@ -1,5 +1,8 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { loadAllPersonas, loadPersonaById, Persona } from "../utils/parser.js";
+import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
+
+// 统一返回类型定义
+type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
 
 export const reviewToolDefinition: Tool = {
   name: "review_content",
@@ -43,7 +46,7 @@ export interface ReviewInput {
 export async function handleReviewContent(
   skillsDir: string,
   input: ReviewInput
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+): Promise<ToolResult> {
   // Load all available personas (for continuation tracking)
   const allPersonas = loadAllPersonas(skillsDir);
 
@@ -51,21 +54,20 @@ export async function handleReviewContent(
   let personas: Persona[];
 
   if (input.persona_ids && input.persona_ids.length > 0) {
-    personas = input.persona_ids
-      .map((id) => loadPersonaById(skillsDir, id))
-      .filter((p): p is Persona => p !== null);
+    // Optimized: use batch loading to avoid N file reads for N personas
+    personas = loadPersonasByIds(skillsDir, input.persona_ids);
 
-    const missing = input.persona_ids.filter(
-      (id) => !personas.find((p) => p.meta.id === id)
-    );
+    const foundIds = new Set(personas.map((p) => p.meta.id));
+    const missing = input.persona_ids.filter((id) => !foundIds.has(id));
     if (missing.length > 0) {
       return {
         content: [
           {
             type: "text",
-            text: "❌ 找不到部分选中的评论员。请先查看可用评论员列表。",
+            text: `❌ 找不到以下评论员：${missing.join(", ")}。请先查看可用评论员列表。`,
           },
         ],
+        isError: true,
       };
     }
   } else {
@@ -80,6 +82,7 @@ export async function handleReviewContent(
           text: "⚠️ 当前没有可用评论员。请先创建自定义评论员。",
         },
       ],
+      isError: true,
     };
   }
 

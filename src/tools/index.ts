@@ -6,3 +6,4 @@ export type { ReviewInput } from "./reviewTool.js";
 export { deletePersonaToolDefinition, handleDeletePersona } from "./deletePersonaTool.js";
 export { resetPersonasToolDefinition, handleResetPersonas } from "./resetPersonasTool.js";
 export { helpToolDefinition, handleHelp } from "./helpTool.js";
+export { loadPersonasByIds, validateWritePath } from "../utils/parser.js";

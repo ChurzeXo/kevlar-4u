@@ -1,7 +1,10 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
-import { loadPersonaById } from "../utils/parser.js";
+import { loadPersonaById, validateWritePath } from "../utils/parser.js";
+
+// 统一返回类型定义
+type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
 
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
@@ -26,10 +29,11 @@ export const deletePersonaToolDefinition: Tool = {
 export async function handleDeletePersona(
   skillsDir: string,
   input: { id: string; confirm: boolean }
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+): Promise<ToolResult> {
   if (!input.confirm) {
     return {
       content: [{ type: "text", text: "⚠️ 删除操作需要二次确认，请确认你要删除这个评论员。" }],
+      isError: true,
     };
   }
 
@@ -37,6 +41,22 @@ export async function handleDeletePersona(
   if (!persona) {
     return {
       content: [{ type: "text", text: "❌ 找不到这个评论员。" }],
+      isError: true,
+    };
+  }
+
+  // Idempotency: check if already deleted
+  if (!fs.existsSync(persona.filePath)) {
+    return {
+      content: [{ type: "text", text: "⚠️ 该评论员已被删除。" }],
+    };
+  }
+
+  // Security check: validate path is within skillsDir
+  if (!validateWritePath(persona.filePath, skillsDir)) {
+    return {
+      content: [{ type: "text", text: "❌ 非法路径访问被拒绝。" }],
+      isError: true,
     };
   }
 
@@ -48,6 +68,7 @@ export async function handleDeletePersona(
     const message = err instanceof Error ? err.message : String(err);
     return {
       content: [{ type: "text", text: `❌ 删除文件失败：${message}` }],
+      isError: true,
     };
   }
 

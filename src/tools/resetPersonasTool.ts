@@ -1,7 +1,10 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
-import { writePersonaFile } from "../utils/parser.js";
+import { writePersonaFile, PersonaMeta } from "../utils/parser.js";
+
+// 统一返回类型定义
+type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
 
 const BUILTIN_PERSONAS: Array<{
   id: string;
@@ -196,10 +199,11 @@ export const resetPersonasToolDefinition: Tool = {
 export async function handleResetPersonas(
   skillsDir: string,
   input: { confirm: boolean }
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+): Promise<ToolResult> {
   if (!input.confirm) {
     return {
       content: [{ type: "text", text: "⚠️ 恢复操作需要二次确认，请确认你要恢复默认评论员。" }],
+      isError: true,
     };
   }
 
@@ -207,7 +211,7 @@ export async function handleResetPersonas(
 
   for (const builtin of BUILTIN_PERSONAS) {
     try {
-      const meta = {
+      const meta: PersonaMeta = {
         id: builtin.id,
         name: builtin.name,
         name_en: builtin.name_en,
