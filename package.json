@@ -1,5 +1,5 @@
 {
-  "name": "kevlar",
+  "name": "kevlar-mcp",
   "version": "1.0.0",
   "description": "Kevlar: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
   "main": "dist/index.js",
