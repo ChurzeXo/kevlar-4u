@@ -1,0 +1,29 @@
+{
+  "name": "kevlar",
+  "version": "1.0.0",
+  "description": "Kevlar: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
+  "main": "dist/index.js",
+  "bin": {
+    "kevlar": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["mcp", "multi-agent", "content-review", "ai"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.4.2",
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.22.1",
+    "typescript": "^6.0.3"
+  }
+}
