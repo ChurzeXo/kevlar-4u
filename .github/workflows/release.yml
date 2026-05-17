@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Setup Node.js ─────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 4. Compile TypeScript ────────────────────────────────────────────
+      - name: Build
+        run: npm run build
+
+      # ── 5. Inject shebang so dist/index.js is directly executable ───────
+      - name: Make entry executable
+        run: |
+          sed -i '1s|^|#!/usr/bin/env node\n|' dist/index.js
+          chmod +x dist/index.js
+
+      # ── 6. Extract version from tag (e.g. refs/tags/v1.2.3 → 1.2.3) ────
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # ── 7. Bundle release tarball ─────────────────────────────────────────
+      # Includes: compiled dist/, skills/, config/, README, LICENSE
+      # Excludes: source TypeScript, node_modules, dev files
+      - name: Create release tarball
+        run: |
+          tar -czf kevlar-${{ steps.version.outputs.VERSION }}.tar.gz \
+            dist/ \
+            skills/ \
+            config/ \
+            package.json \
+            README.md \
+            --exclude="node_modules"
+
+      # ── 8. Create zip for Windows users ──────────────────────────────────
+      - name: Create release zip
+        run: |
+          zip -r kevlar-${{ steps.version.outputs.VERSION }}.zip \
+            dist/ \
+            skills/ \
+            config/ \
+            package.json \
+            README.md \
+            -x "node_modules/*"
+
+      # ── 9. Generate changelog from git log since last tag ────────────────
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD")
+          fi
+          # Write to file to safely pass multi-line string
+          echo "$CHANGELOG" > changelog.txt
+          echo "Generated changelog since ${PREV_TAG:-initial commit}"
+
+      # ── 10. Publish GitHub Release ────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "🛡️ Kevlar ${{ github.ref_name }}"
+          body_path: changelog.txt
+          files: |
+            kevlar-${{ steps.version.outputs.VERSION }}.tar.gz
+            kevlar-${{ steps.version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Optional: publish to npm ─────────────────────────────────────────────
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: build-and-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.SERVER_PASSWORD }}
