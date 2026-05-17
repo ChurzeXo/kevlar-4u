@@ -50,12 +50,12 @@ jobs:
       - name: Create release tarball
         run: |
           tar -czf kevlar-${{ steps.version.outputs.VERSION }}.tar.gz \
+            --exclude="node_modules" \
             dist/ \
             skills/ \
             config/ \
             package.json \
-            README.md \
-            --exclude="node_modules"
+            README.md
 
       # ── 8. Create zip for Windows users ──────────────────────────────────
       - name: Create release zip
