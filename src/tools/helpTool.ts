@@ -1,4 +1,5 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { ToolResult } from "../utils/types.js";
 
 export const helpToolDefinition: Tool = {
   name: "kevlar_help",
@@ -66,9 +67,7 @@ Kevlar 是一个内容压力测试工具。把你的文案交给多个独立 AI 
 **Q: 如何恢复默认设置？**
 告诉我"恢复默认评论员"，一切回到初始状态。`;
 
-export async function handleHelp(): Promise<{
-  content: Array<{ type: string; text: string }>;
-}> {
+export async function handleHelp(): Promise<ToolResult> {
   return {
     content: [
       {

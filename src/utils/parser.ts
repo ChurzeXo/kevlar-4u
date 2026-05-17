@@ -1,3 +1,4 @@
+import { promises as fsp } from "fs";
 import * as fs from "fs";
 import * as path from "path";
 import matter from "gray-matter";
@@ -18,30 +19,34 @@ export interface Persona {
   filePath: string;
 }
 
-/**
- * 安全验证：确保路径在指定目录内，防止路径遍历攻击
- */
-function validatePath(filePath: string, baseDir: string): boolean {
+// ── Cache for loadAllPersonas ────────────────────────────────────────────────
+
+let personasCache: { personas: Persona[]; mtime: number } | null = null;
+
+export function invalidatePersonasCache(): void {
+  personasCache = null;
+}
+
+// ── Path validation ──────────────────────────────────────────────────────────
+
+export function validateWritePath(filePath: string, baseDir: string): boolean {
   const resolvedPath = path.resolve(filePath);
   const resolvedBase = path.resolve(baseDir);
   return resolvedPath.startsWith(resolvedBase + path.sep);
 }
 
-/**
- * Parse a single persona .md file.
- * Returns null if the file is a template or lacks required frontmatter.
- */
-export function parsePersonaFile(filePath: string): Persona | null {
+// ── Persona parsing ──────────────────────────────────────────────────────────
+
+export async function parsePersonaFile(filePath: string): Promise<Persona | null> {
   const fileName = path.basename(filePath);
 
-  // Skip template files
   if (fileName.startsWith("_")) {
     return null;
   }
 
   let raw: string;
   try {
-    raw = fs.readFileSync(filePath, "utf-8");
+    raw = await fsp.readFile(filePath, "utf-8");
   } catch {
     return null;
   }
@@ -56,7 +61,6 @@ export function parsePersonaFile(filePath: string): Persona | null {
 
   const data = parsed.data;
 
-  // Validate required fields
   if (!data.id || !data.name) {
     return null;
   }
@@ -78,37 +82,39 @@ export function parsePersonaFile(filePath: string): Persona | null {
   };
 }
 
-/**
- * Load all personas from the skills/ directory.
- */
-export function loadAllPersonas(skillsDir: string): Persona[] {
+// ── Loading personas ─────────────────────────────────────────────────────────
+
+export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
   if (!fs.existsSync(skillsDir)) {
     return [];
   }
 
-  const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md"));
+  const stat = fs.statSync(skillsDir);
+  const currentMtime = stat.mtimeMs;
+
+  if (personasCache && personasCache.mtime === currentMtime) {
+    return personasCache.personas;
+  }
+
+  const files = (await fsp.readdir(skillsDir)).filter((f) => f.endsWith(".md"));
   const personas: Persona[] = [];
 
   for (const file of files) {
     const fullPath = path.join(skillsDir, file);
-    const persona = parsePersonaFile(fullPath);
+    const persona = await parsePersonaFile(fullPath);
     if (persona) {
       personas.push(persona);
     }
   }
 
+  personasCache = { personas, mtime: currentMtime };
   return personas;
 }
 
-/**
- * Load a single persona by its id.
- * Optimized: loads only the specific file instead of all personas.
- */
-export function loadPersonaById(
+export async function loadPersonaById(
   skillsDir: string,
   id: string
-): Persona | null {
-  // Sanitize ID to prevent path traversal
+): Promise<Persona | null> {
   const sanitizedId = id.replace(/[^a-z0-9_]/gi, "");
   if (!sanitizedId || sanitizedId !== id) {
     return null;
@@ -117,61 +123,42 @@ export function loadPersonaById(
   const fileName = `${sanitizedId}.md`;
   const filePath = path.join(skillsDir, fileName);
 
-  // Security check: ensure file is within skillsDir
-  if (!validatePath(filePath, skillsDir)) {
+  if (!validateWritePath(filePath, skillsDir)) {
     return null;
   }
 
   return parsePersonaFile(filePath);
 }
 
-/**
- * Load multiple personas by their ids efficiently.
- * Single directory scan for all requested personas.
- */
-export function loadPersonasByIds(
+export async function loadPersonasByIds(
   skillsDir: string,
   ids: string[]
-): Persona[] {
-  const all = loadAllPersonas(skillsDir);
-  const idSet = new Set(ids.map((id) => id.replace(/[^a-z0-9_]/gi, "")));
-  return all.filter((p) => idSet.has(p.meta.id));
+): Promise<Persona[]> {
+  const results = await Promise.all(
+    ids.map((id) => loadPersonaById(skillsDir, id))
+  );
+  return results.filter((p): p is Persona => p !== null);
 }
 
-/**
- * Validate that a file path is safe to write/delete within skillsDir.
- */
-export function validateWritePath(
-  filePath: string,
-  skillsDir: string
-): boolean {
-  // Ensure parent directory is skillsDir
-  const resolvedPath = path.resolve(filePath);
-  const resolvedDir = path.resolve(skillsDir);
-  return resolvedPath.startsWith(resolvedDir + path.sep);
-}
+// ── Writing personas ─────────────────────────────────────────────────────────
 
-/**
- * Write a new persona file to the skills directory.
- * Returns the path of the created file.
- */
-export function writePersonaFile(
+export async function writePersonaFile(
   skillsDir: string,
   meta: PersonaMeta,
   systemPrompt: string
-): string {
+): Promise<string> {
   const fileName = `${meta.id}.md`;
   const filePath = path.join(skillsDir, fileName);
 
-  // Security check
   if (!validateWritePath(filePath, skillsDir)) {
     throw new Error("Invalid file path: path traversal detected");
   }
 
   const frontmatter = matter.stringify(systemPrompt, meta as unknown as Record<string, unknown>);
 
-  fs.mkdirSync(skillsDir, { recursive: true });
-  fs.writeFileSync(filePath, frontmatter, "utf-8");
+  await fsp.mkdir(skillsDir, { recursive: true });
+  await fsp.writeFile(filePath, frontmatter, "utf-8");
 
+  invalidatePersonasCache();
   return filePath;
 }

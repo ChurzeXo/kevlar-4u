@@ -1,11 +1,10 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import * as path from "path";
-import * as fs from "fs";
 import { writePersonaFile, PersonaMeta } from "../utils/parser.js";
+import { ToolResult } from "../utils/types.js";
 
-// 统一返回类型定义
-type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
-
+// ── Single source of truth for built-in personas ────────────────────────────
+// skills/*.md on disk are derived artifacts. Edit prompts here, then call
+// reset_personas to regenerate the .md files.
 const BUILTIN_PERSONAS: Array<{
   id: string;
   name: string;
@@ -221,7 +220,7 @@ export async function handleResetPersonas(
         description: builtin.description,
       };
 
-      writePersonaFile(skillsDir, meta, builtin.systemPrompt);
+      await writePersonaFile(skillsDir, meta, builtin.systemPrompt);
       results.push(`✅ ${builtin.name} 已恢复`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

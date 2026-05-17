@@ -42,9 +42,8 @@ const VERSION = pkg.version || "1.0.0";
 // We forward to the compiled entry point instead of rendering the CLI.
 
 if (process.argv.includes("--stdio")) {
-  const pkgData    = findPackageJson(__dirname);
-  const projectRoot = pkgData.__path
-    ? path.dirname(pkgData.__path)
+  const projectRoot = pkg.__path
+    ? path.dirname(pkg.__path)
     : path.resolve(__dirname, "..");
 
   const serverPath = fs.existsSync(path.join(projectRoot, "dist/index.js"))
@@ -299,9 +298,8 @@ async function runCLI() {
   const isRemoteRun =
     __dirname.includes("node_modules") || __dirname.includes("_npx");
 
-  const pkgData     = findPackageJson(__dirname);
-  const projectRoot = pkgData.__path
-    ? path.dirname(pkgData.__path)
+  const projectRoot = pkg.__path
+    ? path.dirname(pkg.__path)
     : path.resolve(__dirname, "..");
 
   // Resolve the command that the AI client will use to launch Kevlar

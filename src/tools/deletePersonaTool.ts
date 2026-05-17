@@ -1,10 +1,7 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import * as path from "path";
 import * as fs from "fs";
-import { loadPersonaById, validateWritePath } from "../utils/parser.js";
-
-// 统一返回类型定义
-type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+import { loadPersonaById, validateWritePath, invalidatePersonasCache } from "../utils/parser.js";
+import { ToolResult } from "../utils/types.js";
 
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
@@ -37,7 +34,7 @@ export async function handleDeletePersona(
     };
   }
 
-  const persona = loadPersonaById(skillsDir, input.id);
+  const persona = await loadPersonaById(skillsDir, input.id);
   if (!persona) {
     return {
       content: [{ type: "text", text: "❌ 找不到这个评论员。" }],
@@ -63,7 +60,8 @@ export async function handleDeletePersona(
   const isBuiltIn = persona.meta.author === "kevlar-core";
 
   try {
-    fs.unlinkSync(persona.filePath);
+    await fs.promises.unlink(persona.filePath);
+    invalidatePersonasCache();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {

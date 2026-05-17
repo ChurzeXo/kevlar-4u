@@ -1,11 +1,8 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
-import matter from "gray-matter";
-import { validateWritePath, PersonaMeta } from "../utils/parser.js";
-
-// 统一返回类型定义
-type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+import { validateWritePath, writePersonaFile, PersonaMeta } from "../utils/parser.js";
+import { ToolResult } from "../utils/types.js";
 
 export const createPersonaToolDefinition: Tool = {
   name: "create_persona",
@@ -64,7 +61,6 @@ export async function handleCreatePersona(
   skillsDir: string,
   input: CreatePersonaInput
 ): Promise<ToolResult> {
-  // Validate ID format
   if (!/^[a-z0-9_]+$/.test(input.id)) {
     return {
       content: [
@@ -80,7 +76,6 @@ export async function handleCreatePersona(
   const fileName = `${input.id}.md`;
   const filePath = path.join(skillsDir, fileName);
 
-  // Security check: validate path is within skillsDir
   if (!validateWritePath(filePath, skillsDir)) {
     return {
       content: [
@@ -93,7 +88,6 @@ export async function handleCreatePersona(
     };
   }
 
-  // Check for existing file
   if (fs.existsSync(filePath)) {
     return {
       content: [
@@ -106,7 +100,6 @@ export async function handleCreatePersona(
     };
   }
 
-  // Define proper Frontmatter type
   const meta: PersonaMeta = {
     id: input.id,
     name: input.name,
@@ -118,9 +111,7 @@ export async function handleCreatePersona(
   };
 
   try {
-    fs.mkdirSync(skillsDir, { recursive: true });
-    const fileContent = matter.stringify(input.system_prompt, meta);
-    fs.writeFileSync(filePath, fileContent, "utf-8");
+    await writePersonaFile(skillsDir, meta, input.system_prompt);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {

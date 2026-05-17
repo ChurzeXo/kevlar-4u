@@ -1,5 +1,6 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { loadAllPersonas } from "../utils/parser.js";
+import { ToolResult } from "../utils/types.js";
 
 export const listPersonasToolDefinition: Tool = {
   name: "list_personas",
@@ -14,8 +15,8 @@ export const listPersonasToolDefinition: Tool = {
 
 export async function handleListPersonas(
   skillsDir: string
-): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const personas = loadAllPersonas(skillsDir);
+): Promise<ToolResult> {
+  const personas = await loadAllPersonas(skillsDir);
 
   if (personas.length === 0) {
     return {

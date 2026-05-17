@@ -1,8 +1,6 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
-
-// 统一返回类型定义
-type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+import { ToolResult } from "../utils/types.js";
 
 export const reviewToolDefinition: Tool = {
   name: "review_content",
@@ -48,14 +46,13 @@ export async function handleReviewContent(
   input: ReviewInput
 ): Promise<ToolResult> {
   // Load all available personas (for continuation tracking)
-  const allPersonas = loadAllPersonas(skillsDir);
+  const allPersonas = await loadAllPersonas(skillsDir);
 
   // Load requested personas (or all of them)
   let personas: Persona[];
 
   if (input.persona_ids && input.persona_ids.length > 0) {
-    // Optimized: use batch loading to avoid N file reads for N personas
-    personas = loadPersonasByIds(skillsDir, input.persona_ids);
+    personas = await loadPersonasByIds(skillsDir, input.persona_ids);
 
     const foundIds = new Set(personas.map((p) => p.meta.id));
     const missing = input.persona_ids.filter((id) => !foundIds.has(id));
