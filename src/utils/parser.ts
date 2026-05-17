@@ -1,7 +1,7 @@
 import { promises as fsp } from "fs";
-import * as fs from "fs";
 import * as path from "path";
 import matter from "gray-matter";
+import { logger } from "./logger.js";
 
 export interface PersonaMeta {
   id: string;
@@ -35,7 +35,7 @@ export function validateWritePath(filePath: string, baseDir: string): boolean {
   return resolvedPath.startsWith(resolvedBase + path.sep);
 }
 
-// ── Persona parsing ──────────────────────────────────────────────────────────
+// ── Persona parsing ─────────────────────────────────────────────────────────
 
 export async function parsePersonaFile(filePath: string): Promise<Persona | null> {
   const fileName = path.basename(filePath);
@@ -47,7 +47,8 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
   let raw: string;
   try {
     raw = await fsp.readFile(filePath, "utf-8");
-  } catch {
+  } catch (err) {
+    logger.warn("Failed to read persona file", { event: "file_read_error", path: filePath });
     return null;
   }
 
@@ -55,7 +56,11 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
   try {
     parsed = matter(raw);
   } catch (err) {
-    console.warn(`[Kevlar] Failed to parse ${filePath}:`, err);
+    logger.warn("Failed to parse persona file", {
+      event: "parse_error",
+      path: filePath,
+      error: String(err),
+    });
     return null;
   }
 
@@ -82,21 +87,61 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
   };
 }
 
+// ── Directory existence check (async) ──────────────────────────────────────
+
+async function ensureDirExists(dirPath: string): Promise<boolean> {
+  try {
+    await fsp.access(dirPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Loading personas ─────────────────────────────────────────────────────────
 
 export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
-  if (!fs.existsSync(skillsDir)) {
+  const dirExists = await ensureDirExists(skillsDir);
+  if (!dirExists) {
+    logger.debug("Skills directory does not exist", { event: "dir_not_found", path: skillsDir });
     return [];
   }
 
-  const stat = fs.statSync(skillsDir);
+  let stat: Awaited<ReturnType<typeof fsp.stat>>;
+  try {
+    stat = await fsp.stat(skillsDir);
+  } catch (err) {
+    logger.error("Failed to stat skills directory", {
+      event: "stat_error",
+      path: skillsDir,
+      error: String(err),
+    });
+    return [];
+  }
   const currentMtime = stat.mtimeMs;
 
   if (personasCache && personasCache.mtime === currentMtime) {
+    logger.debug("Returning cached personas", {
+      event: "cache_hit",
+      count: personasCache.personas.length,
+    });
     return personasCache.personas;
   }
 
-  const files = (await fsp.readdir(skillsDir)).filter((f) => f.endsWith(".md"));
+  let files: string[];
+  try {
+    files = (await fsp.readdir(skillsDir)).filter((f) => f.endsWith(".md"));
+  } catch (err) {
+    logger.error("Failed to read skills directory", {
+      event: "readdir_error",
+      path: skillsDir,
+      error: String(err),
+    });
+    return [];
+  }
+
+  logger.debug("Loading personas from directory", { event: "loading_personas", count: files.length });
+
   const personas: Persona[] = [];
 
   for (const file of files) {
@@ -108,6 +153,7 @@ export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
   }
 
   personasCache = { personas, mtime: currentMtime };
+  logger.info("Personas loaded", { event: "personas_loaded", count: personas.length });
   return personas;
 }
 
@@ -117,6 +163,7 @@ export async function loadPersonaById(
 ): Promise<Persona | null> {
   const sanitizedId = id.replace(/[^a-z0-9_]/gi, "");
   if (!sanitizedId || sanitizedId !== id) {
+    logger.warn("Invalid persona ID format", { event: "invalid_id", id });
     return null;
   }
 
@@ -124,6 +171,7 @@ export async function loadPersonaById(
   const filePath = path.join(skillsDir, fileName);
 
   if (!validateWritePath(filePath, skillsDir)) {
+    logger.warn("Path traversal attempt detected", { event: "path_traversal", path: filePath });
     return null;
   }
 
@@ -134,9 +182,7 @@ export async function loadPersonasByIds(
   skillsDir: string,
   ids: string[]
 ): Promise<Persona[]> {
-  const results = await Promise.all(
-    ids.map((id) => loadPersonaById(skillsDir, id))
-  );
+  const results = await Promise.all(ids.map((id) => loadPersonaById(skillsDir, id)));
   return results.filter((p): p is Persona => p !== null);
 }
 
@@ -151,13 +197,30 @@ export async function writePersonaFile(
   const filePath = path.join(skillsDir, fileName);
 
   if (!validateWritePath(filePath, skillsDir)) {
+    logger.warn("Path traversal attempt in writePersonaFile", {
+      event: "path_traversal",
+      path: filePath,
+    });
     throw new Error("Invalid file path: path traversal detected");
   }
 
-  const frontmatter = matter.stringify(systemPrompt, meta as unknown as Record<string, unknown>);
+  const frontmatter = matter.stringify(
+    systemPrompt,
+    meta as unknown as Record<string, unknown>
+  );
 
-  await fsp.mkdir(skillsDir, { recursive: true });
-  await fsp.writeFile(filePath, frontmatter, "utf-8");
+  try {
+    await fsp.mkdir(skillsDir, { recursive: true });
+    await fsp.writeFile(filePath, frontmatter, "utf-8");
+    logger.info("Persona file written", { event: "file_written", path: filePath, id: meta.id });
+  } catch (err) {
+    logger.error("Failed to write persona file", {
+      event: "write_error",
+      path: filePath,
+      error: String(err),
+    });
+    throw err;
+  }
 
   invalidatePersonasCache();
   return filePath;

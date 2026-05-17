@@ -23,6 +23,8 @@ import {
   CreatePersonaInput,
   ReviewInput,
 } from "./tools/index.js";
+import { logger } from "./utils/logger.js";
+import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
 
 // ── Resolve the skills/ directory ────────────────────────────────────────────
 // Priority:
@@ -45,12 +47,12 @@ function resolveSkillsDir(): string {
 export function createKevlarServer(): Server {
   const skillsDir = resolveSkillsDir();
 
-  // Ensure skills directory exists on startup
+  // Ensure skills directory exists on startup (sync for initialization)
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
-    console.error(`[Kevlar] Created skills directory at: ${skillsDir}`);
+    logger.info("Created skills directory", { event: "dir_created", path: skillsDir });
   } else {
-    console.error(`[Kevlar] Using skills directory: ${skillsDir}`);
+    logger.info("Using skills directory", { event: "dir_using", path: skillsDir });
   }
 
   const server = new Server(
@@ -82,6 +84,8 @@ export function createKevlarServer(): Server {
   // ── Tool: dispatch calls ────────────────────────────────────────────────
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+
+    logger.debug("Tool call received", { event: "tool_called", tool: name });
 
     try {
       switch (name) {
@@ -120,9 +124,6 @@ export function createKevlarServer(): Server {
             throw new Error("评测需要提供文案内容");
           }
           const input = args as unknown as ReviewInput;
-          if (!input.content || typeof input.content !== "string") {
-            throw new Error("请提供要评测的文案内容");
-          }
           return await handleReviewContent(skillsDir, input);
         }
 
@@ -130,20 +131,19 @@ export function createKevlarServer(): Server {
           return await handleHelp();
         }
 
-        default:
+        default: {
+          logger.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
           throw new Error(`Unknown tool: ${name}`);
+        }
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        content: [
-          {
-            type: "text",
-            text: `❌ 操作失败：${message}`,
-          },
-        ],
-        isError: true,
-      };
+      logger.error("Tool execution failed", {
+        event: "tool_error",
+        tool: name,
+        error: isKevlarError(err) ? err.code : "INTERNAL_ERROR",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return formatErrorResponse(err);
     }
   });
 

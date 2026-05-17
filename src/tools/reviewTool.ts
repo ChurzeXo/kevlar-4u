@@ -2,6 +2,12 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 
+// ── Resource limits ───────────────────────────────────────────────────────────
+
+const MAX_CONTENT_LENGTH = 100_000; // 100KB
+const MAX_CONTEXT_LENGTH = 5_000; // 5KB
+const MAX_PERSONAS = 50;
+
 export const reviewToolDefinition: Tool = {
   name: "review_content",
   description:
@@ -45,6 +51,38 @@ export async function handleReviewContent(
   skillsDir: string,
   input: ReviewInput
 ): Promise<ToolResult> {
+  // ── Resource limits validation ───────────────────────────────────────────
+  if (!input.content || typeof input.content !== "string") {
+    return {
+      content: [{ type: "text", text: "❌ 请提供要评测的文案内容" }],
+      isError: true,
+    };
+  }
+
+  if (input.content.length > MAX_CONTENT_LENGTH) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 文案内容超出长度限制（${MAX_CONTENT_LENGTH}字符）。当前长度：${input.content.length}字符`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (input.context && input.context.length > MAX_CONTEXT_LENGTH) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 上下文说明超出长度限制（${MAX_CONTEXT_LENGTH}字符）`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
   // Load all available personas (for continuation tracking)
   const allPersonas = await loadAllPersonas(skillsDir);
 
@@ -52,6 +90,18 @@ export async function handleReviewContent(
   let personas: Persona[];
 
   if (input.persona_ids && input.persona_ids.length > 0) {
+    if (input.persona_ids.length > MAX_PERSONAS) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `❌ 选择的评论员数量超出限制（最多${MAX_PERSONAS}个）`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     personas = await loadPersonasByIds(skillsDir, input.persona_ids);
 
     const foundIds = new Set(personas.map((p) => p.meta.id));
