@@ -5,7 +5,7 @@
  * API keys are NEVER stored here - only environment variables.
  */
 
-import { readFileSync, promises as fsp } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import * as path from "path";
 import { logger } from "../utils/logger.js";
 import type { ExecutionMode, ResolveableMode } from "./base.js";
@@ -66,17 +66,8 @@ export function readConfig(): KevlarConfig {
 }
 
 export async function readConfigAsync(): Promise<KevlarConfig> {
-  if (!configPath) {
-    return { ...DEFAULT_CONFIG };
-  }
-
-  try {
-    const raw = await fsp.readFile(configPath, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<KevlarConfig>;
-    return { ...DEFAULT_CONFIG, ...parsed };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
+  // Kept for backward compatibility, using synchronous read for safety
+  return readConfig();
 }
 
 // ── Write Config ─────────────────────────────────────────────────────────────
@@ -92,7 +83,8 @@ export async function updateConfig(options: UpdateConfigOptions): Promise<Kevlar
     throw new Error("Config path not initialized");
   }
 
-  const current = await readConfigAsync();
+  // Use synchronous atomic read-merge-write to prevent async race conditions
+  const current = readConfig();
   const updated: KevlarConfig = {
     ...current,
     multiAgent: {
@@ -112,7 +104,7 @@ export async function updateConfig(options: UpdateConfigOptions): Promise<Kevlar
   }
 
   try {
-    await fsp.writeFile(configPath, JSON.stringify(updated, null, 2), "utf-8");
+    writeFileSync(configPath, JSON.stringify(updated, null, 2), "utf-8");
     logger.info("Config updated", { event: "config_update", path: configPath, options });
     return updated;
   } catch (err) {

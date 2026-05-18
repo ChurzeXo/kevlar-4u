@@ -24,9 +24,9 @@ import type {
 // ── Handler Registry ──────────────────────────────────────────────────────────
 
 const handlers: ExecutionHandler[] = [
-  orchestrationHandler, // priority: 10 (fallback)
-  samplingHandler,      // priority: 20
-  directApiHandler,     // priority: 30
+  orchestrationHandler, // priority: 30 (fallback)
+  samplingHandler,      // priority: 10 (preferred)
+  directApiHandler,     // priority: 20 (medium)
 ];
 
 // ── Core Execution Function ───────────────────────────────────────────────────

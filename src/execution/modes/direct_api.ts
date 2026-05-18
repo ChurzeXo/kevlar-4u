@@ -28,7 +28,23 @@ function getApiKey(): ApiKeyInfo | null {
     process.env.ANTHROPIC_API_KEY ||
     process.env.OPENAI_API_KEY;
 
-  if (!key) return null;
+  if (!key) {
+    // If no API key is set, but OLLAMA_BASE_URL is set, or KEVLAR_MODEL is configured and looks like
+    // a local model, allow direct API mode without a key, treating it as Ollama.
+    const isOllamaEnv =
+      !!process.env.OLLAMA_BASE_URL ||
+      (!!process.env.KEVLAR_MODEL &&
+        (process.env.KEVLAR_MODEL.startsWith("llama") ||
+          process.env.KEVLAR_MODEL.startsWith("deepseek") ||
+          process.env.KEVLAR_MODEL.startsWith("qwen") ||
+          process.env.KEVLAR_MODEL.startsWith("mistral") ||
+          process.env.KEVLAR_MODEL.includes("ollama")));
+
+    if (isOllamaEnv) {
+      return { key: "ollama", provider: "ollama" };
+    }
+    return null;
+  }
 
   // Detect provider
   if (key.startsWith("sk-ant-")) {
@@ -238,11 +254,17 @@ export const directApiHandler: ExecutionHandler = {
 
     const aggregator = new ResultAggregator();
 
-    // Parallel execution with rate limiting
-    const promises = personas.map(async (persona) => {
+    // Parallel execution with rate limiting and startup stagger (jitter)
+    const promises = personas.map(async (persona, index) => {
       await limiter.acquire();
       
       try {
+        // Add a small stagger delay (e.g. 50ms per persona index) to stagger parallel request initiation
+        if (index > 0) {
+          const jitterMs = index * 50 + Math.floor(Math.random() * 30);
+          await new Promise((resolve) => setTimeout(resolve, jitterMs));
+        }
+
         await limiter.waitForDelay();
         
         const result = await withRetry(

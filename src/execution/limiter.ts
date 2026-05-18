@@ -55,10 +55,12 @@ export class RateLimiter {
   private semaphore: Semaphore;
   private minDelayMs: number;
   private lastExecution = 0;
+  private maxConcurrent: number;
 
   constructor(config: RateLimitConfig = DEFAULT_CONFIG) {
     this.semaphore = new Semaphore(config.maxConcurrent);
     this.minDelayMs = config.minDelayMs;
+    this.maxConcurrent = config.maxConcurrent;
   }
 
   async acquire(): Promise<void> {
@@ -82,7 +84,7 @@ export class RateLimiter {
 
   getConfig(): RateLimitConfig {
     return {
-      maxConcurrent: this.semaphore["permits"] + (this.semaphore["queue"].length > 0 ? 1 : 0),
+      maxConcurrent: this.maxConcurrent,
       minDelayMs: this.minDelayMs,
     };
   }

@@ -86,10 +86,7 @@ export async function handleReviewContent(
     };
   }
 
-  // ── Load all available personas (for continuation tracking) ──────────────
-  const allPersonas = await loadAllPersonas(skillsDir);
-
-  // ── Load requested personas (or all of them) ────────────────────────────
+  // ── Load requested personas (or all of them) using unified helper ───────────
   let personas: Persona[];
 
   if (input.persona_ids && input.persona_ids.length > 0) {
@@ -104,24 +101,21 @@ export async function handleReviewContent(
         isError: true,
       };
     }
+  }
 
-    personas = await loadPersonasByIds(skillsDir, input.persona_ids);
+  const loadResult = await loadPersonasForReview(skillsDir, input.persona_ids);
+  personas = loadResult.personas;
 
-    const foundIds = new Set(personas.map((p) => p.meta.id));
-    const missing = input.persona_ids.filter((id) => !foundIds.has(id));
-    if (missing.length > 0) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `❌ 找不到以下评论员：${missing.join(", ")}。请先查看可用评论员列表。`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  } else {
-    personas = allPersonas;
+  if (loadResult.missingIds && loadResult.missingIds.length > 0) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `❌ 找不到以下评论员：${loadResult.missingIds.join(", ")}。请先查看可用评论员列表。`,
+        },
+      ],
+      isError: true,
+    };
   }
 
   if (personas.length === 0) {
@@ -137,6 +131,7 @@ export async function handleReviewContent(
   }
 
   // ── Track unselected personas for continuation flow ─────────────────────
+  const allPersonas = await loadAllPersonas(skillsDir);
   const activeIds = new Set(personas.map((p) => p.meta.id));
   const remainingPersonas = allPersonas.filter((p) => !activeIds.has(p.meta.id));
 

@@ -41,7 +41,7 @@ describe("orchestrationHandler", () => {
 
   it("has correct mode and priority", () => {
     assert.equal(orchestrationHandler.mode, "orchestration");
-    assert.equal(orchestrationHandler.priority, 10);
+    assert.equal(orchestrationHandler.priority, 30);
   });
 
   it("generates report with personas", async () => {

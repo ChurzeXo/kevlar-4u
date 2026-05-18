@@ -86,11 +86,17 @@ export const samplingHandler: ExecutionHandler = {
 
     const aggregator = new ResultAggregator();
 
-    // Parallel execution with rate limiting
-    const promises = personas.map(async (persona) => {
+    // Parallel execution with rate limiting and startup stagger (jitter)
+    const promises = personas.map(async (persona, index) => {
       await limiter.acquire();
       
       try {
+        // Add a small stagger delay (e.g. 50ms per persona index) to stagger parallel request initiation
+        if (index > 0) {
+          const jitterMs = index * 50 + Math.floor(Math.random() * 30);
+          await new Promise((resolve) => setTimeout(resolve, jitterMs));
+        }
+
         await limiter.waitForDelay();
         
         const result = await withRetry(
