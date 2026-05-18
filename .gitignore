@@ -1,5 +1,10 @@
 node_modules/
 dist/
 .env
+.env.local
+.env.*.local
 *.log
 .DS_Store
+
+# Kevlar user config (non-sensitive preferences)
+skills/kevlar-config.json

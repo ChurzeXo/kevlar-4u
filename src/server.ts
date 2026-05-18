@@ -20,11 +20,19 @@ import {
   handleResetPersonas,
   helpToolDefinition,
   handleHelp,
+  getModesToolDefinition,
+  handleGetModes,
+  configureToolDefinition,
+  handleConfigure,
   CreatePersonaInput,
   ReviewInput,
+  ConfigureInput,
 } from "./tools/index.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
+import { setClientInfo } from "./execution/client.js";
+import { setConfigPath } from "./execution/config.js";
+import type { SamplingFunction } from "./execution/base.js";
 
 // ── Resolve the skills/ directory ────────────────────────────────────────────
 // Priority:
@@ -47,6 +55,9 @@ function resolveSkillsDir(): string {
 export function createKevlarServer(): Server {
   const skillsDir = resolveSkillsDir();
 
+  // Initialize config path
+  setConfigPath(skillsDir);
+
   // Ensure skills directory exists on startup (sync for initialization)
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
@@ -67,6 +78,38 @@ export function createKevlarServer(): Server {
     }
   );
 
+  // ── Create sampling function for MCP Sampling mode ─────────────────────────
+  const createSamplingFn = (serverInstance: Server): SamplingFunction => {
+    return async (params: { 
+      systemPrompt: string; 
+      message: string; 
+      maxTokens?: number 
+    }) => {
+      try {
+        const result = await serverInstance.request({
+          method: "sampling/createMessage",
+          params: {
+            systemPrompt: params.systemPrompt,
+            messages: [{ role: "user", content: { type: "text", text: params.message } }],
+            maxTokens: params.maxTokens || 4096,
+          },
+        });
+
+        return {
+          content: result.content?.[0]?.text || "",
+          stopReason: result.stopReason,
+        };
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        logger.error("Sampling request failed", { 
+          event: "sampling_request_error", 
+          error: errorMsg 
+        });
+        throw new Error(`Sampling 调用失败: ${errorMsg}`);
+      }
+    };
+  };
+
   // ── Tool: list tools ────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -76,6 +119,8 @@ export function createKevlarServer(): Server {
         deletePersonaToolDefinition,
         resetPersonasToolDefinition,
         reviewToolDefinition,
+        getModesToolDefinition,
+        configureToolDefinition,
         helpToolDefinition,
       ],
     };
@@ -124,7 +169,29 @@ export function createKevlarServer(): Server {
             throw new Error("评测需要提供文案内容");
           }
           const input = args as unknown as ReviewInput;
+          
+          // Inject client info for capability detection
+          if ((server as any).clientInfo) {
+            setClientInfo((server as any).clientInfo.name, (server as any).clientInfo.version);
+          }
+          
+          // Inject sampling function for MCP Sampling mode
+          const samplingFn = createSamplingFn(server);
+          input.samplingFn = samplingFn;
+          
           return await handleReviewContent(skillsDir, input);
+        }
+
+        case "get_execution_modes": {
+          return await handleGetModes();
+        }
+
+        case "configure": {
+          if (!args || typeof args !== "object") {
+            throw new Error("配置需要提供参数");
+          }
+          const configureInput = args as unknown as ConfigureInput;
+          return await handleConfigure(configureInput);
         }
 
         case "kevlar_help": {
