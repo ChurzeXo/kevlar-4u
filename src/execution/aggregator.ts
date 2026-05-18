@@ -157,7 +157,9 @@ export const DEFAULT_TOKEN_BUDGET = {
 };
 
 export function estimateTokenCost(personas: number, contentLength: number): number {
-  return Math.floor(contentLength / 4) + personas * DEFAULT_TOKEN_BUDGET.per_persona;
+  // Conservative estimate: Chinese text can be 1-2 chars/token vs English ~4 chars/token.
+  // Use ratio 3 to hedge against mixed content and CJK-heavy inputs.
+  return Math.floor(contentLength / 3) + personas * DEFAULT_TOKEN_BUDGET.per_persona;
 }
 
 export function checkBudget(personas: number, contentLength: number): void {

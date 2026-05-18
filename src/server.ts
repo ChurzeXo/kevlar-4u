@@ -86,17 +86,15 @@ export function createKevlarServer(): Server {
       maxTokens?: number 
     }) => {
       try {
-        const result = await serverInstance.request({
-          method: "sampling/createMessage",
-          params: {
-            systemPrompt: params.systemPrompt,
-            messages: [{ role: "user", content: { type: "text", text: params.message } }],
-            maxTokens: params.maxTokens || 4096,
-          },
+        const result = await serverInstance.createMessage({
+          systemPrompt: params.systemPrompt,
+          messages: [{ role: "user", content: { type: "text", text: params.message } }],
+          maxTokens: params.maxTokens || 4096,
         });
 
+        const textContent = result.content.type === "text" ? result.content.text : "";
         return {
-          content: result.content?.[0]?.text || "",
+          content: textContent,
           stopReason: result.stopReason,
         };
       } catch (err) {
@@ -171,8 +169,9 @@ export function createKevlarServer(): Server {
           const input = args as unknown as ReviewInput;
           
           // Inject client info for capability detection
-          if ((server as any).clientInfo) {
-            setClientInfo((server as any).clientInfo.name, (server as any).clientInfo.version);
+          const clientVersion = server.getClientVersion();
+          if (clientVersion) {
+            setClientInfo(clientVersion.name, clientVersion.version);
           }
           
           // Inject sampling function for MCP Sampling mode

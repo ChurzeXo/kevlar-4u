@@ -9,6 +9,8 @@
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
 
+
+
 export const MODE: ExecutionMode = "orchestration";
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -24,9 +26,8 @@ export const orchestrationHandler: ExecutionHandler = {
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { personas, content, context: contextNote } = ctx;
-    const remainingPersonas: Persona[] = []; // Tracked at tool level
 
-    const prompt = buildOrchestrationPrompt(content, personas, remainingPersonas, contextNote);
+    const prompt = buildOrchestrationPrompt(content, personas, contextNote);
 
     return {
       report: prompt,
@@ -41,7 +42,6 @@ export const orchestrationHandler: ExecutionHandler = {
 function buildOrchestrationPrompt(
   content: string,
   personas: Persona[],
-  remainingPersonas: Persona[],
   contextNote?: string
 ): string {
   const personaBlocks = personas
@@ -51,21 +51,6 @@ function buildOrchestrationPrompt(
   const contextSection = contextNote
     ? `\n\n**发布平台 & 目标受众背景**：${contextNote}`
     : "";
-
-  const remainingNames = remainingPersonas.map((p) => p.meta.name).join("、");
-
-  const remainingBlock =
-    remainingPersonas.length > 0
-      ? `\n## 🔄 延续测试
-
-本轮有 **${remainingPersonas.length} 个人设未参与评测**：${remainingNames}。
-
-**完成汇总报告后：**
-1. 向用户展示报告
-2. 询问是否要用剩余评论员（${remainingNames}）继续评测
-3. 用户同意则启动新一轮评测（复用本次内容）
-4. 用户拒绝则结束`
-      : "";
 
   return `# 🛡️ Kevlar 压力测试任务派发
 
@@ -109,7 +94,7 @@ ${personaBlocks}
 #### 一句话总评
 
 （一句最犀利的总结：这份内容现在能不能发？）
-${remainingBlock}
+
 ---
 *由 Kevlar MCP Server 驱动 · 本地多智能体内容防弹衣*`;
 }

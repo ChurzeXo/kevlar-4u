@@ -8,7 +8,7 @@
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
 import { readConfig } from "../config.js";
-import { RateLimiter, withRetry } from "../limiter.js";
+import { getRateLimiter, withRetry } from "../limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "../aggregator.js";
 import { logger } from "../../utils/logger.js";
 
@@ -199,6 +199,7 @@ async function callOllama(apiKey: string, request: LlmRequest): Promise<LlmRespo
       ],
       options: {
         temperature: request.temperature ?? 0.7,
+        num_predict: request.maxTokens || 4096,
       },
       stream: false,
     }),
@@ -247,7 +248,7 @@ export const directApiHandler: ExecutionHandler = {
       provider: keyInfo.provider,
     });
 
-    const limiter = new RateLimiter({
+    const limiter = getRateLimiter({
       maxConcurrent: config.multiAgent.maxConcurrency,
       minDelayMs: Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000,
     });

@@ -32,7 +32,10 @@ export function invalidatePersonasCache(): void {
 export function validateWritePath(filePath: string, baseDir: string): boolean {
   const resolvedPath = path.resolve(filePath);
   const resolvedBase = path.resolve(baseDir);
-  return resolvedPath.startsWith(resolvedBase + path.sep);
+  const relative = path.relative(resolvedBase, resolvedPath);
+  // Relative must not start with '..' (which means it escaped baseDir)
+  // and must not be empty (which means filePath === baseDir itself)
+  return !relative.startsWith("..") && relative !== "";
 }
 
 // ── Persona parsing ─────────────────────────────────────────────────────────

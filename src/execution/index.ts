@@ -6,7 +6,7 @@
 
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { logger } from "../utils/logger.js";
-import { readConfig } from "./config.js";
+import { readConfig, isValidMode } from "./config.js";
 import { isSamplingSupported } from "./client.js";
 import { orchestrationHandler } from "./modes/orchestration.js";
 import { samplingHandler } from "./modes/sampling.js";
@@ -77,14 +77,21 @@ export async function executeReview(
 // ── Mode Resolution ──────────────────────────────────────────────────────────
 
 async function resolveMode(): Promise<ExecutionMode> {
-  // 1. Check persisted config
+  // 1. Check persisted config (user preference, highest priority)
   const config = readConfig();
   if (config.mode && config.mode !== "auto") {
     logger.debug("Using persisted mode", { event: "mode_persist", mode: config.mode });
     return config.mode;
   }
 
-  // 2. Select first available by priority
+  // 2. Check KEVLAR_MODE env var (global default, overridden by config)
+  const envMode = process.env.KEVLAR_MODE as ResolveableMode | undefined;
+  if (envMode && envMode !== "auto" && isValidMode(envMode)) {
+    logger.debug("Using env var mode", { event: "mode_env", mode: envMode });
+    return envMode;
+  }
+
+  // 3. Select first available by priority
   const sorted = [...handlers].sort((a, b) => a.priority - b.priority);
   for (const h of sorted) {
     if (h.canExecute()) {
@@ -93,7 +100,7 @@ async function resolveMode(): Promise<ExecutionMode> {
     }
   }
 
-  // 3. Fallback to orchestration (always available)
+  // 4. Fallback to orchestration (always available)
   return "orchestration";
 }
 

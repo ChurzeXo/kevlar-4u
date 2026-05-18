@@ -9,7 +9,7 @@ import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode
 import type { Persona } from "../../utils/parser.js";
 import { isSamplingSupported } from "../client.js";
 import { readConfig } from "../config.js";
-import { RateLimiter, withRetry } from "../limiter.js";
+import { getRateLimiter, withRetry } from "../limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "../aggregator.js";
 import { logger } from "../../utils/logger.js";
 
@@ -79,9 +79,9 @@ export const samplingHandler: ExecutionHandler = {
     // Budget check
     checkBudget(personas.length, content.length);
 
-    const limiter = new RateLimiter({
+    const limiter = getRateLimiter({
       maxConcurrent: config.multiAgent.maxConcurrency,
-      minDelayMs: 1000,
+      minDelayMs: Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000,
     });
 
     const aggregator = new ResultAggregator();

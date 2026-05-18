@@ -367,8 +367,8 @@ describe("generateAggregatedReport", () => {
 describe("estimateTokenCost", () => {
   it("estimates based on content and persona count", () => {
     const cost = estimateTokenCost(3, 1000);
-    // (1000/4) + 3*10000 = 250 + 30000 = 30250
-    assert.equal(cost, 30250);
+    // (1000/3) + 3*10000 = 333 + 30000 = 30333
+    assert.equal(cost, 30333);
   });
 });
 
@@ -528,8 +528,57 @@ describe("executeReview", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("loadPersonasForReview", () => {
+  beforeEach(async () => {
+    // Create a test persona file in tmpDir
+    const personaPath = path.join(tmpDir, "test_persona.md");
+    fs.writeFileSync(personaPath, [
+      "---",
+      "id: test_persona",
+      "name: 测试人设",
+      "name_en: Test",
+      "version: 1.0.0",
+      "author: test",
+      "tags:",
+      "  - test",
+      "description: A test persona",
+      "---",
+      "You are a test.",
+    ].join("\n"), "utf-8");
+  });
+
   it("returns empty personas when directory empty", async () => {
-    const { personas } = await loadPersonasForReview(tmpDir);
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-empty-"));
+    try {
+      const { personas } = await loadPersonasForReview(emptyDir);
+      assert.equal(personas.length, 0);
+    } finally {
+      fs.rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads all personas when no ids specified", async () => {
+    const { personas, missingIds } = await loadPersonasForReview(tmpDir);
+    assert.equal(personas.length, 1);
+    assert.equal(personas[0].meta.id, "test_persona");
+    assert.equal(missingIds, undefined);
+  });
+
+  it("loads specific personas by ids", async () => {
+    const { personas, missingIds } = await loadPersonasForReview(tmpDir, ["test_persona"]);
+    assert.equal(personas.length, 1);
+    assert.ok(!missingIds);
+  });
+
+  it("reports missing ids", async () => {
+    const { personas, missingIds } = await loadPersonasForReview(tmpDir, ["nonexistent"]);
     assert.equal(personas.length, 0);
+    assert.deepEqual(missingIds, ["nonexistent"]);
+  });
+
+  it("partially loads with missing ids", async () => {
+    const { personas, missingIds } = await loadPersonasForReview(tmpDir, ["test_persona", "ghost"]);
+    assert.equal(personas.length, 1);
+    assert.equal(personas[0].meta.id, "test_persona");
+    assert.deepEqual(missingIds, ["ghost"]);
   });
 });
