@@ -1,6 +1,6 @@
 # Kevlar 多执行模式需求文档
 
-> **文档版本**：2.0.0
+> **文档版本**：2.1.0
 > **更新日期**：2026-05-18
 > **状态**：定稿
 
@@ -142,9 +142,52 @@ Kevlar 验证 API Key（仅从环境变量读取）
 
 ---
 
-## 三、架构设计
+## 三、模式切换交互设计
 
-### 3.1 目录结构
+### 3.1 引导对话流
+
+用户无需记忆任何指令。Kevlar 的宿主 AI 应主动识别用户意图并引导：
+
+```
+用户: "设置" 或 "帮我换一下评测模式"
+
+  → AI 调用 get_execution_modes 获取可用模式列表
+  → AI 以表格形式展示三种模式的状态与说明
+  → AI 询问用户选择哪种模式
+
+用户: "用采样模式吧"
+
+  → AI 调用 configure { mode: "mcp_sampling" }
+  → Kevlar 写入 kevlar-config.json
+  → AI 回复 "已切换为 MCP 采样模式，下次评测生效"
+
+用户: "还是换回默认吧"
+
+  → AI 调用 configure { mode: "auto" }
+  → Kevlar 写入 kevlar-config.json
+  → AI 回复 "已恢复自动模式，系统将根据环境选择最佳模式"
+```
+
+**关键规则**：
+- 切换模式**不需要**重启宿主客户端，下次调用 `review_content` 时立即生效
+- `configure` 工具只读/写 `kevlar-config.json`，不碰环境变量
+- API Key 的配置/变更不在本工具覆盖范围内（仅通过环境变量）
+
+### 3.2 首次运行体验
+
+`kevlar-config.json` 不存在时，`get_execution_modes` 在返回末尾附加引导提示：
+
+```
+💡 首次使用？你可以告诉我"设置"来切换执行模式。
+```
+
+宿主 AI 在看到此提示后，应主动在首轮对话中向用户介绍模式选项。
+
+---
+
+## 四、架构设计
+
+### 4.1 目录结构
 
 ```
 src/
@@ -161,14 +204,15 @@ src/
 │       └── direct_api.ts             # Direct API 模式
 ├── tools/
 │   ├── reviewTool.ts                 # 简化为入口 + 参数校验
-│   └── getModesTool.ts               # 新增：查询可用模式
+│   ├── getModesTool.ts               # 新增：查询可用模式
+│   └── configureTool.ts              # 新增：写入用户配置
 └── utils/
     ├── types.ts                      # 共享类型
     ├── parser.ts                     # Persona 文件解析
     └── errors.ts                     # 错误码 + 错误处理
 ```
 
-### 3.2 核心接口
+### 4.2 核心接口
 
 ```typescript
 // src/execution/base.ts
@@ -200,7 +244,7 @@ export interface ExecutionHandler {
 }
 ```
 
-### 3.3 模式注册与分发
+### 4.3 模式注册与分发
 
 ```typescript
 // src/execution/index.ts
@@ -241,7 +285,7 @@ async function resolveMode(): Promise<ExecutionMode> {
 }
 ```
 
-### 3.4 用户配置持久化（`skills/kevlar-config.json`）
+### 4.4 用户配置持久化（`skills/kevlar-config.json`）
 
 配置文件用于存储非敏感的偏好设置，API Key **绝不**写入此文件。
 
@@ -261,12 +305,47 @@ async function resolveMode(): Promise<ExecutionMode> {
 - 路径：`skills/kevlar-config.json`（复用已有的 path validation）
 - `.gitignore` 中添加此文件（因人设排序等属于个人偏好）
 - 不存在时使用全部默认值，不报错
+- 支持配置项见 `configure` 工具（§7.3）
+
+### 4.5 并发评测锁
+
+`mcp_sampling` 和 `direct_api` 模式涉及模型调用，不允许并发执行两个评审任务：
+
+```typescript
+// src/execution/lock.ts
+let reviewLock: { mode: string; startedAt: number } | null = null;
+
+export function acquireReviewLock(mode: string): boolean {
+  if (reviewLock) return false;
+  reviewLock = { mode, startedAt: Date.now() };
+  return true;
+}
+
+export function releaseReviewLock(): void {
+  reviewLock = null;
+}
+```
+
+**Orchestration 模式不受此限制**（仅是 prompt 构建，无外部调用）。
+
+### 4.6 报告模式标注
+
+每次评审结果必须在报告中明确标注使用的执行模式，确保用户知情：
+
+```
+**执行模式**：MCP 采样模式
+**参与评论员**：急性子路人甲、键盘侠·杠精模式（共 2 位）
+**部分失败**：无
+```
+
+- Orchestration 模式：`*执行模式：编排代理模式*`（附加在报告末尾）
+- Sampling / Direct API 模式：在报告头部注明
 
 ---
 
-## 四、限流与错误处理
+## 五、限流与错误处理
 
-### 4.1 限流架构
+### 5.1 限流架构
 
 复用单一的 `RateLimiter` 类，`mcp_sampling` 和 `direct_api` 模式共享：
 
@@ -297,7 +376,7 @@ KEVLAR_MAX_CONCURRENT=3
 KEVLAR_MIN_DELAY_MS=1000
 ```
 
-### 4.2 Token 预算控制
+### 5.2 Token 预算控制
 
 所有涉及模型调用的模式（`mcp_sampling`、`direct_api`）在执行前进行预算检查：
 
@@ -324,7 +403,7 @@ function checkBudget(personas: number, contentLength: number): void {
 }
 ```
 
-### 4.3 重试与部分失败
+### 5.3 重试与部分失败
 
 ```typescript
 // 重试策略：指数退避
@@ -355,16 +434,16 @@ interface PartialResult<T> {
 
 ---
 
-## 五、API Key 安全管理
+## 六、API Key 安全管理
 
-### 5.1 读取规则
+### 6.1 读取规则
 
 ```
 优先级：KEVLAR_API_KEY > ANTHROPIC_API_KEY > OPENAI_API_KEY
 来源：仅环境变量（禁止通过工具参数传入）
 ```
 
-### 5.2 格式校验
+### 6.2 格式校验
 
 ```typescript
 const PROVIDERS = {
@@ -381,7 +460,7 @@ function validateApiKey(key: string): { valid: boolean; provider?: string } {
 }
 ```
 
-### 5.3 日志脱敏
+### 6.3 日志脱敏
 
 ```typescript
 function maskKey(key: string, visible = 4): string {
@@ -391,7 +470,7 @@ function maskKey(key: string, visible = 4): string {
 // 示例：sk-ant-****abcd
 ```
 
-### 5.4 `.gitignore` 保护
+### 6.4 `.gitignore` 保护
 
 ```
 .env
@@ -400,11 +479,18 @@ function maskKey(key: string, visible = 4): string {
 skills/kevlar-config.json
 ```
 
+项目根目录 `.gitignore` 需追加：
+
+```gitignore
+# Kevlar user config (non-sensitive preferences)
+skills/kevlar-config.json
+```
+
 ---
 
-## 六、工具接口设计
+## 七、工具接口设计
 
-### 6.1 review_content（重构）
+### 7.1 review_content（重构）
 
 ```typescript
 export const reviewToolDefinition: Tool = {
@@ -432,7 +518,7 @@ export const reviewToolDefinition: Tool = {
 2. 若未配置，按优先级选第一个可用的
 3. 返回报告时附加一行 `*执行模式：{mode}*`
 
-### 6.2 get_execution_modes（新增）
+### 7.2 get_execution_modes（新增）
 
 ```typescript
 export const getModesToolDefinition: Tool = {
@@ -456,9 +542,45 @@ export const getModesToolDefinition: Tool = {
 **当前配置**：auto → mcp_sampling
 ```
 
+### 7.3 configure（新增）
+
+AI 通过此工具写入用户的选择到 `kevlar-config.json`，**不涉及 API Key 等敏感信息**。
+
+```typescript
+export const configureToolDefinition: Tool = {
+  name: "configure",
+  description:
+    "修改 Kevlar 运行配置（执行模式、并发数等持久化设置）。" +
+    "由 AI 在用户表达设置意图后自动调用，用户无需手动操作。",
+  inputSchema: {
+    type: "object",
+    properties: {
+      mode: {
+        type: "string",
+        enum: ["auto", "orchestration", "mcp_sampling", "direct_api"],
+        description: "执行模式。不传则不修改当前值。",
+      },
+      maxConcurrency: {
+        type: "number",
+        description: "最大并发数（仅 mcp_sampling / direct_api 模式生效）。不传则不修改。",
+      },
+    },
+  },
+};
+```
+
+**返回值示例**：
+```text
+✅ 配置已更新
+- 执行模式：auto → mcp_sampling
+- 并发数：3（未变更）
+
+下次调用 review_content 时自动生效。
+```
+
 ---
 
-## 七、环境变量清单
+## 八、环境变量清单
 
 ```bash
 # ── 执行模式 ──────────────────────────────────────
@@ -483,7 +605,7 @@ LOG_LEVEL=info
 
 ---
 
-## 八、实现路线图
+## 九、实现路线图
 
 | Phase | 内容 | 预估代码量 |
 |-------|------|-----------|
@@ -493,13 +615,13 @@ LOG_LEVEL=info
 | **P4** | 实现 `limiter.ts` + `aggregator.ts` | ~100 行 |
 | **P5** | 实现 `sampling.ts`（MCP sampling 调度） | ~120 行 |
 | **P6** | 实现 `direct_api.ts`（API 调度 + Key 校验） | ~100 行 |
-| **P7** | 重构 `reviewTool.ts` + 新增 `getModesTool.ts` | ~80 行 |
-| **P8** | 更新 `server.ts` 注入客户端检测 | ~30 行 |
+| **P7** | 重构 `reviewTool.ts` + 新增 `getModesTool.ts` + `configureTool.ts` | ~100 行 |
+| **P8** | 更新 `server.ts` 注入客户端检测 + 并发锁 | ~40 行 |
 | **P9** | 编写测试 | ~150 行 |
 
 ---
 
-## 九、风险与缓解
+## 十、风险与缓解
 
 | 风险 | 级别 | 缓解 |
 |------|------|------|
