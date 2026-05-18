@@ -316,10 +316,6 @@ export const directApiHandler: ExecutionHandler = {
       mode: MODE,
       contentSummary,
       personas: results,
-      partialFailures: failed.map((f) => ({
-        personaId: f.personaId,
-        error: f.error || "Unknown error",
-      })),
     });
 
     logger.info("Direct API review completed", {

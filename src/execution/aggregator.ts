@@ -84,11 +84,10 @@ export interface AggregatedReportOptions {
   mode: ExecutionMode;
   contentSummary: string;
   personas: PersonaResultWithMeta[];
-  partialFailures?: Array<{ personaId: string; error: string }>;
 }
 
 export function generateAggregatedReport(options: AggregatedReportOptions): string {
-  const { mode, contentSummary, personas, partialFailures } = options;
+  const { mode, contentSummary, personas } = options;
   
   const successful = personas.filter((p) => !p.error);
   const failed = personas.filter((p) => p.error);

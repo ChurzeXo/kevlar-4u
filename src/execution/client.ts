@@ -23,20 +23,12 @@ export function setClientInfo(name: string, version?: string): void {
   clientInfo.name = name.toLowerCase();
 }
 
-export function getClientInfo(): { name: string; version?: string } | null {
-  return clientInfo;
-}
-
 // ── Capability Check ─────────────────────────────────────────────────────────
 
 export function isSamplingSupported(clientName?: string): boolean {
   const name = clientName ?? clientInfo?.name;
   if (!name) return false;
   return SAMPLING_CLIENTS.has(name.toLowerCase());
-}
-
-export function isSamplingSupportedExplicit(clientName: string): boolean {
-  return SAMPLING_CLIENTS.has(clientName.toLowerCase());
 }
 
 export function getSamplingClientList(): string[] {

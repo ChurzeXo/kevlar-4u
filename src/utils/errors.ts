@@ -31,18 +31,6 @@ export interface KevlarError extends Error {
   details?: Record<string, unknown>;
 }
 
-export function createError(
-  code: ErrorCode,
-  message: string,
-  options?: { recoverable?: boolean; details?: Record<string, unknown> }
-): KevlarError {
-  const err = new Error(message) as KevlarError;
-  err.code = code;
-  err.recoverable = options?.recoverable ?? false;
-  err.details = options?.details;
-  return err;
-}
-
 export function isKevlarError(err: unknown): err is KevlarError {
   return err instanceof Error && "code" in err && "recoverable" in err;
 }

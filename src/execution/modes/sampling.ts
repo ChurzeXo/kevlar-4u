@@ -147,10 +147,6 @@ export const samplingHandler: ExecutionHandler = {
       mode: MODE,
       contentSummary,
       personas: results,
-      partialFailures: failed.map((f) => ({
-        personaId: f.personaId,
-        error: f.error || "Unknown error",
-      })),
     });
 
     return {

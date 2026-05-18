@@ -190,7 +190,7 @@ describe("writePersonaFile", () => {
           tags: [],
           description: "Fail attempt",
         }, "content"),
-        /Simulated I/O Error/
+        /Simulated I\/O Error/
       );
     } finally {
       (fsp as any).writeFile = originalWriteFile;

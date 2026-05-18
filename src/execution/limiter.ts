@@ -200,6 +200,4 @@ export function getRateLimiter(config?: RateLimitConfig): RateLimiter {
   return globalLimiter;
 }
 
-export function resetRateLimiter(): void {
-  globalLimiter = null;
-}
+

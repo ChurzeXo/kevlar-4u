@@ -9,8 +9,6 @@
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
 
-
-
 export const MODE: ExecutionMode = "orchestration";
 
 // ── Handler ───────────────────────────────────────────────────────────────────
