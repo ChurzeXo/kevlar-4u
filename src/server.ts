@@ -11,8 +11,6 @@ import {
   listPersonasToolDefinition,
   handleListPersonas,
   createPersonaToolDefinition,
-        updatePersonaDraftToolDefinition,
-        deletePersonaDraftToolDefinition,
   updatePersonaDraftToolDefinition,
   handleUpdatePersonaDraft,
   deletePersonaDraftToolDefinition,
