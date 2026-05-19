@@ -360,7 +360,7 @@ async function runCLI() {
   });
 
   if (proceed === "cancel") {
-    console.log(DIM("\n  安装已取消。下次运行：npm run install-mcp\n"));
+    console.log(DIM("\n  安装已取消。下次运行：npm run kevlar-mcp\n"));
     process.exit(0);
   }
 
