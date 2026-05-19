@@ -42,7 +42,7 @@ export async function handleListPersonas(
   }
 
   lines.push("---");
-  lines.push("💡 以上是全部可用评论员。告诉用户勾选想激活的角色，默认全部选中。");
+  lines.push("💡 告诉我你想激活哪些评论员，或直接说「全部」开始评测。");
 
   return {
     content: [

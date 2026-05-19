@@ -2,6 +2,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -33,7 +35,9 @@ import {
   CreatePersonaInput,
   ReviewInput,
   ConfigureInput,
+  SYSTEM_PROMPT,
 } from "./tools/index.js";
+import { REVIEW_DISPATCHER_PROMPT } from "./prompts/reviewDispatcherPrompt.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
 import { setClientInfo } from "./execution/client.js";
@@ -112,6 +116,7 @@ export function createKevlarServer(): Server {
     {
       capabilities: {
         tools: {},
+        prompts: {},
       },
     }
   );
@@ -152,6 +157,8 @@ export function createKevlarServer(): Server {
       tools: [
         listPersonasToolDefinition,
         createPersonaToolDefinition,
+        updatePersonaDraftToolDefinition,
+        deletePersonaDraftToolDefinition,
         deletePersonaToolDefinition,
         resetPersonasToolDefinition,
         reviewToolDefinition,
@@ -261,5 +268,51 @@ export function createKevlarServer(): Server {
     }
   });
 
+  // ── Prompts: list prompts ───────────────────────────────────────────────
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return {
+      prompts: [
+        {
+          name: "create_persona",
+          title: "虚拟读者人设搭建系统 (Create Persona Wizard)",
+          description: "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+        },
+        {
+          name: "review_content",
+          title: "内容评测调度引擎 (Content Review Dispatcher)",
+          description: "分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
+        }
+      ]
+    };
+  });
+
+  // ── Prompts: get prompt ──────────────────────────────────────────────────
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const { name } = request.params;
+    if (name === "create_persona") {
+      return {
+        description: "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+        messages: [
+          {
+            role: "user",
+            content: { type: "text", text: SYSTEM_PROMPT }
+          }
+        ]
+      };
+    } else if (name === "review_content") {
+      return {
+        description: "分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
+        messages: [
+          {
+            role: "user",
+            content: { type: "text", text: REVIEW_DISPATCHER_PROMPT }
+          }
+        ]
+      };
+    }
+    throw new Error(`Unknown prompt: ${name}`);
+  });
+
   return server;
 }
+
