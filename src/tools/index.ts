@@ -1,5 +1,5 @@
 export { listPersonasToolDefinition, handleListPersonas } from "./listPersonasTool.js";
-export { createPersonaToolDefinition, handleCreatePersona } from "./createPersonaTool.js";
+export { createPersonaToolDefinition, handleCreatePersona, updatePersonaDraftToolDefinition, handleUpdatePersonaDraft, deletePersonaDraftToolDefinition, handleDeletePersonaDraft, UpdatePersonaDraftInput, DeletePersonaDraftInput } from "./createPersonaTool.js";
 export type { CreatePersonaInput } from "./createPersonaTool.js";
 export { reviewToolDefinition, handleReviewContent } from "./reviewTool.js";
 export type { ReviewInput } from "./reviewTool.js";

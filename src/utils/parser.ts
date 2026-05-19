@@ -11,6 +11,10 @@ export interface PersonaMeta {
   author: string;
   tags: string[];
   description: string;
+  culturalContext?: string;
+  authorRelation?: string;
+  stance?: string;
+  blindSpot?: string;
 }
 
 export interface Persona {
@@ -194,7 +198,7 @@ export async function loadPersonasByIds(
 export async function writePersonaFile(
   skillsDir: string,
   meta: PersonaMeta,
-  systemPrompt: string
+  personaDescription: string
 ): Promise<string> {
   const fileName = `${meta.id}.md`;
   const filePath = path.join(skillsDir, fileName);
@@ -208,7 +212,7 @@ export async function writePersonaFile(
   }
 
   const frontmatter = matter.stringify(
-    systemPrompt,
+    personaDescription,
     meta as unknown as Record<string, unknown>
   );
 

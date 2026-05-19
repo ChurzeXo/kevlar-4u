@@ -11,6 +11,14 @@ import {
   listPersonasToolDefinition,
   handleListPersonas,
   createPersonaToolDefinition,
+        updatePersonaDraftToolDefinition,
+        deletePersonaDraftToolDefinition,
+  updatePersonaDraftToolDefinition,
+  handleUpdatePersonaDraft,
+  deletePersonaDraftToolDefinition,
+  handleDeletePersonaDraft,
+  UpdatePersonaDraftInput,
+  DeletePersonaDraftInput,
   handleCreatePersona,
   reviewToolDefinition,
   handleReviewContent,
@@ -52,8 +60,37 @@ function resolveSkillsDir(): string {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+// ── Clean Stale Drafts ───────────────────────────────────────────────────────
+async function cleanStaleDrafts(tmpDir: string) {
+  try {
+    if (!fs.existsSync(tmpDir)) return;
+    const files = await fs.promises.readdir(tmpDir);
+    const now = Date.now();
+    for (const file of files) {
+      if (!file.endsWith('_draft.json')) continue;
+      const filePath = path.join(tmpDir, file);
+      try {
+        const data = await fs.promises.readFile(filePath, 'utf-8');
+        const draft = JSON.parse(data);
+        if (draft.createdAt && now - draft.createdAt > 86400000) {
+          await fs.promises.unlink(filePath);
+          logger.info("Cleaned stale draft", { event: "clean_stale_draft", file });
+        }
+      } catch (err) {
+        // Ignore parsing errors for individual files
+      }
+    }
+  } catch (err) {
+    logger.warn("Failed to clean stale drafts", { event: "clean_stale_drafts_error", error: String(err) });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function createKevlarServer(): Server {
   const skillsDir = resolveSkillsDir();
+  const tmpDir = path.join(skillsDir, "tmp");
 
   // Initialize config path
   setConfigPath(skillsDir);
@@ -65,6 +102,9 @@ export function createKevlarServer(): Server {
   } else {
     logger.info("Using skills directory", { event: "dir_using", path: skillsDir });
   }
+
+  // Background cleanup of stale drafts
+  cleanStaleDrafts(tmpDir).catch(() => {});
 
   const server = new Server(
     {
@@ -136,11 +176,21 @@ export function createKevlarServer(): Server {
           return await handleListPersonas(skillsDir);
         }
 
+                case "update_persona_draft": {
+          if (!args || typeof args !== "object") throw new Error("需要提供参数");
+          return await handleUpdatePersonaDraft(tmpDir, args as unknown as UpdatePersonaDraftInput);
+        }
+
+        case "delete_persona_draft": {
+          if (!args || typeof args !== "object") throw new Error("需要提供参数");
+          return await handleDeletePersonaDraft(tmpDir, args as unknown as DeletePersonaDraftInput);
+        }
+
         case "create_persona": {
           if (!args || typeof args !== "object") {
             throw new Error("创建评论员需要提供参数");
           }
-          return await handleCreatePersona(skillsDir, args as unknown as CreatePersonaInput);
+          return await handleCreatePersona(skillsDir, tmpDir, args as unknown as CreatePersonaInput);
         }
 
         case "delete_persona": {
