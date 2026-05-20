@@ -93,7 +93,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
   const failed = personas.filter((p) => p.error);
 
   const modeLabels: Record<ExecutionMode, string> = {
-    orchestration: "编排代理模式",
+    orchestration: "宿主辅助兜底模式",
     mcp_sampling: "MCP 采样模式",
     direct_api: "直接 API 模式",
   };

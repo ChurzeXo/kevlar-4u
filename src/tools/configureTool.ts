@@ -71,7 +71,7 @@ export async function handleConfigure(input: ConfigureInput): Promise<ToolResult
     if (input.mode !== undefined) {
       const modeLabels: Record<string, string> = {
         auto: "自动",
-        orchestration: "编排代理模式",
+        orchestration: "宿主辅助兜底模式",
         mcp_sampling: "MCP 采样模式",
         direct_api: "直接 API 模式",
       };

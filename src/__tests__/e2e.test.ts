@@ -67,7 +67,7 @@ describe("End-to-End integration test", () => {
 
       const textOutput = response.content[0].text;
       assert.ok(textOutput.includes("E2E Tester"), "Should include persona name");
-      assert.ok(textOutput.includes("编排代理模式"), "Should indicate orchestration mode");
+      assert.ok(textOutput.includes("宿主辅助兜底模式"), "Should indicate orchestration fallback mode");
       assert.ok(textOutput.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
     } finally {
       await client.close();
@@ -103,13 +103,12 @@ describe("End-to-End integration test", () => {
       const getCreateResponse = await client.getPrompt({ name: "create_persona" });
       assert.ok(getCreateResponse, "Prompt response should exist");
       assert.ok(Array.isArray(getCreateResponse.messages), "Prompt should have messages");
-      // SYSTEM_PROMPT is returned as "user" role (a directive/instruction)
-      // rather than "assistant", since GetPromptResult has no systemPrompt field.
+      // prompts/get returns a short workflow context rather than a fake system prompt.
       assert.equal(getCreateResponse.messages[0].role, "user");
       assert.ok(
         getCreateResponse.messages[0].content.type === "text" &&
-        getCreateResponse.messages[0].content.text.includes("你是一个角色构建引擎"),
-        "Should contain create_persona instructions"
+        getCreateResponse.messages[0].content.text.includes("create_persona_wizard"),
+        "Should direct the client to the create_persona_wizard workflow"
       );
 
       // 3. Get review_content prompt
@@ -174,4 +173,3 @@ describe("End-to-End integration test", () => {
     }
   });
 });
-

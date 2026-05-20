@@ -13,7 +13,7 @@ import { getSamplingClientList, isSamplingSupported } from "../execution/client.
 
 export const getModesToolDefinition: Tool = {
   name: "get_execution_modes",
-  description: "查询当前可用的执行模式及配置状态。用于查看三种评测模式（编排代理/MCP采样/直接API）的可用性。",
+  description: "查询当前可用的执行模式及配置状态。用于查看宿主辅助兜底/MCP采样/直接API三种模式的可用性。",
   inputSchema: { type: "object" as const, properties: {} },
 };
 
@@ -25,9 +25,9 @@ export async function handleGetModes(): Promise<ToolResult> {
 
   const modeLabels: Record<string, { name: string; emoji: string; desc: string }> = {
     orchestration: {
-      name: "编排代理模式",
+      name: "宿主辅助兜底模式",
       emoji: "✅",
-      desc: "单次 Prompt 调用，简单可靠，零 Token 成本",
+      desc: "单次 Prompt 交给宿主 AI 协助完成，零额外成本，但不是真正隔离的多智能体执行",
     },
     mcp_sampling: {
       name: "MCP 采样模式",
@@ -63,7 +63,7 @@ export async function handleGetModes(): Promise<ToolResult> {
 
   // Determine recommendation
   const recommendedLabels: Record<string, string> = {
-    orchestration: "编排代理模式（零成本开箱即用）",
+    orchestration: "宿主辅助兜底模式（零成本、低隔离 fallback）",
     mcp_sampling: "MCP 采样模式（推荐：并行深度分析）",
     direct_api: "直接 API 模式（完全自主控制）",
   };

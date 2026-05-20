@@ -457,7 +457,7 @@ describe("executeReview", () => {
 
     assert.equal(result.mode, "orchestration");
     assert.deepEqual(result.personas, ["test-1"]);
-    assert.ok(result.report.includes("🛡️ Kevlar 压力测试任务派发"));
+    assert.ok(result.report.includes("宿主辅助兜底模式"));
   });
 
   it("throws for unknown mode", async () => {

@@ -3,44 +3,30 @@ import * as path from "path";
 import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction } from "../execution/base.js";
-import { REVIEW_DISPATCHER_PROMPT } from "../prompts/reviewDispatcherPrompt.js";
-import { loadAllPersonas } from "../utils/parser.js";
+import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
 import { logger } from "../utils/logger.js";
 
-export const WIZARD_REVIEW_DISPATCHER_PROMPT = `${REVIEW_DISPATCHER_PROMPT}
-
----
-
-## 五、系统对接协议（仅限内部使用，不对用户展示）
-
-当用户同意你推荐的评论员组合（或指定了他自选的评论员）并且你准备启动评测时，
-请在你的回复最后一行，以严格 JSON 格式输出以下执行标记（不要包含任何 markdown 标记如 \`\`\`json）：
-
-===EXECUTE_REVIEW=== { "persona_ids": ["id1", "id2"], "content": "待评论的完整内容", "context": "发布平台或受众背景（可选）" }
-
-注意：
-- 该 JSON 中的 content 必须是用户最开始提交的、需要评测的完整文案内容。
-- 如果没有明确提供 context，context 字段可以设为 ""。
-- ===EXECUTE_REVIEW=== 标记与其后的 JSON 必须独占一行，前后不得有其他文本。`;
-
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
-  description: "使用 MCP Sampling 驱动的评测调度向导。引导用户匹配评论员，并在确认后自动执行高精度评论并生成诊断报告。",
+  description:
+    "推进一个由 Kevlar 服务端维护状态的内容评测工作流。工具会保存待测内容、检查角色库、推荐或展示评论员，并且只在用户确认后执行评测。",
   inputSchema: {
     type: "object",
     properties: {
       sessionId: {
         type: "string",
-        description: "当前向导对话的会话 ID（可选。若首次调用，请不要提供，系统会自动生成并返回新的 sessionId）"
+        description:
+          "当前评测向导会话 ID。首次调用不传；继续会话时必须带回工具返回的 sessionId。",
       },
       userMessage: {
         type: "string",
-        description: "用户的消息内容（如果是首次开始，可以输入您需要评测的内容或者请求匹配评论员）"
-      }
+        description:
+          "用户在当前评测工作流步骤下的回复。首次调用时传入待评测内容或评测请求。",
+      },
     },
-    required: ["userMessage"]
-  }
+    required: ["userMessage"],
+  },
 };
 
 export interface ReviewWizardInput {
@@ -49,11 +35,25 @@ export interface ReviewWizardInput {
   samplingFn?: MultiTurnSamplingFunction;
 }
 
+type ReviewWizardStep =
+  | "checkPersonaInventory"
+  | "waitingForPersonaCreation"
+  | "confirmSelection"
+  | "completed";
+
 interface ReviewWizardState {
   sessionId: string;
   createdAt: number;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  status: "in_progress" | "completed";
+  step: ReviewWizardStep;
+  content: string;
+  context?: string;
+  selectedPersonaIds: string[];
+  remainingPersonaIds: string[];
+}
+
+interface Recommendation {
+  personaIds: string[];
+  assistantMessage: string;
 }
 
 export async function handleReviewContentWizard(
@@ -61,210 +61,314 @@ export async function handleReviewContentWizard(
   tmpDir: string,
   input: ReviewWizardInput
 ): Promise<ToolResult> {
-  const { sessionId: inputSessionId, userMessage, samplingFn } = input;
-
-  // 1. Check if Sampling is available
-  if (!samplingFn) {
+  if (!input.userMessage || typeof input.userMessage !== "string") {
     return {
-      content: [
-        {
-          type: "text",
-          text: [
-            "❌ 您的客户端目前不支持或未启用 MCP Sampling（采样）能力。",
-            "",
-            "**解决办法：**",
-            "1. 请在您的 MCP 客户端设置中开启 'Sampling' / '采样模型' 能力。",
-            "2. 降级方案：您可以使用 Prompts 面板中的「内容评测调度引擎 (Content Review Dispatcher)」Prompt 开启新对话来进行匹配和评测。"
-          ].join("\n")
-        }
-      ],
-      isError: true
+      content: [{ type: "text", text: "❌ 请提供当前步骤的用户回复。" }],
+      isError: true,
     };
   }
 
-  // 2. Resolve or generate sessionId
-  const sessionId = inputSessionId || `wizard-review-${Math.random().toString(36).substring(2, 10)}`;
-  const wizardStatePath = path.join(tmpDir, `${sessionId}_review_wizard.json`);
-
-  // Ensure tmpDir exists
-  if (!fs.existsSync(tmpDir)) {
-    await fs.promises.mkdir(tmpDir, { recursive: true });
-  }
-
-  // 3. Load or initialize wizard state
-  let state: ReviewWizardState = {
-    sessionId,
-    createdAt: Date.now(),
-    messages: [],
-    status: "in_progress"
-  };
-
-  if (inputSessionId && fs.existsSync(wizardStatePath)) {
-    try {
-      const data = await fs.promises.readFile(wizardStatePath, "utf-8");
-      state = JSON.parse(data);
-    } catch (err) {
-      logger.error("Failed to read review wizard state", { event: "read_wizard_state_error", sessionId, error: String(err) });
-    }
-  }
-
-  // Add the new user message to the conversation history
-  state.messages.push({ role: "user", content: userMessage });
-
-  // 4. Inject dynamic available personas context in a copy of the message list
-  const activePersonas = await loadAllPersonas(skillsDir);
-  const personaListStr = activePersonas
-    .map(p => `- ${p.meta.name} (ID: ${p.meta.id}, 平台: ${p.meta.tags.join("、") || "所有"}, 简介: ${p.meta.description})`)
-    .join("\n");
-
-  const systemInject = `\n\n【系统补充：当前库中已有的可用评论员列表如下：\n${personaListStr}\n\n当前人设总数量为：${activePersonas.length}。如果没有可用角色，请在第一步引导创建人设前，通过系统提示词中描述的流程记录并暂存用户的待测文案。】`;
-
-  // Clone messages to inject dynamic context without polluting persistent session file
-  const samplingMessages = state.messages.map((m, idx) => {
-    if (idx === state.messages.length - 1 && m.role === "user") {
-      return { ...m, content: m.content + systemInject };
-    }
-    return m;
-  });
-
-  // 5. Call Multi-turn Sampling API with true systemPrompt
   try {
-    const samplingResponse = await samplingFn({
-      systemPrompt: WIZARD_REVIEW_DISPATCHER_PROMPT,
-      messages: samplingMessages,
-      maxTokens: 4096
-    });
-
-    const replyContent = samplingResponse.content;
-
-    // Check if review execution was triggered
-    const executeMarker = "===EXECUTE_REVIEW===";
-    const hasExecutionTrigger = replyContent.includes(executeMarker);
-
-    if (hasExecutionTrigger) {
-      const parts = replyContent.split(executeMarker);
-      const displayReply = parts[0].trim();
-      const jsonPayloadStr = parts[1].trim();
-
-      state.messages.push({ role: "assistant", content: displayReply });
-      state.status = "completed";
-      await fs.promises.writeFile(wizardStatePath, JSON.stringify(state, null, 2), "utf-8");
-
-      logger.info("Review wizard triggered evaluation execution.", { event: "review_wizard_complete", sessionId });
-
-      return await executeAutomaticReview(skillsDir, wizardStatePath, displayReply, jsonPayloadStr);
-    }
-
-    // Regular dialogue flow
-    state.messages.push({ role: "assistant", content: replyContent });
-    await fs.promises.writeFile(wizardStatePath, JSON.stringify(state, null, 2), "utf-8");
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: [
-            replyContent,
-            "",
-            `🏷️ *[会话 ID: ${sessionId}] (继续对话请携带此 sessionId)*`
-          ].join("\n")
-        }
-      ]
-    };
-
+    await fs.promises.mkdir(tmpDir, { recursive: true });
+    const state = await loadOrCreateState(tmpDir, input);
+    const personas = await loadAllPersonas(skillsDir);
+    return await advanceWizard(skillsDir, tmpDir, state, personas, input.userMessage, input.samplingFn);
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    logger.error("Review content wizard sampling error", { event: "wizard_sampling_error", sessionId, error: errorMsg });
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("Review content wizard failed", { event: "review_wizard_error", error: message });
     return {
-      content: [{ type: "text", text: `❌ 交互采样过程失败：${errorMsg}` }],
-      isError: true
+      content: [{ type: "text", text: `❌ 内容评测向导失败：${message}` }],
+      isError: true,
     };
   }
 }
 
-async function executeAutomaticReview(
+async function advanceWizard(
   skillsDir: string,
-  wizardStatePath: string,
-  displayReply: string,
-  jsonPayloadStr: string
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
-  try {
-    let jsonText = jsonPayloadStr.trim();
-    // Strip markdown code fences if model returned them
-    if (jsonText.startsWith("```")) {
-      jsonText = jsonText.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
-    }
+  switch (state.step) {
+    case "checkPersonaInventory":
+      return handleInventoryCheck(tmpDir, state, personas, samplingFn);
 
-    const payload = JSON.parse(jsonText);
-    const { persona_ids, content, context } = payload;
+    case "waitingForPersonaCreation":
+      return handleInventoryCheck(tmpDir, state, personas, samplingFn);
 
-    if (!content) {
-      throw new Error("Missing content in execution payload");
-    }
+    case "confirmSelection":
+      return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage);
 
-    // Call standard review handler
-    const reviewResult = await handleReviewContent(skillsDir, {
-      content,
-      persona_ids,
-      context: context || undefined,
-      mode: "auto" // Automatically resolves optimal execution mode
-    });
+    case "completed":
+      return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
+  }
+}
 
-    // Clean up session state upon successful completion
-    try {
-      if (fs.existsSync(wizardStatePath)) {
-        await fs.promises.unlink(wizardStatePath);
-      }
-    } catch (cleanErr) {
-      logger.warn("Failed to clean up review wizard state file", { event: "cleanup_error", path: wizardStatePath, error: String(cleanErr) });
-    }
+async function handleInventoryCheck(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  if (personas.length === 0) {
+    state.step = "waitingForPersonaCreation";
+    state.selectedPersonaIds = [];
+    state.remainingPersonaIds = [];
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        "当前还没有可用评论员。请先创建至少一个角色，再继续这次内容评测。",
+        "",
+        "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
+      ].join("\n")
+    );
+  }
 
-    if (reviewResult.isError) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              displayReply,
-              "",
-              "❌ 评测执行失败：",
-              reviewResult.content[0].text
-            ].join("\n")
-          }
-        ],
-        isError: true
-      };
-    }
+  if (personas.length <= 2) {
+    state.step = "confirmSelection";
+    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.remainingPersonaIds = [];
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        `当前只有 ${personas.length} 位评论员可用，已为你展示全部角色，请确认是否使用。`,
+        "",
+        ...personas.map((p) => `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
+        "",
+        "确认使用以上评论员吗？",
+      ].join("\n")
+    );
+  }
 
+  const recommendation = await recommendPersonas(state, personas, samplingFn);
+  const selected = personas.filter((p) => recommendation.personaIds.includes(p.meta.id));
+  state.step = "confirmSelection";
+  state.selectedPersonaIds = selected.map((p) => p.meta.id);
+  state.remainingPersonaIds = personas
+    .filter((p) => !state.selectedPersonaIds.includes(p.meta.id))
+    .map((p) => p.meta.id);
+  await saveState(tmpDir, state);
+
+  return toolResponse(state, recommendation.assistantMessage);
+}
+
+async function handleSelectionConfirmation(
+  skillsDir: string,
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string
+): Promise<ToolResult> {
+  const explicitIds = extractPersonaIds(userMessage, personas);
+  if (explicitIds.length > 0) {
+    state.selectedPersonaIds = explicitIds;
+    state.remainingPersonaIds = personas
+      .filter((p) => !explicitIds.includes(p.meta.id))
+      .map((p) => p.meta.id);
+    await saveState(tmpDir, state);
+    const selectedNames = personas
+      .filter((p) => explicitIds.includes(p.meta.id))
+      .map((p) => p.meta.name)
+      .join("、");
+    return toolResponse(state, `已选择：${selectedNames}。确认开始评测吗？`);
+  }
+
+  if (!isAffirmative(userMessage)) {
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        "请告诉我你想使用哪些评论员。可以直接回复评论员 ID 或名称。",
+        "",
+        ...personas.map((p) => `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.description}`),
+      ].join("\n")
+    );
+  }
+
+  if (state.selectedPersonaIds.length === 0) {
+    throw new Error("当前没有已选择的评论员。");
+  }
+
+  const reviewResult = await handleReviewContent(skillsDir, {
+    content: state.content,
+    persona_ids: state.selectedPersonaIds,
+    context: state.context,
+    mode: "auto",
+  });
+
+  if (reviewResult.isError) {
     return {
-      content: [
-        {
-          type: "text",
-          text: [
-            displayReply,
-            "",
-            reviewResult.content[0].text
-          ].join("\n")
-        }
-      ]
-    };
-
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    logger.error("Failed to execute automatic review from wizard", { event: "automatic_review_error", error: errorMsg, payload: jsonPayloadStr });
-    return {
-      content: [
-        {
-          type: "text",
-          text: [
-            displayReply,
-            "",
-            "⚠️ 已收到评测确认，但在执行评测任务时发生解析或运行错误。",
-            `错误详情: ${errorMsg}`
-          ].join("\n")
-        }
-      ],
-      isError: true
+      content: [{ type: "text", text: reviewResult.content[0]?.text || "❌ 评测执行失败。" }],
+      isError: true,
     };
   }
+
+  state.step = "completed";
+  await saveState(tmpDir, state);
+  await cleanupState(tmpDir, state.sessionId);
+  return reviewResult;
+}
+
+async function recommendPersonas(
+  state: ReviewWizardState,
+  personas: Persona[],
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<Recommendation> {
+  if (samplingFn) {
+    try {
+      const personaSummary = personas.map((p) => ({
+        id: p.meta.id,
+        name: p.meta.name,
+        tags: p.meta.tags,
+        description: p.meta.description,
+      }));
+      const response = await samplingFn({
+        systemPrompt:
+          "你是 Kevlar 评论员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id，并严格输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"展示推荐名单和理由，并询问用户是否确认\"}。不要输出 markdown。",
+        messages: [
+          {
+            role: "user",
+            content: JSON.stringify({
+              content: state.content,
+              context: state.context || "",
+              personas: personaSummary,
+            }),
+          },
+        ],
+        maxTokens: 2048,
+      });
+      const parsed = JSON.parse(stripCodeFence(response.content.trim())) as Record<string, unknown>;
+      const validIds = new Set(personas.map((p) => p.meta.id));
+      const personaIds = Array.isArray(parsed.personaIds)
+        ? parsed.personaIds.map(String).filter((id) => validIds.has(id)).slice(0, 3)
+        : [];
+      if (personaIds.length > 0 && typeof parsed.assistantMessage === "string") {
+        return { personaIds, assistantMessage: parsed.assistantMessage };
+      }
+    } catch (err) {
+      logger.warn("AI persona recommendation failed, falling back to heuristic", {
+        event: "review_recommendation_fallback",
+        error: String(err),
+      });
+    }
+  }
+
+  return heuristicRecommendation(state, personas);
+}
+
+function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]): Recommendation {
+  const terms = `${state.content}\n${state.context || ""}`.toLowerCase();
+  const scored = personas
+    .map((p) => {
+      const haystack = [p.meta.name, p.meta.description, ...p.meta.tags, p.systemPrompt].join("\n").toLowerCase();
+      const score = p.meta.tags.reduce((sum, tag) => sum + (terms.includes(tag.toLowerCase()) ? 2 : 0), 0) +
+        (terms.includes(p.meta.name.toLowerCase()) ? 3 : 0) +
+        (haystack.includes("小红书") && terms.includes("小红书") ? 1 : 0);
+      return { persona: p, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const selected = scored.slice(0, Math.min(3, personas.length)).map((item) => item.persona);
+  return {
+    personaIds: selected.map((p) => p.meta.id),
+    assistantMessage: [
+      "我为这篇内容推荐了以下评论员：",
+      "",
+      ...selected.map((p) => `- ${p.meta.name}（推荐理由：标签和描述与本次内容更接近；ID: ${p.meta.id}）`),
+      "",
+      "确认使用以上评论员，还是需要从完整列表中自选？",
+    ].join("\n"),
+  };
+}
+
+async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
+  if (input.sessionId && !/^[a-z0-9-]+$/.test(input.sessionId)) {
+    throw new Error("sessionId 格式不合法。");
+  }
+
+  const sessionId = input.sessionId || `wizard-review-${Math.random().toString(36).substring(2, 10)}`;
+  const statePath = getStatePath(tmpDir, sessionId);
+
+  if (input.sessionId && fs.existsSync(statePath)) {
+    const raw = await fs.promises.readFile(statePath, "utf-8");
+    return JSON.parse(raw) as ReviewWizardState;
+  }
+
+  return {
+    sessionId,
+    createdAt: Date.now(),
+    step: "checkPersonaInventory",
+    content: input.userMessage.trim(),
+    selectedPersonaIds: [],
+    remainingPersonaIds: [],
+  };
+}
+
+async function saveState(tmpDir: string, state: ReviewWizardState): Promise<void> {
+  await fs.promises.mkdir(tmpDir, { recursive: true });
+  await fs.promises.writeFile(getStatePath(tmpDir, state.sessionId), JSON.stringify(state, null, 2), "utf-8");
+}
+
+async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {
+  const statePath = getStatePath(tmpDir, sessionId);
+  try {
+    if (fs.existsSync(statePath)) await fs.promises.unlink(statePath);
+  } catch (err) {
+    logger.warn("Failed to clean review wizard state", {
+      event: "review_wizard_cleanup_error",
+      path: statePath,
+      error: String(err),
+    });
+  }
+}
+
+function getStatePath(tmpDir: string, sessionId: string): string {
+  return path.join(tmpDir, `${sessionId}_review_wizard.json`);
+}
+
+function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: [
+          assistantMessage,
+          "",
+          "```kevlar-state",
+          `sessionId: ${state.sessionId}`,
+          "workflow: review_content",
+          `currentStep: ${state.step}`,
+          `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
+          `remainingPersonaIds: ${state.remainingPersonaIds.join(", ") || "none"}`,
+          "```",
+        ].join("\n"),
+      },
+    ],
+  };
+}
+
+function extractPersonaIds(input: string, personas: Persona[]): string[] {
+  const selected: string[] = [];
+  for (const persona of personas) {
+    if (input.includes(persona.meta.id) || input.includes(persona.meta.name)) {
+      selected.push(persona.meta.id);
+    }
+  }
+  return selected;
+}
+
+function isAffirmative(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  return ["确认", "是", "可以", "没问题", "开始", "执行", "对", "好", "ok", "yes", "y"].some((word) =>
+    normalized.includes(word)
+  );
+}
+
+function stripCodeFence(text: string): string {
+  if (!text.startsWith("```")) return text;
+  return text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
 }

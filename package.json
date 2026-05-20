@@ -13,7 +13,15 @@
     "setup": "tsx scripts/setup.ts",
     "kevlar-mcp": "tsx scripts/cli.ts",
     "test": "tsx --test src/__tests__/**/*.test.ts",
-"test:watch": "tsx --test --watch src/__tests__/**/*.test.ts"
+    "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "config/"
+  ],
+  "engines": {
+    "node": ">=20"
   },
   "keywords": ["mcp", "multi-agent", "content-review", "ai"],
   "author": "",

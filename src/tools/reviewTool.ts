@@ -13,7 +13,7 @@ const MAX_PERSONAS = 50;
 export const reviewToolDefinition: Tool = {
   name: "review_content",
   description:
-    "将文案交给多个评论员进行压力测试。支持三种执行模式（编排代理/MCP采样/直接API）。使用前可先查看可用评论员让用户选择。",
+    "将文案交给多个评论员进行压力测试。支持三种执行模式（宿主辅助兜底/MCP采样/直接API）。使用前可先查看可用评论员让用户选择。",
   inputSchema: {
     type: "object" as const,
     properties: {

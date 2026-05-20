@@ -4,11 +4,17 @@ export type { CreatePersonaInput, UpdatePersonaDraftInput, DeletePersonaDraftInp
 export { reviewToolDefinition, handleReviewContent } from "./reviewTool.js";
 export type { ReviewInput } from "./reviewTool.js";
 export { deletePersonaToolDefinition, handleDeletePersona } from "./deletePersonaTool.js";
+export { deletePersonaWizardToolDefinition, handleDeletePersonaWizard } from "./deletePersonaWizardTool.js";
+export type { DeletePersonaWizardInput } from "./deletePersonaWizardTool.js";
 export { resetPersonasToolDefinition, handleResetPersonas } from "./resetPersonasTool.js";
+export { resetPersonasWizardToolDefinition, handleResetPersonasWizard } from "./resetPersonasWizardTool.js";
+export type { ResetPersonasWizardInput } from "./resetPersonasWizardTool.js";
 export { helpToolDefinition, handleHelp } from "./helpTool.js";
 export { getModesToolDefinition, handleGetModes } from "./getModesTool.js";
 export { configureToolDefinition, handleConfigure } from "./configureTool.js";
 export type { ConfigureInput } from "./configureTool.js";
+export { configureWizardToolDefinition, handleConfigureWizard } from "./configureWizardTool.js";
+export type { ConfigureWizardInput } from "./configureWizardTool.js";
 
 export { createPersonaWizardToolDefinition, handleCreatePersonaWizard } from "./createPersonaWizardTool.js";
 export type { WizardInput } from "./createPersonaWizardTool.js";

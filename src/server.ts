@@ -24,8 +24,14 @@ import {
   handleReviewContent,
   deletePersonaToolDefinition,
   handleDeletePersona,
+  deletePersonaWizardToolDefinition,
+  handleDeletePersonaWizard,
+  DeletePersonaWizardInput,
   resetPersonasToolDefinition,
   handleResetPersonas,
+  resetPersonasWizardToolDefinition,
+  handleResetPersonasWizard,
+  ResetPersonasWizardInput,
   helpToolDefinition,
   handleHelp,
   getModesToolDefinition,
@@ -35,7 +41,9 @@ import {
   CreatePersonaInput,
   ReviewInput,
   ConfigureInput,
-  SYSTEM_PROMPT,
+  configureWizardToolDefinition,
+  handleConfigureWizard,
+  ConfigureWizardInput,
   createPersonaWizardToolDefinition,
   handleCreatePersonaWizard,
   WizardInput,
@@ -46,7 +54,7 @@ import {
 import { REVIEW_DISPATCHER_PROMPT } from "./prompts/reviewDispatcherPrompt.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
-import { setClientInfo } from "./execution/client.js";
+import { isSamplingSupported, setClientInfo } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import type { SamplingFunction, MultiTurnSamplingFunction } from "./execution/base.js";
 
@@ -127,6 +135,15 @@ export function createKevlarServer(): Server {
     }
   );
 
+  const updateClientSamplingSupport = (): boolean => {
+    const clientVersion = server.getClientVersion();
+    if (clientVersion) {
+      setClientInfo(clientVersion.name, clientVersion.version);
+      return isSamplingSupported(clientVersion.name);
+    }
+    return false;
+  };
+
   // ── Create sampling function for MCP Sampling mode ─────────────────────────
   const createSamplingFn = (serverInstance: Server): SamplingFunction => {
     return async (params: { 
@@ -195,10 +212,13 @@ export function createKevlarServer(): Server {
         updatePersonaDraftToolDefinition,
         deletePersonaDraftToolDefinition,
         deletePersonaToolDefinition,
+        deletePersonaWizardToolDefinition,
         resetPersonasToolDefinition,
+        resetPersonasWizardToolDefinition,
         reviewToolDefinition,
         getModesToolDefinition,
         configureToolDefinition,
+        configureWizardToolDefinition,
         helpToolDefinition,
         createPersonaWizardToolDefinition,
         reviewContentWizardToolDefinition,
@@ -240,8 +260,9 @@ export function createKevlarServer(): Server {
             throw new Error("向导需要提供参数");
           }
           const input = args as unknown as WizardInput;
-          const samplingFn = createMultiTurnSamplingFn(server);
-          input.samplingFn = samplingFn;
+          if (updateClientSamplingSupport()) {
+            input.samplingFn = createMultiTurnSamplingFn(server);
+          }
           
           return await handleCreatePersonaWizard(skillsDir, tmpDir, input);
         }
@@ -257,6 +278,13 @@ export function createKevlarServer(): Server {
           return await handleDeletePersona(skillsDir, delInput);
         }
 
+        case "delete_persona_wizard": {
+          if (!args || typeof args !== "object") {
+            throw new Error("删除向导需要提供参数");
+          }
+          return await handleDeletePersonaWizard(skillsDir, tmpDir, args as unknown as DeletePersonaWizardInput);
+        }
+
         case "reset_personas": {
           if (!args || typeof args !== "object") {
             throw new Error("恢复操作需要提供参数");
@@ -265,21 +293,25 @@ export function createKevlarServer(): Server {
           return await handleResetPersonas(skillsDir, resetInput);
         }
 
+        case "reset_personas_wizard": {
+          if (!args || typeof args !== "object") {
+            throw new Error("恢复向导需要提供参数");
+          }
+          return await handleResetPersonasWizard(skillsDir, tmpDir, args as unknown as ResetPersonasWizardInput);
+        }
+
         case "review_content": {
           if (!args || typeof args !== "object") {
             throw new Error("评测需要提供文案内容");
           }
           const input = args as unknown as ReviewInput;
           
-          // Inject client info for capability detection
-          const clientVersion = server.getClientVersion();
-          if (clientVersion) {
-            setClientInfo(clientVersion.name, clientVersion.version);
-          }
+          const samplingSupported = updateClientSamplingSupport();
           
           // Inject sampling function for MCP Sampling mode
-          const samplingFn = createSamplingFn(server);
-          input.samplingFn = samplingFn;
+          if (samplingSupported) {
+            input.samplingFn = createSamplingFn(server);
+          }
           
           return await handleReviewContent(skillsDir, input);
         }
@@ -289,8 +321,9 @@ export function createKevlarServer(): Server {
             throw new Error("向导需要提供参数");
           }
           const input = args as unknown as ReviewWizardInput;
-          const samplingFn = createMultiTurnSamplingFn(server);
-          input.samplingFn = samplingFn;
+          if (updateClientSamplingSupport()) {
+            input.samplingFn = createMultiTurnSamplingFn(server);
+          }
           
           return await handleReviewContentWizard(skillsDir, tmpDir, input);
         }
@@ -305,6 +338,13 @@ export function createKevlarServer(): Server {
           }
           const configureInput = args as unknown as ConfigureInput;
           return await handleConfigure(configureInput);
+        }
+
+        case "configure_wizard": {
+          if (!args || typeof args !== "object") {
+            throw new Error("配置向导需要提供参数");
+          }
+          return await handleConfigureWizard(tmpDir, args as unknown as ConfigureWizardInput);
         }
 
         case "kevlar_help": {
@@ -347,21 +387,33 @@ export function createKevlarServer(): Server {
 
   // ── Prompts: get prompt ──────────────────────────────────────────────────
   server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-    const { name } = request.params;
+    const { name, arguments: promptArgs } = request.params;
     if (name === "create_persona") {
+      const args = (promptArgs || {}) as Record<string, string>;
+      const currentStep = args.currentStep || "ageRange";
+      const sessionId = args.sessionId || "未开始";
+      const knownFields = args.knownFields || "none";
       return {
         description:
-          "【降级方案】引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+          "【降级方案】启动或恢复 Kevlar 人设创建工作流的动态上下文提示",
         messages: [
           {
-            // role: "user" 使 SYSTEM_PROMPT 以用户指令的形式出现在对话中，
-            // LLM 将其视为行为定义指令，效果最接近系统提示词。
-            // GetPromptResult 不支持 systemPrompt 字段（仅 Sampling
-            // 协议的 CreateMessageRequestParams 才有），
-            // 故无法通过 prompts/get 注入为真正的系统提示词。
-            // (注意: 如果客户端支持 MCP Sampling，推荐使用 create_persona_wizard 工具进行更底层的交互)
             role: "user",
-            content: { type: "text", text: SYSTEM_PROMPT },
+            content: {
+              type: "text",
+              text: [
+                "你正在协助执行 Kevlar 的 create_persona 工作流。",
+                "不要自行扮演完整的角色构建引擎；流程状态、字段校验和写入由 Kevlar 工具负责。",
+                "",
+                `sessionId: ${sessionId}`,
+                `currentStep: ${currentStep}`,
+                `knownFields: ${knownFields}`,
+                "",
+                "下一步：调用 create_persona_wizard 工具，并把用户回复作为 userMessage 传入。",
+                "工具返回 assistantMessage 后，将其展示给用户；用户继续回复时，带上同一个 sessionId 再次调用 create_persona_wizard。",
+                "禁止：不要跳过确认步骤，不要直接调用 create_persona，除非 create_persona_wizard 已完成最终创建。",
+              ].join("\n"),
+            },
           },
         ],
       };
@@ -381,4 +433,3 @@ export function createKevlarServer(): Server {
 
   return server;
 }
-

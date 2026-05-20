@@ -1,9 +1,10 @@
 /**
- * Orchestration Execution Mode
+ * Host-assisted fallback execution mode
  * 
  * Bundles all persona instructions into a single prompt,
  * dispatched to the host AI client for execution.
- * Zero token cost - Kevlar itself doesn't call any model.
+ * Zero token cost - Kevlar itself doesn't call any model. This is a
+ * best-effort fallback, not true isolated multi-agent execution.
  */
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
@@ -50,11 +51,15 @@ function buildOrchestrationPrompt(
     ? `\n\n**发布平台 & 目标受众背景**：${contextNote}`
     : "";
 
-  return `# 🛡️ Kevlar 压力测试任务派发
+  return `# 🛡️ Kevlar 宿主辅助评测任务
 
 **待测试内容**（共 ${content.length} 字）已锁定。${contextSection}
 
-你需要激活以下 **${personas.length} 个独立批评人设**，为每个人设开启一个**独立的思维线程**，严格禁止人格串味。每个人设必须只用自己的视角阅读内容，不受其他人设影响。
+**执行模式**：宿主辅助兜底模式（orchestration fallback）
+
+这是一个低隔离降级方案：Kevlar 会把所有人设和待评测内容组织成单次 Prompt，交由宿主 AI 协助完成。它不等价于 MCP Sampling 或 Direct API 的真实并行多智能体执行。
+
+请尽力按以下 **${personas.length} 个批评人设** 分段模拟评测，并避免人格串味。每个人设必须只用自己的视角阅读内容，不受其他人设影响。
 
 ---
 
@@ -68,7 +73,7 @@ ${personaBlocks}
 
 ### 🛡️ Kevlar 压力测试报告
 
-**执行模式**：编排代理模式
+**执行模式**：宿主辅助兜底模式
 
 **测试内容摘要**：（一句话概括被测试内容的类型和主题）
 **激活人设数量**：${personas.length} 个
