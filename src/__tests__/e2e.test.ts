@@ -100,17 +100,16 @@ describe("End-to-End integration test", () => {
       assert.ok(promptNames.includes("review_content"), "Should list review_content prompt");
 
       // 2. Get create_persona prompt
-      // Note: The handler now uses sampling/createMessage to inject SYSTEM_PROMPT
-      // as a proper system prompt. In the test environment (InMemoryTransport)
-      // sampling is not available, so it falls back to a simplified prompt.
       const getCreateResponse = await client.getPrompt({ name: "create_persona" });
       assert.ok(getCreateResponse, "Prompt response should exist");
       assert.ok(Array.isArray(getCreateResponse.messages), "Prompt should have messages");
-      assert.equal(getCreateResponse.messages[0].role, "assistant");
+      // SYSTEM_PROMPT is returned as "user" role (a directive/instruction)
+      // rather than "assistant", since GetPromptResult has no systemPrompt field.
+      assert.equal(getCreateResponse.messages[0].role, "user");
       assert.ok(
         getCreateResponse.messages[0].content.type === "text" &&
-        getCreateResponse.messages[0].content.text.includes("请逐步告诉我这个人设的信息"),
-        "Should contain create_persona fallback instructions"
+        getCreateResponse.messages[0].content.text.includes("你是一个角色构建引擎"),
+        "Should contain create_persona instructions"
       );
 
       // 3. Get review_content prompt
