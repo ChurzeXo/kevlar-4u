@@ -290,16 +290,60 @@ export function createKevlarServer(): Server {
   server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     const { name } = request.params;
     if (name === "create_persona") {
-      return {
-			description:
-				"引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
-			messages: [
-				{
-					role: "assistant",
-					content: { type: "text", text: SYSTEM_PROMPT },
-				},
-			],
-		};
+      try {
+        // Use sampling/createMessage to inject SYSTEM_PROMPT as a proper
+        // system prompt via the MCP Sampling protocol, so the host (e.g.
+        // Claude Desktop) sets it as the LLM's system instruction rather
+        // than treating it as a regular conversation message.
+        const samplingResult = await server.createMessage({
+          systemPrompt: SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: "请开始创建评论员人设。",
+              },
+            },
+          ],
+          maxTokens: 200,
+        });
+
+        const responseText =
+          samplingResult.content.type === "text"
+            ? samplingResult.content.text
+            : "好的，我们开始创建评论员人设吧。请告诉我这个角色的基本信息。";
+
+        return {
+          description:
+            "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+          messages: [
+            {
+              role: "assistant",
+              content: { type: "text", text: responseText },
+            },
+          ],
+        };
+      } catch (err) {
+        logger.warn("create_persona sampling request failed, using fallback prompt", {
+          event: "prompt_sampling_fallback",
+          error: err instanceof Error ? err.message : String(err),
+        });
+
+        return {
+          description:
+            "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+          messages: [
+            {
+              role: "assistant",
+              content: {
+                type: "text",
+                text: "请逐步告诉我这个人设的信息：年龄段、兴趣方向、性格特质、常用平台。",
+              },
+            },
+          ],
+        };
+      }
     } else if (name === "review_content") {
       return {
         description: "分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
