@@ -8,9 +8,8 @@
 
 const SAMPLING_CLIENTS = new Set([
   "claude-ai",
-  // 以下需实测确认后添加：
-  // "Cursor",
-  // "claude-code",
+  "cursor",
+  "claude-code",
 ]);
 
 // ── Client Info Store ─────────────────────────────────────────────────────────

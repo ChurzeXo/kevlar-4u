@@ -18,6 +18,12 @@ export type SamplingFunction = (params: {
   maxTokens?: number;
 }) => Promise<{ content: string; stopReason?: string }>;
 
+export type MultiTurnSamplingFunction = (params: {
+  systemPrompt: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  maxTokens?: number;
+}) => Promise<{ content: string; stopReason?: string }>;
+
 // ── Execution Context ─────────────────────────────────────────────────────────
 
 export interface ExecutionContext {
@@ -26,6 +32,7 @@ export interface ExecutionContext {
   content: string;
   context?: string;
   samplingFn?: SamplingFunction;
+  multiTurnSamplingFn?: MultiTurnSamplingFunction;
 }
 
 // ── Execution Result ─────────────────────────────────────────────────────────

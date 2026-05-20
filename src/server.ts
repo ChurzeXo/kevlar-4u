@@ -36,13 +36,19 @@ import {
   ReviewInput,
   ConfigureInput,
   SYSTEM_PROMPT,
+  createPersonaWizardToolDefinition,
+  handleCreatePersonaWizard,
+  WizardInput,
+  reviewContentWizardToolDefinition,
+  handleReviewContentWizard,
+  ReviewWizardInput,
 } from "./tools/index.js";
 import { REVIEW_DISPATCHER_PROMPT } from "./prompts/reviewDispatcherPrompt.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
 import { setClientInfo } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
-import type { SamplingFunction } from "./execution/base.js";
+import type { SamplingFunction, MultiTurnSamplingFunction } from "./execution/base.js";
 
 // ── Resolve the skills/ directory ────────────────────────────────────────────
 // Priority:
@@ -151,6 +157,35 @@ export function createKevlarServer(): Server {
     };
   };
 
+  // ── Create multi-turn sampling function for MCP Sampling Wizards ─────────────
+  const createMultiTurnSamplingFn = (serverInstance: Server): MultiTurnSamplingFunction => {
+    return async (params) => {
+      try {
+        const result = await serverInstance.createMessage({
+          systemPrompt: params.systemPrompt,
+          messages: params.messages.map(m => ({
+            role: m.role,
+            content: { type: "text", text: m.content }
+          })),
+          maxTokens: params.maxTokens || 4096,
+        });
+
+        const textContent = result.content.type === "text" ? result.content.text : "";
+        return {
+          content: textContent,
+          stopReason: result.stopReason,
+        };
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        logger.error("Multi-turn Sampling request failed", { 
+          event: "multi_sampling_request_error", 
+          error: errorMsg 
+        });
+        throw new Error(`多轮 Sampling 调用失败: ${errorMsg}`);
+      }
+    };
+  };
+
   // ── Tool: list tools ────────────────────────────────────────────────────
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -165,6 +200,8 @@ export function createKevlarServer(): Server {
         getModesToolDefinition,
         configureToolDefinition,
         helpToolDefinition,
+        createPersonaWizardToolDefinition,
+        reviewContentWizardToolDefinition,
       ],
     };
   });
@@ -196,6 +233,17 @@ export function createKevlarServer(): Server {
             throw new Error("创建评论员需要提供参数");
           }
           return await handleCreatePersona(skillsDir, tmpDir, args as unknown as CreatePersonaInput);
+        }
+
+        case "create_persona_wizard": {
+          if (!args || typeof args !== "object") {
+            throw new Error("向导需要提供参数");
+          }
+          const input = args as unknown as WizardInput;
+          const samplingFn = createMultiTurnSamplingFn(server);
+          input.samplingFn = samplingFn;
+          
+          return await handleCreatePersonaWizard(skillsDir, tmpDir, input);
         }
 
         case "delete_persona": {
@@ -236,6 +284,17 @@ export function createKevlarServer(): Server {
           return await handleReviewContent(skillsDir, input);
         }
 
+        case "review_content_wizard": {
+          if (!args || typeof args !== "object") {
+            throw new Error("向导需要提供参数");
+          }
+          const input = args as unknown as ReviewWizardInput;
+          const samplingFn = createMultiTurnSamplingFn(server);
+          input.samplingFn = samplingFn;
+          
+          return await handleReviewContentWizard(skillsDir, tmpDir, input);
+        }
+
         case "get_execution_modes": {
           return await handleGetModes();
         }
@@ -274,13 +333,13 @@ export function createKevlarServer(): Server {
       prompts: [
         {
           name: "create_persona",
-          title: "虚拟读者人设搭建系统 (Create Persona Wizard)",
-          description: "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+          title: "虚拟读者人设搭建系统 (Legacy Fallback)",
+          description: "【仅用于不支持 Sampling 的旧版客户端的降级方案】引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
         },
         {
           name: "review_content",
-          title: "内容评测调度引擎 (Content Review Dispatcher)",
-          description: "分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
+          title: "内容评测调度引擎 (Legacy Fallback)",
+          description: "【仅用于不支持 Sampling 的旧版客户端的降级方案】分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
         }
       ]
     };
@@ -292,7 +351,7 @@ export function createKevlarServer(): Server {
     if (name === "create_persona") {
       return {
         description:
-          "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+          "【降级方案】引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
         messages: [
           {
             // role: "user" 使 SYSTEM_PROMPT 以用户指令的形式出现在对话中，
@@ -300,6 +359,7 @@ export function createKevlarServer(): Server {
             // GetPromptResult 不支持 systemPrompt 字段（仅 Sampling
             // 协议的 CreateMessageRequestParams 才有），
             // 故无法通过 prompts/get 注入为真正的系统提示词。
+            // (注意: 如果客户端支持 MCP Sampling，推荐使用 create_persona_wizard 工具进行更底层的交互)
             role: "user",
             content: { type: "text", text: SYSTEM_PROMPT },
           },
@@ -307,7 +367,7 @@ export function createKevlarServer(): Server {
       };
     } else if (name === "review_content") {
       return {
-        description: "分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
+        description: "【降级方案】分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
         messages: [
           {
             role: "assistant",

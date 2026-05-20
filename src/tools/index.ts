@@ -9,3 +9,8 @@ export { helpToolDefinition, handleHelp } from "./helpTool.js";
 export { getModesToolDefinition, handleGetModes } from "./getModesTool.js";
 export { configureToolDefinition, handleConfigure } from "./configureTool.js";
 export type { ConfigureInput } from "./configureTool.js";
+
+export { createPersonaWizardToolDefinition, handleCreatePersonaWizard } from "./createPersonaWizardTool.js";
+export type { WizardInput } from "./createPersonaWizardTool.js";
+export { reviewContentWizardToolDefinition, handleReviewContentWizard } from "./reviewContentWizardTool.js";
+export type { ReviewWizardInput } from "./reviewContentWizardTool.js";
