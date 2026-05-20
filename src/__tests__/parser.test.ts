@@ -75,6 +75,39 @@ describe("parsePersonaFile", () => {
     assert.equal(persona.systemPrompt, "You are a test persona.");
   });
 
+  it("parses a persona file with inferred metadata fields", async () => {
+    const filePath = path.join(tmpDir, "inferred_persona.md");
+    fs.writeFileSync(
+      filePath,
+      [
+        "---",
+        "id: inferred_persona",
+        "name: 推断人设",
+        "name_en: Inferred Persona",
+        "version: 1.0.0",
+        "author: tester",
+        "tags: []",
+        "description: A test inferred persona",
+        "culturalContext: Chinese culture",
+        "authorRelation: Subscribed",
+        "stance: Supportive",
+        "blindSpot: Math",
+        "---",
+        "You are an inferred persona.",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const persona = await parsePersonaFile(filePath);
+    assert.ok(persona !== null);
+    assert.equal(persona.meta.id, "inferred_persona");
+    assert.equal(persona.meta.culturalContext, "Chinese culture");
+    assert.equal(persona.meta.authorRelation, "Subscribed");
+    assert.equal(persona.meta.stance, "Supportive");
+    assert.equal(persona.meta.blindSpot, "Math");
+    assert.equal(persona.systemPrompt, "You are an inferred persona.");
+  });
+
   it("skips template files starting with _", async () => {
     const filePath = path.join(tmpDir, "_template.md");
     fs.writeFileSync(filePath, "---\nid: template\nname: Template\n---\nContent", "utf-8");
@@ -128,6 +161,29 @@ describe("writePersonaFile", () => {
     assert.ok(persona);
     assert.equal(persona.meta.id, "test_writer");
     assert.equal(persona.systemPrompt, "You are a test persona.");
+  });
+
+  it("writes inferred metadata fields to frontmatter", async () => {
+    const filePath = await writePersonaFile(tmpDir, {
+      id: "test_inferred_writer",
+      name: "测试推断写入",
+      name_en: "Test Inferred Writer",
+      version: "1.0.0",
+      author: "tester",
+      tags: ["test"],
+      description: "Test inferred write",
+      culturalContext: "Chinese context",
+      authorRelation: "Stranger",
+      stance: "Skeptical",
+      blindSpot: "Visuals",
+    }, "Content here");
+
+    const persona = await parsePersonaFile(filePath);
+    assert.ok(persona);
+    assert.equal(persona.meta.culturalContext, "Chinese context");
+    assert.equal(persona.meta.authorRelation, "Stranger");
+    assert.equal(persona.meta.stance, "Skeptical");
+    assert.equal(persona.meta.blindSpot, "Visuals");
   });
 
   it("rejects path traversal via id", async () => {

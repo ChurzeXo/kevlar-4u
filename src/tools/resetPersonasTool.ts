@@ -144,7 +144,7 @@ const BUILTIN_PERSONAS: Array<{
   },
   {
     id: "keyboard_warrior",
-    name: "键盘侠·杠精模式",
+    name: "键盘侠·九段杠精",
     name_en: "Keyboard Warrior",
     description: "专门猎杀逻辑漏洞、事实错误与模糊表述的网络键盘侠，毒舌但有据可依",
     tags: ["逻辑漏洞", "杠精", "批判性思维", "社交媒体"],

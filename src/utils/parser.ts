@@ -85,6 +85,10 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
     author: String(data.author || "unknown"),
     tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
     description: String(data.description || ""),
+    culturalContext: data.culturalContext ? String(data.culturalContext) : undefined,
+    authorRelation: data.authorRelation ? String(data.authorRelation) : undefined,
+    stance: data.stance ? String(data.stance) : undefined,
+    blindSpot: data.blindSpot ? String(data.blindSpot) : undefined,
   };
 
   return {

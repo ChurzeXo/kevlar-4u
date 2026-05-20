@@ -32,7 +32,7 @@ describe("End-to-End integration test", () => {
       "name: E2E Tester",
       "name_en: E2E Tester",
       "version: 1.0.0",
-      "author: test",
+      "author: kevlar-core",
       "tags: [e2e]",
       "description: Testing persona",
       "---",
@@ -103,7 +103,7 @@ describe("End-to-End integration test", () => {
       const getCreateResponse = await client.getPrompt({ name: "create_persona" });
       assert.ok(getCreateResponse, "Prompt response should exist");
       assert.ok(Array.isArray(getCreateResponse.messages), "Prompt should have messages");
-      assert.equal(getCreateResponse.messages[0].role, "user");
+      assert.equal(getCreateResponse.messages[0].role, "assistant");
       assert.ok(
         getCreateResponse.messages[0].content.type === "text" &&
         getCreateResponse.messages[0].content.text.includes("你是一个角色构建引擎"),
@@ -114,7 +114,7 @@ describe("End-to-End integration test", () => {
       const getReviewResponse = await client.getPrompt({ name: "review_content" });
       assert.ok(getReviewResponse, "Prompt response should exist");
       assert.ok(Array.isArray(getReviewResponse.messages), "Prompt should have messages");
-      assert.equal(getReviewResponse.messages[0].role, "user");
+      assert.equal(getReviewResponse.messages[0].role, "assistant");
       assert.ok(
         getReviewResponse.messages[0].content.type === "text" &&
         getReviewResponse.messages[0].content.text.includes("内容评论"),

@@ -143,17 +143,40 @@ export interface PersonaLoadingResult {
   missingIds?: string[];
 }
 
+export function validatePersonaFields(persona: Persona): void {
+  // Built-in personas (author === "kevlar-core") are already complete and valid
+  if (persona.meta.author === "kevlar-core") {
+    return;
+  }
+
+  const prompt = persona.systemPrompt || "";
+  
+  const hasPlatform = prompt.includes("常用平台") || (persona.meta.description && persona.meta.description.includes("平台"));
+  const hasTraits = prompt.includes("性格特质") || prompt.includes("性格");
+  const hasBlindSpot = prompt.includes("盲区") || !!persona.meta.blindSpot;
+
+  if (!hasPlatform || !hasTraits || !hasBlindSpot) {
+    throw new Error(`[${persona.meta.name}] 角色描述不完整，未通过字段校验。请确认常用平台、性格特质、盲区已配齐。`);
+  }
+}
+
 export async function loadPersonasForReview(
   skillsDir: string,
   personaIds?: string[]
 ): Promise<PersonaLoadingResult> {
   if (personaIds && personaIds.length > 0) {
     const personas = await loadPersonasByIds(skillsDir, personaIds);
+    for (const p of personas) {
+      validatePersonaFields(p);
+    }
     const foundIds = new Set(personas.map((p) => p.meta.id));
     const missing = personaIds.filter((id) => !foundIds.has(id));
     return { personas, missingIds: missing.length > 0 ? missing : undefined };
   }
   const personas = await loadAllPersonas(skillsDir);
+  for (const p of personas) {
+    validatePersonaFields(p);
+  }
   return { personas };
 }
 
