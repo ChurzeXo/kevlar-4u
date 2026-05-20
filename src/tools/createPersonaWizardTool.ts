@@ -36,13 +36,9 @@ export interface WizardInput {
 
 type WizardStep =
   | "ageRange"
-  | "ageRangeConfirm"
   | "interests"
-  | "interestsConfirm"
   | "traits"
-  | "traitsConfirm"
   | "platform"
-  | "platformConfirm"
   | "finalConfirm"
   | "completed";
 
@@ -62,8 +58,6 @@ interface WizardState {
     stance?: string;
     blindSpot?: string;
   };
-  pendingField?: DraftField;
-  pendingValue?: string | string[];
 }
 
 interface ExtractionResult {
@@ -116,139 +110,113 @@ async function advanceWizard(
 ): Promise<ToolResult> {
   switch (state.step) {
     case "ageRange":
-      return setPendingAndAskForConfirmation(tmpDir, state, "ageRange", userMessage.trim(), "ageRangeConfirm");
-
-    case "ageRangeConfirm":
-      return handleConfirmation(tmpDir, state, userMessage, {
-        confirmedStep: "interests",
-        retryStep: "ageRange",
-        nextMessage: "请描述这个角色的兴趣方向，可以自由描述，不需要使用特定格式。",
-        retryMessage: "请重新告诉我这个角色的年龄段。",
-      });
+      state.fields.ageRange = userMessage.trim();
+      state.step = "interests";
+      await saveState(tmpDir, state);
+      await saveDraft(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          `已记录年龄段：${state.fields.ageRange}`,
+          "",
+          "请描述这个角色的兴趣方向，可以自由描述，不需要使用特定格式。",
+        ].join("\n")
+      );
 
     case "interests": {
       const extracted = await extractInterests(userMessage, samplingFn);
-      return setPendingAndAskForConfirmation(
-        tmpDir,
+      state.fields.interests = normalizeStringArray(extracted.value);
+      state.step = "traits";
+      await saveState(tmpDir, state);
+      await saveDraft(tmpDir, state);
+      return toolResponse(
         state,
-        "interests",
-        extracted.value,
-        "interestsConfirm",
-        extracted.assistantMessage
+        [
+          extracted.assistantMessage,
+          "",
+          "请描述这个角色的性格特质，可以自由描述，不需要使用特定格式。",
+        ].join("\n")
       );
     }
-
-    case "interestsConfirm":
-      return handleConfirmation(tmpDir, state, userMessage, {
-        confirmedStep: "traits",
-        retryStep: "interests",
-        nextMessage: "请描述这个角色的性格特质，可以自由描述，不需要使用特定格式。",
-        retryMessage: "请重新描述这个角色的兴趣方向。",
-      });
 
     case "traits": {
       const extracted = await extractTraits(userMessage, samplingFn);
-      return setPendingAndAskForConfirmation(
-        tmpDir,
+      state.fields.traits = normalizeStringArray(extracted.value);
+      state.step = "platform";
+      await saveState(tmpDir, state);
+      await saveDraft(tmpDir, state);
+      return toolResponse(
         state,
-        "traits",
-        extracted.value,
-        "traitsConfirm",
-        extracted.assistantMessage
+        [
+          extracted.assistantMessage,
+          "",
+          "请问这个角色主要用于评论哪个平台的内容？例如：微信公众号、小红书、Instagram、Twitter/X、YouTube、Reddit。",
+        ].join("\n")
       );
     }
 
-    case "traitsConfirm":
-      return handleConfirmation(tmpDir, state, userMessage, {
-        confirmedStep: "platform",
-        retryStep: "traits",
-        nextMessage:
-          "请问这个角色主要用于评论哪个平台的内容？例如：微信公众号、小红书、Instagram、Twitter/X、YouTube、Reddit。",
-        retryMessage: "请重新描述这个角色的性格特质。",
-      });
-
     case "platform":
-      return setPendingAndAskForConfirmation(
-        tmpDir,
-        state,
-        "platform",
-        userMessage.trim(),
-        "platformConfirm"
-      );
-
-    case "platformConfirm":
-      return handleConfirmation(tmpDir, state, userMessage, {
-        confirmedStep: "finalConfirm",
-        retryStep: "platform",
-        nextMessage: buildFinalConfirmationMessage(state),
-        retryMessage: "请重新告诉我这个角色主要用于评论哪个平台的内容。",
-      });
+      state.fields.platform = userMessage.trim();
+      state.step = "finalConfirm";
+      await saveState(tmpDir, state);
+      await saveDraft(tmpDir, state);
+      return toolResponse(state, buildFinalConfirmationMessage(state));
 
     case "finalConfirm":
-      if (!isAffirmative(userMessage)) {
-        state.step = "platform";
-        state.pendingField = undefined;
-        state.pendingValue = undefined;
-        await saveState(tmpDir, state);
-        return toolResponse(state, "好的。请告诉我需要修改的平台，或重新输入常用平台。");
+      if (isAffirmative(userMessage)) {
+        return completeWizard(skillsDir, tmpDir, state, samplingFn);
       }
-      return completeWizard(skillsDir, tmpDir, state, samplingFn);
+
+      {
+        const modified = await applyFinalModification(state, userMessage, samplingFn);
+        if (!modified) {
+          return toolResponse(state, "请说明要修改哪个字段：年龄段、兴趣方向、性格特质或常用平台。");
+        }
+        await saveState(tmpDir, state);
+        await saveDraft(tmpDir, state);
+        return toolResponse(
+          state,
+          [`已更新${fieldLabel(modified)}。`, "", buildFinalConfirmationMessage(state)].join("\n")
+        );
+      }
 
     case "completed":
       return toolResponse(state, "这个人设创建流程已经完成。需要创建新角色时，请重新开始一个会话。");
   }
 }
 
-async function setPendingAndAskForConfirmation(
-  tmpDir: string,
-  state: WizardState,
-  field: DraftField,
-  value: string | string[],
-  nextStep: WizardStep,
-  assistantMessage?: string
-): Promise<ToolResult> {
-  state.pendingField = field;
-  state.pendingValue = value;
-  state.step = nextStep;
-  await saveState(tmpDir, state);
-
-  return toolResponse(
-    state,
-    assistantMessage || buildConfirmationMessage(field, value)
-  );
-}
-
-async function handleConfirmation(
-  tmpDir: string,
+async function applyFinalModification(
   state: WizardState,
   userMessage: string,
-  options: {
-    confirmedStep: WizardStep;
-    retryStep: WizardStep;
-    nextMessage: string;
-    retryMessage: string;
-  }
-): Promise<ToolResult> {
-  if (!isAffirmative(userMessage)) {
-    state.step = options.retryStep;
-    state.pendingField = undefined;
-    state.pendingValue = undefined;
-    await saveState(tmpDir, state);
-    return toolResponse(state, options.retryMessage);
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<DraftField | undefined> {
+  const field = detectModifiedField(userMessage);
+  if (!field) return undefined;
+
+  const valueText = extractModificationValue(userMessage, field);
+  if (!valueText) return undefined;
+
+  switch (field) {
+    case "ageRange":
+      state.fields.ageRange = valueText;
+      break;
+    case "interests": {
+      const extracted = await extractInterests(valueText, samplingFn);
+      state.fields.interests = normalizeStringArray(extracted.value);
+      break;
+    }
+    case "traits": {
+      const extracted = await extractTraits(valueText, samplingFn);
+      state.fields.traits = normalizeStringArray(extracted.value);
+      break;
+    }
+    case "platform":
+      state.fields.platform = valueText;
+      break;
   }
 
-  if (!state.pendingField || state.pendingValue === undefined) {
-    throw new Error("当前会话缺少待确认字段。");
-  }
-
-  (state.fields as Record<string, string | string[]>)[state.pendingField] = state.pendingValue;
-  state.pendingField = undefined;
-  state.pendingValue = undefined;
-  state.step = options.confirmedStep;
-  await saveState(tmpDir, state);
-  await saveDraft(tmpDir, state);
-
-  return toolResponse(state, options.nextMessage);
+  state.step = "finalConfirm";
+  return field;
 }
 
 async function completeWizard(
@@ -286,7 +254,7 @@ async function extractInterests(
   if (samplingFn) {
     const json = await runJsonExtraction(samplingFn, {
       systemPrompt:
-        "你是字段提炼器。请把用户对兴趣方向的自然语言描述提炼为最多 3 个中文短标签，并严格输出 JSON：{\"interests\":[\"标签\"],\"assistantMessage\":\"确认话术\"}。不要输出 markdown。",
+        "你是字段提炼器。请把用户对兴趣方向的自然语言描述提炼为最多 3 个中文短标签，并严格输出 JSON：{\"interests\":[\"标签\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的标签，不要要求用户确认。不要输出 markdown。",
       userMessage,
     });
     const interests = normalizeStringArray(json.interests).slice(0, 3);
@@ -295,8 +263,8 @@ async function extractInterests(
         value: interests,
         assistantMessage:
           typeof json.assistantMessage === "string"
-            ? json.assistantMessage
-            : `我帮你总结为以下标签：${interests.join("、")}。确认没问题吗？如需调整请直接告诉我。`,
+            ? sanitizeStepAssistantMessage(json.assistantMessage)
+            : `我帮你总结为以下标签：${interests.join("、")}。`,
       };
     }
   }
@@ -304,7 +272,7 @@ async function extractInterests(
   const interests = splitUserText(userMessage, 3);
   return {
     value: interests,
-    assistantMessage: `我帮你总结为以下标签：${interests.join("、")}。确认没问题吗？如需调整请直接告诉我。`,
+    assistantMessage: `我帮你总结为以下标签：${interests.join("、")}。`,
   };
 }
 
@@ -315,7 +283,7 @@ async function extractTraits(
   if (samplingFn) {
     const json = await runJsonExtraction(samplingFn, {
       systemPrompt:
-        "你是字段提炼器。请把用户对性格特质的自然语言描述提炼为最多 4 条「特质 → 行为描述」字符串，并严格输出 JSON：{\"traits\":[\"特质 → 因此当 X 时，会 Y\"],\"assistantMessage\":\"确认话术\"}。不要输出 markdown。",
+        "你是字段提炼器。请把用户对性格特质的自然语言描述提炼为最多 4 条「特质 → 行为描述」字符串，并严格输出 JSON：{\"traits\":[\"特质 → 因此当 X 时，会 Y\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的性格特质，不要要求用户确认。不要输出 markdown。",
       userMessage,
     });
     const traits = normalizeStringArray(json.traits).slice(0, 4).map(normalizeTrait);
@@ -324,8 +292,8 @@ async function extractTraits(
         value: traits,
         assistantMessage:
           typeof json.assistantMessage === "string"
-            ? json.assistantMessage
-            : `我帮你总结为以下性格特质：\n${traits.map((t) => `- ${t}`).join("\n")}\n确认没问题吗？如需调整请直接告诉我。`,
+            ? sanitizeStepAssistantMessage(json.assistantMessage)
+            : `我帮你总结为以下性格特质：\n${traits.map((t) => `- ${t}`).join("\n")}`,
       };
     }
   }
@@ -333,7 +301,7 @@ async function extractTraits(
   const traits = splitUserText(userMessage, 4).map(normalizeTrait);
   return {
     value: traits,
-    assistantMessage: `我帮你总结为以下性格特质：\n${traits.map((t) => `- ${t}`).join("\n")}\n确认没问题吗？如需调整请直接告诉我。`,
+    assistantMessage: `我帮你总结为以下性格特质：\n${traits.map((t) => `- ${t}`).join("\n")}`,
   };
 }
 
@@ -452,7 +420,6 @@ function toolResponse(state: WizardState, assistantMessage: string): ToolResult 
           "workflow: create_persona",
           `currentStep: ${state.step}`,
           `completedFields: ${Object.keys(state.fields).join(", ") || "none"}`,
-          state.pendingField ? `pendingField: ${state.pendingField}` : undefined,
           "```",
         ]
           .filter(Boolean)
@@ -462,31 +429,68 @@ function toolResponse(state: WizardState, assistantMessage: string): ToolResult 
   };
 }
 
-function buildConfirmationMessage(field: DraftField, value: string | string[]): string {
-  const rendered = Array.isArray(value) ? value.join("、") : value;
-  const labels: Record<DraftField, string> = {
-    ageRange: "年龄段",
-    interests: "兴趣方向",
-    traits: "性格特质",
-    platform: "常用平台",
-  };
-  if (field === "traits" && Array.isArray(value)) {
-    return `我帮你总结为以下内容：\n性格特质：\n${value.map((item) => `- ${item}`).join("\n")}\n确认没问题吗？如需调整请直接告诉我。`;
-  }
-  return `${labels[field]}：${rendered}，确认没问题吗？`;
-}
-
 function buildFinalConfirmationMessage(state: WizardState): string {
   const fields = state.fields;
   return [
-    "所有信息已收集完毕，确认没有问题的话，我就开始创建角色了。",
+    "所有信息已收集完毕，请确认是否创建角色。",
     "",
     `年龄段：${fields.ageRange || ""}`,
     `兴趣方向：${fields.interests?.join("、") || ""}`,
     `常用平台：${fields.platform || ""}`,
     "性格特质：",
     ...(fields.traits || []).map((trait) => `- ${trait}`),
+    "",
+    "如需修改，请直接说：年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成...",
+    "确认无误请回复：确认创建",
   ].join("\n");
+}
+
+function detectModifiedField(input: string): DraftField | undefined {
+  if (/年龄|年龄段|\d+\s*[-到至]\s*\d+\s*岁|岁/.test(input)) return "ageRange";
+  if (/兴趣|方向|标签/.test(input)) return "interests";
+  if (/性格|特质|脾气|行为/.test(input)) return "traits";
+  if (/平台|渠道|小红书|知乎|B站|公众号|微信|微博|Instagram|Reddit|YouTube|Twitter|X\b/i.test(input)) {
+    return "platform";
+  }
+  return undefined;
+}
+
+function extractModificationValue(input: string, field: DraftField): string {
+  const trimmed = input.trim();
+  const explicitMatch = trimmed.match(/(?:改成|改为|修改为|换成|变成|调整为|设置为|[:：])\s*(.+)$/);
+  if (explicitMatch?.[1]) return explicitMatch[1].trim();
+
+  const fieldWords: Record<DraftField, RegExp> = {
+    ageRange: /年龄段?|岁数?/g,
+    interests: /兴趣方向|兴趣|方向|标签/g,
+    traits: /性格特质|性格|特质|脾气|行为/g,
+    platform: /常用平台|平台|渠道/g,
+  };
+  const cleaned = trimmed
+    .replace(fieldWords[field], "")
+    .replace(/^(请|帮我|把|将|给我|重新)?\s*/, "")
+    .replace(/(改一下|修改一下|调整一下|改|修改|调整|换)\s*/g, "")
+    .trim();
+
+  return cleaned || trimmed;
+}
+
+function fieldLabel(field: DraftField): string {
+  const labels: Record<DraftField, string> = {
+    ageRange: "年龄段",
+    interests: "兴趣方向",
+    traits: "性格特质",
+    platform: "常用平台",
+  };
+  return labels[field];
+}
+
+function sanitizeStepAssistantMessage(input: string): string {
+  return input
+    .replace(/确认没问题吗？?如需调整请直接告诉我。?/g, "")
+    .replace(/确认没问题吗？?/g, "")
+    .replace(/如需调整请直接告诉我。?/g, "")
+    .trim();
 }
 
 function isAffirmative(input: string): boolean {
@@ -535,13 +539,9 @@ function inferPersonaName(state: WizardState): string {
 function stepNumber(state: WizardState): number {
   const order: WizardStep[] = [
     "ageRange",
-    "ageRangeConfirm",
     "interests",
-    "interestsConfirm",
     "traits",
-    "traitsConfirm",
     "platform",
-    "platformConfirm",
     "finalConfirm",
     "completed",
   ];

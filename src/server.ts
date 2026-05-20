@@ -411,7 +411,7 @@ export function createKevlarServer(): Server {
                 "",
                 "下一步：调用 create_persona_wizard 工具，并把用户回复作为 userMessage 传入。",
                 "工具返回 assistantMessage 后，将其展示给用户；用户继续回复时，带上同一个 sessionId 再次调用 create_persona_wizard。",
-                "禁止：不要跳过确认步骤，不要直接调用 create_persona，除非 create_persona_wizard 已完成最终创建。",
+                "禁止：不要跳过工具返回的下一步问题或最终确认，不要直接调用 create_persona，除非 create_persona_wizard 已完成最终创建。",
               ].join("\n"),
             },
           },
