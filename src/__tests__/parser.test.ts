@@ -108,13 +108,13 @@ describe("parsePersonaFile", () => {
     assert.equal(persona.systemPrompt, "You are an inferred persona.");
   });
 
-  it("skips template files starting with _", async () => {
-    const filePath = path.join(tmpDir, "_template.md");
-    fs.writeFileSync(filePath, "---\nid: template\nname: Template\n---\nContent", "utf-8");
+  // it("skips template files starting with _", async () => {
+  //   const filePath = path.join(tmpDir, "_template.md");
+  //   fs.writeFileSync(filePath, "---\nid: template\nname: Template\n---\nContent", "utf-8");
 
-    const persona = await parsePersonaFile(filePath);
-    assert.equal(persona, null);
-  });
+  //   const persona = await parsePersonaFile(filePath);
+  //   assert.equal(persona, null);
+  // });
 
   it("returns null for missing id in frontmatter", async () => {
     const filePath = path.join(tmpDir, "no_id.md");

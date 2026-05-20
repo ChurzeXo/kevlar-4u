@@ -291,14 +291,15 @@ export function createKevlarServer(): Server {
     const { name } = request.params;
     if (name === "create_persona") {
       return {
-        description: "引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
-        messages: [
-          {
-            role: "assistant",
-            content: { type: "text", text: SYSTEM_PROMPT }
-          }
-        ]
-      };
+			description:
+				"引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
+			messages: [
+				{
+					role: "assistant",
+					content: { type: "text", text: SYSTEM_PROMPT },
+				},
+			],
+		};
     } else if (name === "review_content") {
       return {
         description: "分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
