@@ -32,7 +32,6 @@ export interface ExecutionContext {
   content: string;
   context?: string;
   samplingFn?: SamplingFunction;
-  multiTurnSamplingFn?: MultiTurnSamplingFunction;
 }
 
 // ── Execution Result ─────────────────────────────────────────────────────────

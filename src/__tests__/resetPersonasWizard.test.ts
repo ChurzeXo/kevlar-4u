@@ -5,6 +5,7 @@ import * as path from "path";
 import * as os from "os";
 
 import { handleResetPersonasWizard } from "../tools/resetPersonasWizardTool.js";
+import { handleResetPersonas } from "../tools/resetPersonasTool.js";
 import { invalidatePersonasCache } from "../utils/parser.js";
 
 let skillsDir: string;
@@ -63,5 +64,24 @@ describe("handleResetPersonasWizard", () => {
     const restoredText = textOf(restored);
     assert.ok(restoredText.includes("系统人设恢复完成"));
     assert.ok(fs.readdirSync(skillsDir).some((f) => f.endsWith(".md")));
+  });
+});
+
+describe("handleResetPersonas (direct tool)", () => {
+  it("blocks reset when confirm is false", async () => {
+    const result = await handleResetPersonas(skillsDir, { confirm: false });
+    assert.ok(result.isError);
+    assert.ok(result.content[0]?.text.includes("二次确认"));
+    assert.equal(fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md")).length, 0);
+  });
+
+  it("writes built-in persona files when confirm is true", async () => {
+    const result = await handleResetPersonas(skillsDir, { confirm: true });
+    assert.ok(!result.isError);
+
+    const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md"));
+    assert.ok(files.includes("impatient_passerby.md"));
+    assert.ok(files.includes("keyboard_warrior.md"));
+    assert.ok(files.includes("first_time_reader.md"));
   });
 });

@@ -6,6 +6,7 @@ import * as path from "path";
 
 import { setConfigPath, readConfig } from "../execution/config.js";
 import { handleConfigureWizard } from "../tools/configureWizardTool.js";
+import { handleConfigure } from "../tools/configureTool.js";
 
 let skillsDir: string;
 let tmpDir: string;
@@ -67,5 +68,39 @@ describe("handleConfigureWizard", () => {
     assert.ok(textOf(applied).includes("配置已更新"));
     assert.equal(readConfig().mode, "mcp_sampling");
     assert.equal(readConfig().multiAgent.maxConcurrency, 5);
+  });
+});
+
+describe("handleConfigure (direct tool)", () => {
+  it("rejects invalid mode", async () => {
+    const result = await handleConfigure({ mode: "invalid_mode" as any });
+    assert.ok(result.isError);
+    assert.ok(result.content[0]?.text.includes("无效的执行模式"));
+  });
+
+  it("rejects invalid concurrency out of range", async () => {
+    const resultLow = await handleConfigure({ maxConcurrency: 0 });
+    assert.ok(resultLow.isError);
+    assert.ok(resultLow.content[0]?.text.includes("并发数必须在 1-10"));
+
+    const resultHigh = await handleConfigure({ maxConcurrency: 11 });
+    assert.ok(resultHigh.isError);
+    assert.ok(resultHigh.content[0]?.text.includes("并发数必须在 1-10"));
+  });
+
+  it("writes mode and preserves existing config", async () => {
+    await handleConfigure({ mode: "orchestration" });
+    assert.equal(readConfig().mode, "orchestration");
+
+    // Partial update preserves previous value
+    await handleConfigure({ maxConcurrency: 7 });
+    assert.equal(readConfig().mode, "orchestration");
+    assert.equal(readConfig().multiAgent.maxConcurrency, 7);
+  });
+
+  it("returns success message for valid config", async () => {
+    const result = await handleConfigure({ mode: "mcp_sampling", maxConcurrency: 5 });
+    assert.ok(!result.isError);
+    assert.ok(result.content[0]?.text.includes("配置已更新"));
   });
 });

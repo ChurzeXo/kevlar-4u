@@ -352,8 +352,22 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
 }
 
 function extractPersonaIds(input: string, personas: Persona[]): string[] {
+  // Detect exclusion intent: "不要X" / "不用X" / "排除X" / "去掉X" / "除了X"
+  const exclusionPattern = /(?:不要|不用|排除|去掉|除了)\s*([^\s，。,\.]+)/g;
+  const excluded = new Set<string>();
+  let excludeMatch: RegExpExecArray | null;
+  while ((excludeMatch = exclusionPattern.exec(input)) !== null) {
+    const term = excludeMatch[1].toLowerCase();
+    for (const persona of personas) {
+      if (persona.meta.name.toLowerCase().includes(term) || persona.meta.id.toLowerCase().includes(term)) {
+        excluded.add(persona.meta.id);
+      }
+    }
+  }
+
   const selected: string[] = [];
   for (const persona of personas) {
+    if (excluded.has(persona.meta.id)) continue;
     const idMatch = input.includes(persona.meta.id);
     // For very short names (≤2 chars), require exact match to prevent false positives
     // e.g. persona named "好" should not match "这篇不好"

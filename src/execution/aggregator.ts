@@ -155,10 +155,21 @@ export const DEFAULT_TOKEN_BUDGET = {
   per_persona: 10_000,
 };
 
-export function estimateTokenCost(personas: number, contentLength: number): number {
-  // Conservative estimate: Chinese text can be 1-2 chars/token vs English ~4 chars/token.
-  // Use ratio 3 to hedge against mixed content and CJK-heavy inputs.
-  return Math.floor(contentLength / 3) + personas * DEFAULT_TOKEN_BUDGET.per_persona;
+export function estimateTokenCost(personas: number, contentLength: number, content?: string): number {
+  // Estimate: CJK ~1-2 chars/token, English ~4 chars/token.
+  // Use content sampling to pick a ratio that avoids over- or underestimation.
+  let cjkRatio = 0.5; // default: mixed content (3 chars/token equivalent)
+  if (content) {
+    const sample = content.slice(0, 200);
+    let cjkCount = 0;
+    for (const ch of sample) {
+      if (ch >= '\u4e00' && ch <= '\u9fff') cjkCount++;
+    }
+    cjkRatio = cjkCount / Math.max(sample.length, 1);
+  }
+  // Linear interpolation: pure CJK ~2 chars/tok, pure ASCII ~4 chars/tok, mixed → blend
+  const charsPerToken = 4 - cjkRatio * 2; // 4 when 0% CJK, 2 when 100% CJK
+  return Math.floor(contentLength / Math.max(charsPerToken, 1)) + personas * DEFAULT_TOKEN_BUDGET.per_persona;
 }
 
 export function checkBudget(personas: number, contentLength: number): void {
