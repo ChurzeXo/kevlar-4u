@@ -144,6 +144,7 @@ kevlar/
 │   ├── _template.md
 │   ├── impatient_passerby.md
 │   ├── keyboard_warrior.md
+│   ├── first_time_reader.md
 │   └── tmp/                         # 运行时会话状态，测试或运行时生成
 ├── src/
 │   ├── index.ts                     # stdio server 入口
@@ -252,7 +253,9 @@ node /ABSOLUTE/PATH/TO/kevlar/dist/index.js
 ```json
 {
   "mode": "auto",
-  "maxConcurrency": 3
+  "multiAgent": {
+    "maxConcurrency": 3
+  }
 }
 ```
 

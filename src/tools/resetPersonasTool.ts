@@ -404,7 +404,7 @@ const BUILTIN_PERSONAS: Array<{
 export const resetPersonasToolDefinition: Tool = {
   name: "reset_personas",
   description:
-    "恢复系统内置的默认批评人设。如果有内置角色被误删或损坏，执行此工具将重新创建它们。已有的内置角色文件会被覆盖。",
+    "【高风险操作，无确认步骤】恢复系统内置的默认批评人设。推荐使用 reset_personas_wizard 代替。如果有内置角色被误删或损坏，执行此工具将重新创建它们。已有的内置角色文件会被覆盖。",
   inputSchema: {
     type: "object" as const,
     properties: {

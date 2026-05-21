@@ -1,5 +1,8 @@
 export { listPersonasToolDefinition, handleListPersonas } from "./listPersonasTool.js";
-export { createPersonaToolDefinition, handleCreatePersona, updatePersonaDraftToolDefinition, handleUpdatePersonaDraft, deletePersonaDraftToolDefinition, handleDeletePersonaDraft, SYSTEM_PROMPT } from "./createPersonaTool.js";
+// NOTE: CREATE_PERSONA_STEP_PROMPT_TEMPLATE and WIZARD_PROMPT_TEMPLATE are intentionally
+// NOT re-exported here. They are legacy compatibility artifacts kept inside createPersonaTool.ts
+// for reference only. New flows must go through create_persona_wizard (server-side state machine).
+export { createPersonaToolDefinition, handleCreatePersona, updatePersonaDraftToolDefinition, handleUpdatePersonaDraft, deletePersonaDraftToolDefinition, handleDeletePersonaDraft } from "./createPersonaTool.js";
 export type { CreatePersonaInput, UpdatePersonaDraftInput, DeletePersonaDraftInput } from "./createPersonaTool.js";
 export { reviewToolDefinition, handleReviewContent } from "./reviewTool.js";
 export type { ReviewInput } from "./reviewTool.js";

@@ -110,4 +110,49 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(executedText.includes("视觉读者"));
     assert.ok(executedText.includes("逻辑读者"));
   });
+
+  it("does not treat '这是什么意思' as an affirmative confirmation", async () => {
+    writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
+    
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "请评测这篇内容：这是一篇新品发布文案。",
+    });
+    const sessionId = extractSessionId(textOf(started));
+    
+    // Select persona
+    await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "视觉读者",
+    });
+
+    // Try to confirm with ambiguous word containing "是"
+    const executed = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "这是什么意思",
+    });
+
+    const executedText = textOf(executed);
+    // Should NOT execute review.
+    assert.ok(!executedText.includes("Kevlar 宿主辅助评测任务"));
+  });
+
+  it("does not falsely match short persona names", async () => {
+    // Create a persona with a very short name "好"
+    writePersona("good_reader", "好", ["小红书", "视觉"]);
+    
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "请评测这篇内容：这是一篇新品发布文案。",
+    });
+    const sessionId = extractSessionId(textOf(started));
+    
+    // User message contains "好" but is not exactly "好"
+    const selection = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "这篇不好",
+    });
+
+    const text = textOf(selection);
+    // Should NOT say "已选择：好"
+    assert.ok(!text.includes("已选择：好"));
+  });
 });

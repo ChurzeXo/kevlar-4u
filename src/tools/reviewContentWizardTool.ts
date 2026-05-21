@@ -354,7 +354,14 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
 function extractPersonaIds(input: string, personas: Persona[]): string[] {
   const selected: string[] = [];
   for (const persona of personas) {
-    if (input.includes(persona.meta.id) || input.includes(persona.meta.name)) {
+    const idMatch = input.includes(persona.meta.id);
+    // For very short names (≤2 chars), require exact match to prevent false positives
+    // e.g. persona named "好" should not match "这篇不好"
+    const nameMatch =
+      persona.meta.name.length > 2
+        ? input.includes(persona.meta.name)
+        : input.trim() === persona.meta.name;
+    if (idMatch || nameMatch) {
       selected.push(persona.meta.id);
     }
   }
@@ -363,8 +370,13 @@ function extractPersonaIds(input: string, personas: Persona[]): string[] {
 
 function isAffirmative(input: string): boolean {
   const normalized = input.trim().toLowerCase();
-  return ["确认", "是", "可以", "没问题", "开始", "执行", "对", "好", "ok", "yes", "y"].some((word) =>
-    normalized.includes(word)
+  // Short/ambiguous words require exact match to avoid false positives.
+  // e.g. "这是什么" contains "是" but should NOT be treated as affirmative.
+  const exactMatchWords = ["是", "对", "好", "y"];
+  const containsMatchWords = ["确认", "可以", "没问题", "开始", "执行", "ok", "yes"];
+  return (
+    exactMatchWords.some((w) => normalized === w) ||
+    containsMatchWords.some((w) => normalized.includes(w))
   );
 }
 

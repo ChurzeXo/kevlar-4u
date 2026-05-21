@@ -13,8 +13,9 @@ import { logger } from "../utils/logger.js";
 export const configureToolDefinition: Tool = {
   name: "configure",
   description:
-    "修改 Kevlar 运行配置（执行模式、并发数等持久化设置）。" +
-    "由 AI 在用户表达设置意图后自动调用，用户无需手动操作。",
+    "【直接写入，无确认步骤】修改 Kevlar 运行配置（执行模式、并发数等持久化设置）。" +
+    "推荐使用 configure_wizard 代替——它会先预览变更，用户确认后才写入。" +
+    "仅在脚本或测试场景下直接调用本工具。",
   inputSchema: {
     type: "object" as const,
     properties: {

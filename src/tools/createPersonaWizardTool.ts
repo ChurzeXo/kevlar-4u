@@ -252,20 +252,27 @@ async function extractInterests(
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ExtractionResult> {
   if (samplingFn) {
-    const json = await runJsonExtraction(samplingFn, {
-      systemPrompt:
-        "你是字段提炼器。请把用户对兴趣方向的自然语言描述提炼为最多 3 个中文短标签，并严格输出 JSON：{\"interests\":[\"标签\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的标签，不要要求用户确认。不要输出 markdown。",
-      userMessage,
-    });
-    const interests = normalizeStringArray(json.interests).slice(0, 3);
-    if (interests.length > 0) {
-      return {
-        value: interests,
-        assistantMessage:
-          typeof json.assistantMessage === "string"
-            ? sanitizeStepAssistantMessage(json.assistantMessage)
-            : `我帮你总结为以下标签：${interests.join("、")}。`,
-      };
+    try {
+      const json = await runJsonExtraction(samplingFn, {
+        systemPrompt:
+          "你是字段提炼器。请把用户对兴趣方向的自然语言描述提炼为最多 3 个中文短标签，并严格输出 JSON：{\"interests\":[\"标签\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的标签，不要要求用户确认。不要输出 markdown。",
+        userMessage,
+      });
+      const interests = normalizeStringArray(json.interests).slice(0, 3);
+      if (interests.length > 0) {
+        return {
+          value: interests,
+          assistantMessage:
+            typeof json.assistantMessage === "string"
+              ? sanitizeStepAssistantMessage(json.assistantMessage)
+              : `我帮你总结为以下标签：${interests.join("、")}。`,
+        };
+      }
+    } catch (err) {
+      logger.warn("Sampling extraction failed for interests, falling back to heuristic", {
+        event: "sampling_interests_fallback",
+        error: String(err),
+      });
     }
   }
 
@@ -281,20 +288,27 @@ async function extractTraits(
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ExtractionResult> {
   if (samplingFn) {
-    const json = await runJsonExtraction(samplingFn, {
-      systemPrompt:
-        "你是字段提炼器。请把用户对性格特质的自然语言描述提炼为最多 4 条「特质 → 行为描述」字符串，并严格输出 JSON：{\"traits\":[\"特质 → 因此当 X 时，会 Y\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的性格特质，不要要求用户确认。不要输出 markdown。",
-      userMessage,
-    });
-    const traits = normalizeStringArray(json.traits).slice(0, 4).map(normalizeTrait);
-    if (traits.length > 0) {
-      return {
-        value: traits,
-        assistantMessage:
-          typeof json.assistantMessage === "string"
-            ? sanitizeStepAssistantMessage(json.assistantMessage)
-            : `我帮你总结为以下性格特质：\n${traits.map((t) => `- ${t}`).join("\n")}`,
-      };
+    try {
+      const json = await runJsonExtraction(samplingFn, {
+        systemPrompt:
+          "你是字段提炼器。请把用户对性格特质的自然语言描述提炼为最多 4 条「特质 → 行为描述」字符串，并严格输出 JSON：{\"traits\":[\"特质 → 因此当 X 时，会 Y\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的性格特质，不要要求用户确认。不要输出 markdown。",
+        userMessage,
+      });
+      const traits = normalizeStringArray(json.traits).slice(0, 4).map(normalizeTrait);
+      if (traits.length > 0) {
+        return {
+          value: traits,
+          assistantMessage:
+            typeof json.assistantMessage === "string"
+              ? sanitizeStepAssistantMessage(json.assistantMessage)
+              : `我帮你总结为以下性格特质：\n${traits.map((t) => `- ${t}`).join("\n")}`,
+        };
+      }
+    } catch (err) {
+      logger.warn("Sampling extraction failed for traits, falling back to heuristic", {
+        event: "sampling_traits_fallback",
+        error: String(err),
+      });
     }
   }
 
@@ -495,8 +509,13 @@ function sanitizeStepAssistantMessage(input: string): string {
 
 function isAffirmative(input: string): boolean {
   const normalized = input.trim().toLowerCase();
-  return ["确认", "是", "可以", "没问题", "对", "好", "ok", "yes", "y"].some((word) =>
-    normalized.includes(word)
+  // Short/ambiguous words require exact match to avoid false positives.
+  // e.g. "确认没问题" should match via containsMatchWords; "这是什么" should NOT match.
+  const exactMatchWords = ["是", "对", "好", "y"];
+  const containsMatchWords = ["确认", "可以", "没问题", "ok", "yes"];
+  return (
+    exactMatchWords.some((w) => normalized === w) ||
+    containsMatchWords.some((w) => normalized.includes(w))
   );
 }
 

@@ -118,4 +118,33 @@ describe("handleCreatePersonaWizard fallback state machine", () => {
     const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
     assert.equal(draft.fields.ageRange, "30-35岁（职场中坚）");
   });
+
+  it("falls back to heuristic if samplingFn returns invalid JSON", async () => {
+    const samplingFn: MultiTurnSamplingFunction = async () => ({
+      content: "This is not JSON",
+    });
+
+    const started = await handleCreatePersonaWizard(skillsDir, tmpDir, {
+      userMessage: "开始创建人设",
+    });
+    const sessionId = extractSessionId(textOf(started));
+
+    await handleCreatePersonaWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "25-30岁",
+    });
+
+    // Should not throw, should fall back
+    const extracted = await handleCreatePersonaWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "设计、摄影",
+      samplingFn,
+    });
+
+    assert.ok(textOf(extracted).includes("currentStep: traits"));
+    const draftPath = path.join(tmpDir, `${sessionId}_draft.json`);
+    const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
+    // Heuristic fallback should extract "设计" and "摄影"
+    assert.ok(draft.fields.interests.length > 0);
+  });
 });

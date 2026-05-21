@@ -55,14 +55,25 @@ export function readConfig(): KevlarConfig {
     return { ...DEFAULT_CONFIG };
   }
 
+  let result: KevlarConfig;
   try {
     const raw = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<KevlarConfig>;
-    return { ...DEFAULT_CONFIG, ...parsed };
+    result = { ...DEFAULT_CONFIG, ...parsed };
   } catch {
     // Config doesn't exist or is invalid - use defaults
-    return { ...DEFAULT_CONFIG };
+    result = { ...DEFAULT_CONFIG };
   }
+
+  const envMaxConcurrency = process.env.KEVLAR_MAX_CONCURRENT;
+  if (envMaxConcurrency) {
+    const parsed = parseInt(envMaxConcurrency, 10);
+    if (!isNaN(parsed) && isValidConcurrency(parsed)) {
+      result.multiAgent = { ...result.multiAgent, maxConcurrency: parsed };
+    }
+  }
+
+  return result;
 }
 
 export async function readConfigAsync(): Promise<KevlarConfig> {

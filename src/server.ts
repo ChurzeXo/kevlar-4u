@@ -238,7 +238,7 @@ export function createKevlarServer(): Server {
           return await handleListPersonas(skillsDir);
         }
 
-                case "update_persona_draft": {
+        case "update_persona_draft": {
           if (!args || typeof args !== "object") throw new Error("需要提供参数");
           return await handleUpdatePersonaDraft(tmpDir, args as unknown as UpdatePersonaDraftInput);
         }
