@@ -12,6 +12,7 @@ import { readConfig } from "../config.js";
 import { getRateLimiter, withRetry } from "../limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "../aggregator.js";
 import { logger } from "../../utils/logger.js";
+import { wrapContent } from "../../utils/sanitize.js";
 
 export const MODE: ExecutionMode = "mcp_sampling";
 
@@ -181,7 +182,8 @@ async function executePersonaReview(
 }
 
 function buildUserMessage(content: string, contextNote?: string): string {
-  let message = `请对以下内容进行评论：\n\n${content}`;
+  const wrapped = wrapContent(content);
+  let message = `请对以下内容进行评论：\n\n${wrapped}`;
   if (contextNote) {
     message += `\n\n**发布平台 & 目标受众背景**：${contextNote}`;
   }

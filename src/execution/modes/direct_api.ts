@@ -11,6 +11,7 @@ import { readConfig } from "../config.js";
 import { getRateLimiter, withRetry } from "../limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "../aggregator.js";
 import { logger } from "../../utils/logger.js";
+import { scanForCredentials, wrapContent } from "../../utils/sanitize.js";
 
 export const MODE: ExecutionMode = "direct_api";
 
@@ -112,7 +113,6 @@ async function callAnthropic(apiKey: string, request: LlmRequest): Promise<LlmRe
       "Content-Type": "application/json",
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify({
       model: request.model || "claude-3-5-sonnet-20241022",
@@ -354,11 +354,21 @@ async function executePersonaReview(
     temperature: 0.7,
   });
 
+  const leaked = scanForCredentials(response.content);
+  if (leaked.length > 0) {
+    logger.warn("Credential pattern detected in LLM response", {
+      event: "credential_leak_detected",
+      personaId: persona.meta.id,
+      patterns: leaked,
+    });
+  }
+
   return response.content;
 }
 
 function buildUserMessage(content: string, contextNote?: string): string {
-  let message = `请对以下内容进行评论：\n\n${content}`;
+  const wrapped = wrapContent(content);
+  let message = `请对以下内容进行评论：\n\n${wrapped}`;
   if (contextNote) {
     message += `\n\n**发布平台 & 目标受众背景**：${contextNote}`;
   }

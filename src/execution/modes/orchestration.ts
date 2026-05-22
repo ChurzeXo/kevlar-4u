@@ -9,6 +9,7 @@
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
+import { wrapContent } from "../../utils/sanitize.js";
 
 export const MODE: ExecutionMode = "orchestration";
 
@@ -112,6 +113,7 @@ function buildPersonaBlock(
     ? `\n**发布平台 & 目标受众背景**：${contextNote}`
     : "";
 
+  const safeContent = wrapContent(content);
   return `## 第 ${index} 号子代理：${persona.meta.name}
 
 **角色描述**：${persona.meta.description}
@@ -123,9 +125,7 @@ ${persona.systemPrompt}
 </系统人设结束>
 
 **待评审内容**：
-<content>
-${content}
-</content>${contextSection}
+${safeContent}${contextSection}
 
 请严格按照该人设要求的输出格式作答。`;
 }

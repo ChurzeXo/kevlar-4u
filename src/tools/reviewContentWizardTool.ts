@@ -5,6 +5,7 @@ import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
+import { estimateTokenCost } from "../execution/aggregator.js";
 import { logger } from "../utils/logger.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
@@ -174,7 +175,8 @@ async function handleSelectionConfirmation(
       .filter((p) => explicitIds.includes(p.meta.id))
       .map((p) => p.meta.name)
       .join("、");
-    return toolResponse(state, `已选择：${selectedNames}。确认开始评测吗？`);
+    const costEstimate = estimateTokenCost(explicitIds.length, state.content.length);
+    return toolResponse(state, `已选择：${selectedNames}。\n预估 Token 消耗：约 ${costEstimate.toLocaleString()} tokens\n确认开始评测吗？`);
   }
 
   if (!isAffirmative(userMessage)) {
