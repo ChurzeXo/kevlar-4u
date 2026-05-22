@@ -2,8 +2,6 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
@@ -51,7 +49,6 @@ import {
   handleReviewContentWizard,
   ReviewWizardInput,
 } from "./tools/index.js";
-import { REVIEW_DISPATCHER_PROMPT } from "./prompts/reviewDispatcherPrompt.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
 import { isSamplingSupported, setClientInfo } from "./execution/client.js";
@@ -365,70 +362,6 @@ export function createKevlarServer(): Server {
       });
       return formatErrorResponse(err);
     }
-  });
-
-  // ── Prompts: list prompts ───────────────────────────────────────────────
-  server.setRequestHandler(ListPromptsRequestSchema, async () => {
-    return {
-      prompts: [
-        {
-          name: "create_persona",
-          title: "虚拟读者人设搭建系统 (Legacy Fallback)",
-          description: "【仅用于不支持 Sampling 的旧版客户端的降级方案】引导用户以阶段式对话收集输入，并创建高精度评论员人设的系统提示词",
-        },
-        {
-          name: "review_content",
-          title: "内容评测调度引擎 (Legacy Fallback)",
-          description: "【仅用于不支持 Sampling 的旧版客户端的降级方案】分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
-        }
-      ]
-    };
-  });
-
-  // ── Prompts: get prompt ──────────────────────────────────────────────────
-  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-    const { name, arguments: promptArgs } = request.params;
-    if (name === "create_persona") {
-      const args = (promptArgs || {}) as Record<string, string>;
-      const currentStep = args.currentStep || "ageRange";
-      const sessionId = args.sessionId || "未开始";
-      const knownFields = args.knownFields || "none";
-      return {
-        description:
-          "【降级方案】启动或恢复 Kevlar 人设创建工作流的动态上下文提示",
-        messages: [
-          {
-            role: "user",
-            content: {
-              type: "text",
-              text: [
-                "你正在协助执行 Kevlar 的 create_persona 工作流。",
-                "不要自行扮演完整的角色构建引擎；流程状态、字段校验和写入由 Kevlar 工具负责。",
-                "",
-                `sessionId: ${sessionId}`,
-                `currentStep: ${currentStep}`,
-                `knownFields: ${knownFields}`,
-                "",
-                "下一步：调用 create_persona_wizard 工具，并把用户回复作为 userMessage 传入。",
-                "工具返回 assistantMessage 后，将其展示给用户；用户继续回复时，带上同一个 sessionId 再次调用 create_persona_wizard。",
-                "禁止：不要跳过工具返回的下一步问题或最终确认，不要直接调用 create_persona，除非 create_persona_wizard 已完成最终创建。",
-              ].join("\n"),
-            },
-          },
-        ],
-      };
-    } else if (name === "review_content") {
-      return {
-        description: "【降级方案】分析用户提交的内容并匹配最合适的评论员进行内容评测的系统提示词",
-        messages: [
-          {
-            role: "assistant",
-            content: { type: "text", text: REVIEW_DISPATCHER_PROMPT }
-          }
-        ]
-      };
-    }
-    throw new Error(`Unknown prompt: ${name}`);
   });
 
   return server;

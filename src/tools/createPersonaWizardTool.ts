@@ -18,7 +18,7 @@ const AGE_RANGE_OPTIONS = [
 export const createPersonaWizardToolDefinition: Tool = {
   name: "create_persona_wizard",
   description:
-    "推进一个由 Kevlar 服务端维护状态的人设创建工作流。每次调用会根据 session 状态返回唯一下一步问题、确认请求或创建结果；宿主 AI 应展示 assistantMessage，并在用户回复后继续调用本工具。",
+    "启动或继续一个完整的人设创建工作流。完全独立，不涉及内容评测流程。首次调用不带 sessionId，工具会引导用户逐步完成年龄段、兴趣方向、性格特质、常用平台等信息收集。每次返回 assistantMessage 展示给用户，用户回复后带上 sessionId 再次调用。",
   inputSchema: {
     type: "object",
     properties: {

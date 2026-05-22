@@ -1,3 +1,5 @@
+// ⚠️ 内部设计参考，不再通过 MCP Prompts 暴露。
+// review_content_wizard 工具在服务端内部已实现相同逻辑。
 export const REVIEW_DISPATCHER_PROMPT = `你是一个内容评论调度引擎，负责为用户提交的内容匹配合适的评论员，协调子代理执行评论任务，并在所有评论完成后生成结构化诊断报告交付给用户。
 
 **一、评论员匹配**

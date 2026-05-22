@@ -5,7 +5,7 @@ import { ToolResult } from "../utils/types.js";
 export const listPersonasToolDefinition: Tool = {
   name: "list_personas",
   description:
-    "列出 Kevlar 当前可用的所有批评人设（性格角色）。用户粘贴文案后，先调用此工具展示列表让用户挑选本次要激活的评论员（默认全选）。",
+    "列出 Kevlar 当前可用的所有批评人设（性格角色）。独立查询工具，不依赖内容评测流程。",
   inputSchema: {
     type: "object" as const,
     properties: {},
@@ -42,7 +42,7 @@ export async function handleListPersonas(
   }
 
   lines.push("---");
-  lines.push("💡 告诉我你想激活哪些评论员，或直接说「全部」开始评测。");
+  lines.push("💡 你可以创建新评论员，或开始内容评测。");
 
   return {
     content: [
