@@ -7,6 +7,35 @@ import {
 	PersonaMeta,
 } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
+import {
+	extractShortTrait,
+	mapTraitToKey,
+	mapPlatformToKey,
+	slugify,
+} from "../utils/personaIdMaps.js";
+
+// ── Description creation principles ─────────────────────────────────────────
+// These norms govern the YAML `description` field for every persona:
+//
+//   1. LANGUAGE   — description uses the same language as the user's input
+//   2. SCENARIO   — describe what the persona DOES with content, don't just
+//                   dump collected fields
+//   3. CONCRETE   — use specific behavioural details (e.g. "放大检查排版"),
+//                   not abstract labels (e.g. "专业")
+//   4. CONCISE    — one sentence, under 120 characters
+//
+// The template below is the baseline; when Sampling is available, the AI
+// SHOULD regenerate a richer description that honours these same principles.
+// ────────────────────────────────────────────────────────────────────────────
+export const DESCRIPTION_PRINCIPLES = {
+	LANGUAGE:
+		"Use the same language as the user's input for the description",
+	SCENARIO:
+		"Describe the persona's content-consumption behaviour first; don't just list collected fields",
+	CONCRETE:
+		"Use specific, observable behaviours instead of abstract labels",
+	CONCISE: "Single sentence, under 120 characters",
+} as const;
 
 export const updatePersonaDraftToolDefinition: Tool = {
 	name: "update_persona_draft",
@@ -173,12 +202,37 @@ export async function handleCreatePersona(
 		}
 	}
 
-	const id =
+	const baseId =
 		input.id ||
-		input.name.replace(/[^\p{L}\p{N}_]/gu, "").toLowerCase() ||
+		generateIdFromDraft(draft) ||
+		input.name.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase() ||
 		`persona_${Math.random().toString(36).substring(2, 8)}`;
 
-	// Dynamically infer description and tags from draft fields if not provided
+	const id = input.id ? baseId : applyDedup(skillsDir, baseId);
+
+	if (!/^[a-z0-9_]+$/.test(id)) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `❌ 名称格式不合法，只能包含小写英文字母、数字和下划线。`,
+				},
+			],
+			isError: true,
+		};
+	}
+
+	const fileName = `${id}.md`;
+	const filePath = path.join(skillsDir, fileName);
+
+	if (!validateWritePath(filePath, skillsDir)) {
+		return {
+			content: [{ type: "text", text: `❌ 非法路径访问被拒绝。` }],
+			isError: true,
+		};
+	}
+
+	// ── Description (see DESCRIPTION_PRINCIPLES above) ──
 	let description = input.description;
 	if (
 		!description &&
@@ -201,40 +255,6 @@ export async function handleCreatePersona(
 	}
 	if (!tags) {
 		tags = [];
-	}
-
-	if (!/^[a-z0-9_]+$/.test(id)) {
-		return {
-			content: [
-				{
-					type: "text",
-					text: `❌ 名称格式不合法，只能包含小写英文字母、数字 and 下划线。`,
-				},
-			],
-			isError: true,
-		};
-	}
-
-	const fileName = `${id}.md`;
-	const filePath = path.join(skillsDir, fileName);
-
-	if (!validateWritePath(filePath, skillsDir)) {
-		return {
-			content: [{ type: "text", text: `❌ 非法路径访问被拒绝。` }],
-			isError: true,
-		};
-	}
-
-	if (fs.existsSync(filePath)) {
-		return {
-			content: [
-				{
-					type: "text",
-					text: `⚠️ 这个评论员名称已存在。请换个名称，或先删除旧的再创建。`,
-				},
-			],
-			isError: true,
-		};
 	}
 
 	const meta: PersonaMeta = {
@@ -321,6 +341,35 @@ export async function handleCreatePersona(
 		],
 	};
 }
+
+function generateIdFromDraft(draft: any): string | undefined {
+	if (!draft?.fields) return undefined;
+	const traits = draft.fields.traits;
+	const platform = draft.fields.platform || "";
+
+	let traitShort = "";
+	if (Array.isArray(traits) && traits.length > 0) {
+		traitShort = extractShortTrait(traits[0]);
+	}
+
+	const traitKey = mapTraitToKey(traitShort) || slugify(traitShort);
+	const platformKey = mapPlatformToKey(platform) || slugify(platform);
+
+	if (!traitKey && !platformKey) return undefined;
+	if (!traitKey) return platformKey;
+	if (!platformKey) return traitKey;
+	return `${traitKey}_${platformKey}`;
+}
+
+function applyDedup(skillsDir: string, baseId: string): string {
+	let id = baseId;
+	let counter = 1;
+	while (fs.existsSync(path.join(skillsDir, `${id}.md`))) {
+		id = `${baseId}_${counter++}`;
+	}
+	return id;
+}
+
 export interface UpdatePersonaDraftInput {
 	sessionId: string;
 	field: "ageRange" | "interests" | "traits" | "platform";
