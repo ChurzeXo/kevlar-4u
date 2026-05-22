@@ -1,4 +1,4 @@
-import { promises as fsp } from "fs";
+import { promises as fsp, readdirSync } from "fs";
 import * as path from "path";
 import matter from "gray-matter";
 import { logger } from "./logger.js";
@@ -141,7 +141,8 @@ export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
 
   let files: string[];
   try {
-    files = (await fsp.readdir(skillsDir)).filter((f) => f.endsWith(".md"));
+    files = readdirSync(skillsDir, { recursive: true })
+      .filter((f): f is string => typeof f === "string" && f.endsWith(".md"));
   } catch (err) {
     logger.error("Failed to read skills directory", {
       event: "readdir_error",
@@ -178,15 +179,8 @@ export async function loadPersonaById(
     return null;
   }
 
-  const fileName = `${sanitizedId}.md`;
-  const filePath = path.join(skillsDir, fileName);
-
-  if (!validateWritePath(filePath, skillsDir)) {
-    logger.warn("Path traversal attempt detected", { event: "path_traversal", path: filePath });
-    return null;
-  }
-
-  return parsePersonaFile(filePath);
+  const all = await loadAllPersonas(skillsDir);
+  return all.find((p) => p.meta.id === id) || null;
 }
 
 export async function loadPersonasByIds(
@@ -202,10 +196,13 @@ export async function loadPersonasByIds(
 export async function writePersonaFile(
   skillsDir: string,
   meta: PersonaMeta,
-  personaDescription: string
+  personaDescription: string,
+  subDir?: string
 ): Promise<string> {
   const fileName = `${meta.id}.md`;
-  const filePath = path.join(skillsDir, fileName);
+  const filePath = subDir
+    ? path.join(skillsDir, subDir, fileName)
+    : path.join(skillsDir, fileName);
 
   if (!validateWritePath(filePath, skillsDir)) {
     logger.warn("Path traversal attempt in writePersonaFile", {
@@ -221,7 +218,7 @@ export async function writePersonaFile(
   );
 
   try {
-    await fsp.mkdir(skillsDir, { recursive: true });
+    await fsp.mkdir(subDir ? path.join(skillsDir, subDir) : skillsDir, { recursive: true });
     await fsp.writeFile(filePath, frontmatter, "utf-8");
     logger.info("Persona file written", { event: "file_written", path: filePath, id: meta.id });
   } catch (err) {

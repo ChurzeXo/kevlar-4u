@@ -202,13 +202,15 @@ export async function handleCreatePersona(
 		}
 	}
 
+	const subDir = !input.id ? getSubDirFromDraft(draft) : undefined;
+
 	const baseId =
 		input.id ||
 		generateIdFromDraft(draft) ||
 		input.name.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase() ||
 		`persona_${Math.random().toString(36).substring(2, 8)}`;
 
-	const id = input.id ? baseId : applyDedup(skillsDir, baseId);
+	const id = input.id ? baseId : applyDedup(skillsDir, baseId, subDir);
 
 	if (!/^[a-z0-9_]+$/.test(id)) {
 		return {
@@ -218,16 +220,6 @@ export async function handleCreatePersona(
 					text: `❌ 名称格式不合法，只能包含小写英文字母、数字和下划线。`,
 				},
 			],
-			isError: true,
-		};
-	}
-
-	const fileName = `${id}.md`;
-	const filePath = path.join(skillsDir, fileName);
-
-	if (!validateWritePath(filePath, skillsDir)) {
-		return {
-			content: [{ type: "text", text: `❌ 非法路径访问被拒绝。` }],
 			isError: true,
 		};
 	}
@@ -317,7 +309,7 @@ export async function handleCreatePersona(
 	}
 
 	try {
-		await writePersonaFile(skillsDir, meta, personaDescription);
+		await writePersonaFile(skillsDir, meta, personaDescription, subDir);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		return {
@@ -361,10 +353,18 @@ function generateIdFromDraft(draft: any): string | undefined {
 	return `${traitKey}_${platformKey}`;
 }
 
-function applyDedup(skillsDir: string, baseId: string): string {
+function getSubDirFromDraft(draft: any): string | undefined {
+	if (!draft?.fields) return undefined;
+	const platform = draft.fields.platform || "";
+	const platformKey = mapPlatformToKey(platform) || slugify(platform);
+	return platformKey || undefined;
+}
+
+function applyDedup(skillsDir: string, baseId: string, subDir?: string): string {
 	let id = baseId;
 	let counter = 1;
-	while (fs.existsSync(path.join(skillsDir, `${id}.md`))) {
+	const dir = subDir ? path.join(skillsDir, subDir) : skillsDir;
+	while (fs.existsSync(path.join(dir, `${id}.md`))) {
 		id = `${baseId}_${counter++}`;
 	}
 	return id;
