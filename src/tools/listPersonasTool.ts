@@ -5,7 +5,7 @@ import { ToolResult } from "../utils/types.js";
 export const listPersonasToolDefinition: Tool = {
   name: "list_personas",
   description:
-    "列出 Kevlar 当前可用的所有批评人设（性格角色）。独立查询工具，不依赖内容评测流程。",
+    "当用户问「有哪些评论员」「列出角色」时，调用此工具。列出 Kevlar 当前可用的所有批评人设。独立查询，不触发评测流程。",
   inputSchema: {
     type: "object" as const,
     properties: {},

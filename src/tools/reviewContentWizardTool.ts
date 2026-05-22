@@ -11,7 +11,7 @@ import { logger } from "../utils/logger.js";
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
   description:
-    "推进一个由 Kevlar 服务端维护状态的内容评测工作流。首次调用时 userMessage 传入待评测内容；工具自动分析内容、推荐最匹配的评论员，用户确认后执行评测。用户也可以要求查看剩余评论员、新建评论员，或直接指定。",
+    "当用户说「审稿/评测/评论这篇/帮我看看这篇文案/内容」时，调用此工具。首次调用时 userMessage 传入待评测内容；工具自动保存内容、检查角色库、推荐最匹配的评论员，用户确认后执行评测。用户也可以在确认阶段要求查看剩余评论员、新建评论员，或直接指定人选。不会在未经用户确认评论员名单的情况下直接执行评测。",
   inputSchema: {
     type: "object",
     properties: {

@@ -8,7 +8,7 @@ import { logger } from "../utils/logger.js";
 export const resetPersonasWizardToolDefinition: Tool = {
   name: "reset_personas_wizard",
   description:
-    "推进一个由 Kevlar 服务端维护状态的默认人设恢复工作流。工具会先展示影响范围，并要求用户回复完整确认语后才执行批量恢复。",
+    "当用户说「恢复默认/重置评论员」时，调用此工具。工具重新创建被删除的内置角色（急性子路人甲、键盘侠·九段杠精、第一次听说·路人读者）。不会影响自定义角色。用户回复完整确认语后才执行。",
   inputSchema: {
     type: "object",
     properties: {

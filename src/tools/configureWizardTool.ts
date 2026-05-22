@@ -9,7 +9,7 @@ import { logger } from "../utils/logger.js";
 export const configureWizardToolDefinition: Tool = {
   name: "configure_wizard",
   description:
-    "推进一个由 Kevlar 服务端维护状态的配置修改工作流。工具会先解析并预览配置变更，用户回复完整确认语后才写入 kevlar-config.json。",
+    "当用户说「设置/配置/切换模式/改并发数」时，调用此工具。工具先预览配置变更，用户确认后才写入 kevlar-config.json。API Key 不由此工具处理，只能通过环境变量设置。",
   inputSchema: {
     type: "object",
     properties: {

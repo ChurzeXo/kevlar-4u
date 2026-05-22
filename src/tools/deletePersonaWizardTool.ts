@@ -9,7 +9,7 @@ import { logger } from "../utils/logger.js";
 export const deletePersonaWizardToolDefinition: Tool = {
   name: "delete_persona_wizard",
   description:
-    "推进一个由 Kevlar 服务端维护状态的人设删除工作流。工具会匹配候选人设、绑定删除目标，并要求用户回复具体人设名称后才执行删除。",
+    "当用户说「删除/移除评论员/人设」时，调用此工具。工具自动列出所有评论员供匹配，绑定目标后会要求用户回复完整人设名称以二次确认。用户未明确说出待删除角色名称时不会执行。",
   inputSchema: {
     type: "object",
     properties: {
