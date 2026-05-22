@@ -154,7 +154,8 @@ async function advanceWizard(
         [
           `已记录年龄段：${state.fields.ageRange}`,
           "",
-          "请描述这个角色的兴趣方向，可以自由描述，不需要使用特定格式。",
+          "第二步：请描述这个角色的兴趣方向",
+          "副标题：举几个例子，例如：美食、旅行、科技、育儿、健身……",
         ].join("\n")
       );
     }
@@ -170,7 +171,8 @@ async function advanceWizard(
         [
           extracted.assistantMessage,
           "",
-          "请描述这个角色的性格特质，可以自由描述，不需要使用特定格式。",
+          "第三步：请描述这个角色的性格特质",
+          "自由描述即可，例如：容易跟风、对价格敏感、喜欢对比评测……",
         ].join("\n")
       );
     }
@@ -186,7 +188,8 @@ async function advanceWizard(
         [
           extracted.assistantMessage,
           "",
-          "请问这个角色主要用于评论哪个平台的内容？例如：微信公众号、小红书、Instagram、Twitter/X、YouTube、Reddit。",
+          "第四步：内容主要投放平台",
+          "如果多平台投放，建议创建更多针对某一平台的虚拟评论员。",
         ].join("\n")
       );
     }
