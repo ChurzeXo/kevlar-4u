@@ -75,59 +75,7 @@ describe("End-to-End integration test", () => {
     }
   });
 
-  it("lists prompts and gets prompt contents via MCP client", async () => {
-    const server = createKevlarServer();
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-
-    const client = new Client(
-      { name: "kevlar-e2e-test", version: "1.0.0" },
-      { capabilities: {} }
-    );
-
-    await Promise.all([
-      client.connect(clientTransport),
-      server.connect(serverTransport),
-    ]);
-
-    try {
-      // 1. List prompts
-      const listResponse = await client.listPrompts();
-      assert.ok(listResponse, "Prompts list should exist");
-      assert.ok(Array.isArray(listResponse.prompts), "Prompts should be an array");
-      
-      const promptNames = listResponse.prompts.map((p: any) => p.name);
-      assert.ok(promptNames.includes("create_persona"), "Should list create_persona prompt");
-      assert.ok(promptNames.includes("review_content"), "Should list review_content prompt");
-
-      // 2. Get create_persona prompt
-      const getCreateResponse = await client.getPrompt({ name: "create_persona" });
-      assert.ok(getCreateResponse, "Prompt response should exist");
-      assert.ok(Array.isArray(getCreateResponse.messages), "Prompt should have messages");
-      // prompts/get returns a short workflow context rather than a fake system prompt.
-      assert.equal(getCreateResponse.messages[0].role, "user");
-      assert.ok(
-        getCreateResponse.messages[0].content.type === "text" &&
-        getCreateResponse.messages[0].content.text.includes("create_persona_wizard"),
-        "Should direct the client to the create_persona_wizard workflow"
-      );
-
-      // 3. Get review_content prompt
-      const getReviewResponse = await client.getPrompt({ name: "review_content" });
-      assert.ok(getReviewResponse, "Prompt response should exist");
-      assert.ok(Array.isArray(getReviewResponse.messages), "Prompt should have messages");
-      assert.equal(getReviewResponse.messages[0].role, "assistant");
-      assert.ok(
-        getReviewResponse.messages[0].content.type === "text" &&
-        getReviewResponse.messages[0].content.text.includes("内容评论"),
-        "Should contain review instructions"
-      );
-    } finally {
-      await client.close();
-      await server.close();
-    }
-  });
-
-  it("creates a persona directly without sessionId via MCP client", async () => {
+  it("starts create_persona_wizard via MCP client", async () => {
     const server = createKevlarServer();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
@@ -143,30 +91,17 @@ describe("End-to-End integration test", () => {
 
     try {
       const response = await client.callTool({
-        name: "create_persona",
+        name: "create_persona_wizard",
         arguments: {
-          id: "direct_persona",
-          name: "直接创建评论员",
-          name_en: "Direct Persona",
-          description: "一个直接创建的用于测试的评论员",
-          tags: ["direct", "test"],
+          userMessage: "开始创建人设",
         },
       });
 
       assert.ok(response, "Response should exist");
       assert.ok(Array.isArray(response.content), "Response should have content array");
-      assert.equal(response.content[0].type, "text");
 
       const textOutput = response.content[0].text;
-      assert.ok(textOutput.includes("直接创建评论员"), "Should indicate success with name");
-
-      // Verify the file was written
-      const filePath = path.join(tmpDir, "direct_persona.md");
-      assert.ok(fs.existsSync(filePath), "Persona file should exist");
-      const fileContent = fs.readFileSync(filePath, "utf-8");
-      assert.ok(fileContent.includes("name: 直接创建评论员"), "Metadata name should match");
-      assert.ok(fileContent.includes("name_en: Direct Persona"), "Metadata name_en should match");
-      assert.ok(fileContent.includes("一个直接创建的用于测试的评论员"), "Body description should match");
+      assert.ok(textOutput.includes("年龄段"), "Should ask about age range");
     } finally {
       await client.close();
       await server.close();

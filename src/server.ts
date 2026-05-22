@@ -10,7 +10,6 @@ import { fileURLToPath } from "url";
 import {
   listPersonasToolDefinition,
   handleListPersonas,
-  createPersonaToolDefinition,
   updatePersonaDraftToolDefinition,
   handleUpdatePersonaDraft,
   deletePersonaDraftToolDefinition,
@@ -205,7 +204,6 @@ export function createKevlarServer(): Server {
     return {
       tools: [
         listPersonasToolDefinition,
-        createPersonaToolDefinition,
         updatePersonaDraftToolDefinition,
         deletePersonaDraftToolDefinition,
         deletePersonaToolDefinition,
