@@ -175,7 +175,7 @@ export async function handleCreatePersona(
 
 	const id =
 		input.id ||
-		input.name.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase() ||
+		input.name.replace(/[^\p{L}\p{N}_]/gu, "").toLowerCase() ||
 		`persona_${Math.random().toString(36).substring(2, 8)}`;
 
 	// Dynamically infer description and tags from draft fields if not provided
