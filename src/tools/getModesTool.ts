@@ -13,7 +13,7 @@ import { getSamplingClientList, isSamplingSupported } from "../execution/client.
 
 export const getModesToolDefinition: Tool = {
   name: "get_execution_modes",
-  description: "查询当前可用的执行模式及配置状态。用于查看宿主辅助兜底/MCP采样/直接API三种模式的可用性。",
+  description: "当用户问「当前模式/配置/可用模式」时，调用此工具。查询宿主辅助兜底、MCP 采样、直接 API 三种执行模式的可用性及当前配置状态。",
   inputSchema: { type: "object" as const, properties: {} },
 };
 

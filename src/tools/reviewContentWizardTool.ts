@@ -18,12 +18,12 @@ export const reviewContentWizardToolDefinition: Tool = {
       sessionId: {
         type: "string",
         description:
-          "当前评测向导会话 ID。首次调用不传；继续会话时必须带回工具返回的 sessionId。",
+          "评测向导的会话标识。首次调用请留空，工具会自动生成并返回一个 sessionId。后续调用必须传入此值以继续上一次的评测会话。",
       },
       userMessage: {
         type: "string",
         description:
-          "用户在当前评测工作流步骤下的回复。首次调用时传入待评测内容或评测请求。",
+          "用户在当前步骤的回复内容。首次调用时传入待评测的完整内容或评测请求（例如用户粘贴了文案，或说「帮我审一下这段文字」）。后续步骤传入用户对工具提问的回复。",
       },
     },
     required: ["userMessage"],

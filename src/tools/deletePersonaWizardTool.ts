@@ -15,11 +15,11 @@ export const deletePersonaWizardToolDefinition: Tool = {
     properties: {
       sessionId: {
         type: "string",
-        description: "当前删除向导会话 ID。首次调用不传；继续确认时必须带回工具返回的 sessionId。",
+        description: "删除向导的会话标识。首次调用请留空，工具会自动生成并返回一个 sessionId。后续调用必须传入此值以继续上一次的删除会话。",
       },
       userMessage: {
         type: "string",
-        description: "用户在当前删除工作流步骤下的回复。",
+        description: "用户在当前步骤的回复内容。首次调用时直接传入用户原话（例如「删除急性子路人甲」），工具自动匹配目标。后续步骤传入用户对工具提问的回复。",
       },
     },
     required: ["userMessage"],

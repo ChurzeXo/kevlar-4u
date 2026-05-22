@@ -15,11 +15,11 @@ export const configureWizardToolDefinition: Tool = {
     properties: {
       sessionId: {
         type: "string",
-        description: "当前配置向导会话 ID。首次调用不传；继续确认时必须带回工具返回的 sessionId。",
+        description: "配置向导的会话标识。首次调用请留空，工具会自动生成并返回一个 sessionId。后续调用必须传入此值以继续上一次的配置会话。",
       },
       userMessage: {
         type: "string",
-        description: "用户在当前配置工作流步骤下的回复。",
+        description: "用户在当前步骤的回复内容。首次调用时传入用户原话（例如「切换到 MCP 采样模式」「并发数改成 5」），工具解析变更项并预览。后续步骤传入用户对工具提问的回复。",
       },
     },
     required: ["userMessage"],

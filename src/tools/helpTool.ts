@@ -4,7 +4,7 @@ import { ToolResult } from "../utils/types.js";
 export const helpToolDefinition: Tool = {
   name: "kevlar_help",
   description:
-    "显示 Kevlar 的完整使用帮助，包括功能说明、可用工具和常见问题。",
+    "当用户说「帮助/怎么用/说明」时，调用此工具。显示完整使用帮助，包括功能说明、可用工具和常见问题。",
   inputSchema: {
     type: "object" as const,
     properties: {},
