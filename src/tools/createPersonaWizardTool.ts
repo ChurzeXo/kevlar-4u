@@ -6,6 +6,15 @@ import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { handleCreatePersona } from "./createPersonaTool.js";
 import { logger } from "../utils/logger.js";
 
+const AGE_RANGE_OPTIONS = [
+  { value: "18岁以下", label: "18岁以下" },
+  { value: "18-24岁", label: "18-24岁" },
+  { value: "25-30岁", label: "25-30岁" },
+  { value: "30-35岁", label: "30-35岁" },
+  { value: "35-40岁", label: "35-40岁" },
+  { value: "40岁以上", label: "40岁以上" },
+];
+
 export const createPersonaWizardToolDefinition: Tool = {
   name: "create_persona_wizard",
   description:
@@ -39,10 +48,11 @@ type WizardStep =
   | "interests"
   | "traits"
   | "platform"
+  | "authorRelation"
   | "finalConfirm"
   | "completed";
 
-type DraftField = "ageRange" | "interests" | "traits" | "platform";
+type DraftField = "ageRange" | "interests" | "traits" | "platform" | "authorRelation";
 
 interface WizardState {
   sessionId: string;
@@ -86,7 +96,16 @@ export async function handleCreatePersonaWizard(
       await saveState(tmpDir, state);
       return toolResponse(
         state,
-        "请问这个角色的年龄段是？例如：18-24岁、30-35岁。"
+        [
+          "请选择这个角色的年龄段（回复编号或文字）：",
+          "",
+          "1. 18岁以下",
+          "2. 18-24岁",
+          "3. 25-30岁",
+          "4. 30-35岁",
+          "5. 35-40岁",
+          "6. 40岁以上",
+        ].join("\n")
       );
     }
     const result = await advanceWizard(skillsDir, tmpDir, state, userMessage, samplingFn);
@@ -109,8 +128,24 @@ async function advanceWizard(
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
   switch (state.step) {
-    case "ageRange":
-      state.fields.ageRange = userMessage.trim();
+    case "ageRange": {
+      const resolved = resolveAgeRange(userMessage);
+      if (!resolved) {
+        return toolResponse(
+          state,
+          [
+            "请从以下选项中选择（回复编号或文字）：",
+            "",
+            "1. 18岁以下",
+            "2. 18-24岁",
+            "3. 25-30岁",
+            "4. 30-35岁",
+            "5. 35-40岁",
+            "6. 40岁以上",
+          ].join("\n")
+        );
+      }
+      state.fields.ageRange = resolved;
       state.step = "interests";
       await saveState(tmpDir, state);
       await saveDraft(tmpDir, state);
@@ -122,6 +157,7 @@ async function advanceWizard(
           "请描述这个角色的兴趣方向，可以自由描述，不需要使用特定格式。",
         ].join("\n")
       );
+    }
 
     case "interests": {
       const extracted = await extractInterests(userMessage, samplingFn);
@@ -157,10 +193,40 @@ async function advanceWizard(
 
     case "platform":
       state.fields.platform = userMessage.trim();
+      state.step = "authorRelation";
+      await saveState(tmpDir, state);
+      await saveDraft(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          `已记录常用平台：${state.fields.platform}`,
+          "",
+          "请选择这个角色与作者的关系（回复编号或文字）：",
+          "",
+          "1. 已关注（信任阈值较高，但期望值也更高）",
+          "2. 未关注（信任阈值较低，更容易因细节问题流失注意力）",
+        ].join("\n")
+      );
+
+    case "authorRelation": {
+      const resolved = resolveAuthorRelation(userMessage);
+      if (!resolved) {
+        return toolResponse(
+          state,
+          [
+            "请从以下选项中选择（回复编号或文字）：",
+            "",
+            "1. 已关注",
+            "2. 未关注",
+          ].join("\n")
+        );
+      }
+      state.fields.authorRelation = resolved;
       state.step = "finalConfirm";
       await saveState(tmpDir, state);
       await saveDraft(tmpDir, state);
       return toolResponse(state, buildFinalConfirmationMessage(state));
+    }
 
     case "finalConfirm":
       if (isAffirmative(userMessage)) {
@@ -212,6 +278,9 @@ async function applyFinalModification(
     }
     case "platform":
       state.fields.platform = valueText;
+      break;
+    case "authorRelation":
+      state.fields.authorRelation = valueText;
       break;
   }
 
@@ -325,7 +394,7 @@ async function inferFinalFields(
 ): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "stance" | "blindSpot">> {
   const fallback = {
     culturalContext: inferCulturalContext(state),
-    authorRelation: "未关注",
+    authorRelation: state.fields.authorRelation || "未关注",
     stance: "默认质疑",
     blindSpot: "无特定盲区",
   };
@@ -335,12 +404,12 @@ async function inferFinalFields(
   try {
     const json = await runJsonExtraction(samplingFn, {
       systemPrompt:
-        "你是人设属性推断器。根据已确认字段推断 culturalContext、authorRelation、stance、blindSpot，并严格输出 JSON：{\"culturalContext\":\"...\",\"authorRelation\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。不要输出 markdown。",
+        "你是人设属性推断器。根据已确认字段推断 culturalContext、stance、blindSpot，并严格输出 JSON：{\"culturalContext\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
       userMessage: JSON.stringify(state.fields),
     });
     return {
       culturalContext: typeof json.culturalContext === "string" ? json.culturalContext : fallback.culturalContext,
-      authorRelation: typeof json.authorRelation === "string" ? json.authorRelation : fallback.authorRelation,
+      authorRelation: fallback.authorRelation,
       stance: typeof json.stance === "string" ? json.stance : fallback.stance,
       blindSpot: typeof json.blindSpot === "string" ? json.blindSpot : fallback.blindSpot,
     };
@@ -451,10 +520,11 @@ function buildFinalConfirmationMessage(state: WizardState): string {
     `年龄段：${fields.ageRange || ""}`,
     `兴趣方向：${fields.interests?.join("、") || ""}`,
     `常用平台：${fields.platform || ""}`,
+    `与作者的关系：${fields.authorRelation || ""}`,
     "性格特质：",
     ...(fields.traits || []).map((trait) => `- ${trait}`),
     "",
-    "如需修改，请直接说：年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成...",
+    "如需修改，请直接说：年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成... / 关系改成...",
     "确认无误请回复：确认创建",
   ].join("\n");
 }
@@ -466,6 +536,7 @@ function detectModifiedField(input: string): DraftField | undefined {
   if (/平台|渠道|小红书|知乎|B站|公众号|微信|微博|Instagram|Reddit|YouTube|Twitter|X\b/i.test(input)) {
     return "platform";
   }
+  if (/关系|关注|作者/.test(input)) return "authorRelation";
   return undefined;
 }
 
@@ -479,6 +550,7 @@ function extractModificationValue(input: string, field: DraftField): string {
     interests: /兴趣方向|兴趣|方向|标签/g,
     traits: /性格特质|性格|特质|脾气|行为/g,
     platform: /常用平台|平台|渠道/g,
+    authorRelation: /与作者的关系|关系|关注/g,
   };
   const cleaned = trimmed
     .replace(fieldWords[field], "")
@@ -495,6 +567,7 @@ function fieldLabel(field: DraftField): string {
     interests: "兴趣方向",
     traits: "性格特质",
     platform: "常用平台",
+    authorRelation: "与作者的关系",
   };
   return labels[field];
 }
@@ -538,6 +611,29 @@ function normalizeTrait(input: string): string {
   return `${text} → 因此在相关内容判断中会表现出这一倾向`;
 }
 
+function resolveAgeRange(input: string): string | null {
+  const trimmed = input.trim();
+  const num = parseInt(trimmed, 10);
+  if (num >= 1 && num <= AGE_RANGE_OPTIONS.length) {
+    return AGE_RANGE_OPTIONS[num - 1].value;
+  }
+  const exact = AGE_RANGE_OPTIONS.find((o) => o.value === trimmed);
+  if (exact) return exact.value;
+  const partial = AGE_RANGE_OPTIONS.find((o) => o.value.replace("岁", "") === trimmed);
+  if (partial) return partial.value;
+  return null;
+}
+
+function resolveAuthorRelation(input: string): string | null {
+  const trimmed = input.trim();
+  const num = parseInt(trimmed, 10);
+  if (num === 1) return "已关注";
+  if (num === 2) return "未关注";
+  if (/已关注|关注了|已关/.test(trimmed)) return "已关注";
+  if (/未关注|没关注|未关/.test(trimmed)) return "未关注";
+  return null;
+}
+
 function inferCulturalContext(state: WizardState): string {
   const platform = state.fields.platform || "";
   if (/小红书|微信|公众号|知乎|B站|抖音/.test(platform)) {
@@ -561,6 +657,7 @@ function stepNumber(state: WizardState): number {
     "interests",
     "traits",
     "platform",
+    "authorRelation",
     "finalConfirm",
     "completed",
   ];

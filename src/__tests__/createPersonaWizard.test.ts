@@ -30,13 +30,15 @@ function extractSessionId(text: string): string {
 }
 
 describe("handleCreatePersonaWizard fallback state machine", () => {
-  it("starts with a single age range question without dumping the full instructions", async () => {
+  it("starts with age range options without dumping the full instructions", async () => {
     const result = await handleCreatePersonaWizard(skillsDir, tmpDir, {
       userMessage: "开始创建人设",
     });
 
     const text = textOf(result);
-    assert.ok(text.includes("请问这个角色的年龄段是"));
+    assert.ok(text.includes("请选择这个角色的年龄段"));
+    assert.ok(text.includes("18岁以下"));
+    assert.ok(text.includes("40岁以上"));
     assert.ok(text.includes("currentStep: ageRange"));
     assert.ok(!text.includes("=== SYSTEM_PROMPT 开始 ==="));
     assert.ok(!text.includes("角色构建引擎"));
@@ -58,7 +60,7 @@ describe("handleCreatePersonaWizard fallback state machine", () => {
 
     const ageRecorded = await handleCreatePersonaWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "25-30岁（职场新人）",
+      userMessage: "25-30岁",
     });
     assert.ok(textOf(ageRecorded).includes("currentStep: interests"));
 
@@ -74,7 +76,7 @@ describe("handleCreatePersonaWizard fallback state machine", () => {
 
     const draftPath = path.join(tmpDir, `${sessionId}_draft.json`);
     const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
-    assert.equal(draft.fields.ageRange, "25-30岁（职场新人）");
+    assert.equal(draft.fields.ageRange, "25-30岁");
     assert.deepEqual(draft.fields.interests, [
       "独立设计师",
       "小红书运营",
@@ -100,23 +102,29 @@ describe("handleCreatePersonaWizard fallback state machine", () => {
       sessionId,
       userMessage: "挑剔，表达直接",
     });
-    const finalPreview = await handleCreatePersonaWizard(skillsDir, tmpDir, {
+    const platformRecorded = await handleCreatePersonaWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "小红书",
     });
-    assert.ok(textOf(finalPreview).includes("currentStep: finalConfirm"));
+    assert.ok(textOf(platformRecorded).includes("currentStep: authorRelation"));
+
+    const relationRecorded = await handleCreatePersonaWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "已关注",
+    });
+    assert.ok(textOf(relationRecorded).includes("currentStep: finalConfirm"));
 
     const modified = await handleCreatePersonaWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "年龄段改成30-35岁（职场中坚）",
+      userMessage: "年龄段改成30-35岁",
     });
     const modifiedText = textOf(modified);
-    assert.ok(modifiedText.includes("30-35岁（职场中坚）"));
+    assert.ok(modifiedText.includes("30-35岁"));
     assert.ok(modifiedText.includes("currentStep: finalConfirm"));
 
     const draftPath = path.join(tmpDir, `${sessionId}_draft.json`);
     const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
-    assert.equal(draft.fields.ageRange, "30-35岁（职场中坚）");
+    assert.equal(draft.fields.ageRange, "30-35岁");
   });
 
   it("falls back to heuristic if samplingFn returns invalid JSON", async () => {
