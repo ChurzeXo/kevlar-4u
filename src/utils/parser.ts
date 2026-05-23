@@ -15,6 +15,7 @@ export interface PersonaMeta {
   authorRelation?: string;
   stance?: string;
   blindSpot?: string;
+  gender?: string;
 }
 
 export interface Persona {

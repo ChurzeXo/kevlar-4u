@@ -24,7 +24,7 @@ const AGE_RANGE_OPTIONS = [
 export const createPersonaWizardToolDefinition: Tool = {
   name: "create_persona_wizard",
   description:
-    "当用户说「创建/新建/自定义评论员/人设/角色」时，调用此工具。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、常用平台等信息收集。完全独立，不涉及内容评测流程。",
+    "当用户说「创建/新建/自定义评论员/人设/角色」时，调用此工具。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。",
   inputSchema: {
     type: "object",
     properties: {
@@ -364,6 +364,7 @@ async function completeWizard(
     authorRelation: state.fields.authorRelation,
     stance: state.fields.stance,
     blindSpot: state.fields.blindSpot,
+    gender: state.fields.gender,
   });
 
   if (!createResult.isError) {

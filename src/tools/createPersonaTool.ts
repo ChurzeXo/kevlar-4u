@@ -57,7 +57,7 @@ export const updatePersonaDraftToolDefinition: Tool = {
 			value: {
 				type: ["string", "array"],
 				items: { type: "string" },
-				description: "字段值（支持字符串或字符串数组）",
+				description: "字段值。标量字段传 string（ageRange、platform、authorRelation），列表字段传 string[]（interests、traits）",
 			},
 		},
 		required: ["sessionId", "field", "value"],
@@ -82,7 +82,7 @@ export const deletePersonaDraftToolDefinition: Tool = {
 export const createPersonaToolDefinition: Tool = {
 	name: "create_persona",
 	description:
-		"正式创建并保存一个新的批评人设。支持通过 sessionId 读取已完成的临时草稿完成高精度创建，也支持直接通过 id、name_en、description 和 tags 等参数进行直接一步创建。",
+		"根据草稿或直接参数创建并保存一个新的批评人设。当用户已完成 create_persona_wizard 的流程后调用此工具完成最终创建；也可直接传入 name 和各字段一步创建。[只写] 不负责收集用户偏好或引导对话——收集阶段应使用 create_persona_wizard。name 为必填，其余字段均可选。",
 	inputSchema: {
 		type: "object" as const,
 		properties: {
@@ -119,19 +119,23 @@ export const createPersonaToolDefinition: Tool = {
 			},
 			culturalContext: {
 				type: "string",
-				description: "文化背景（模型推断，可选）",
+				description: "文化背景描述（可选），例如：日本二次元文化圈、一线城市职场文化。传空字符串则由草稿或系统推断。",
 			},
 			authorRelation: {
 				type: "string",
-				description: "与作者的关系（模型推断，可选）",
+				description: "该人设与内容作者的关系（可选），例如：路人、粉丝、同行。传空字符串则由草稿或系统推断。",
 			},
 			stance: {
 				type: "string",
-				description: "立场（模型推断，可选）",
+				description: "评论立场倾向（可选），例如：默认质疑、温和包容、技术导向。传空字符串则由草稿或系统推断。",
 			},
 			blindSpot: {
 				type: "string",
-				description: "盲区（模型推断，可选）",
+				description: "认知盲区描述（可选），例如：对价格不敏感、忽略小众需求。传空字符串则由草稿或系统推断。",
+			},
+			gender: {
+				type: "string",
+				description: "性别（可选），可选值：男 / 女 / 未指定",
 			},
 		},
 		required: ["name"],
@@ -150,6 +154,7 @@ export interface CreatePersonaInput {
 	authorRelation?: string;
 	stance?: string;
 	blindSpot?: string;
+	gender?: string;
 }
 
 export const updatePersonaDraftModule: ToolModule = {
@@ -215,13 +220,14 @@ export async function handleCreatePersona(
 			!draft.fields.ageRange ||
 			!draft.fields.interests ||
 			!draft.fields.traits ||
-			!draft.fields.platform
+			!draft.fields.platform ||
+			!draft.fields.authorRelation
 		) {
 			return {
 				content: [
 					{
 						type: "text",
-						text: `❌ 创建失败：未找到完整的临时草稿。你必须扮演角色构建引擎，先使用 update_persona_draft 逐步收集并保存角色的【年龄段(ageRange)、兴趣方向(interests)、性格特质(traits)、常用平台(platform)】，确认无误后才能调用 create_persona 完成创建。`,
+						text: `❌ 创建失败：未找到完整的临时草稿。你必须扮演角色构建引擎，先使用 update_persona_draft 逐步收集并保存角色的【年龄段(ageRange)、兴趣方向(interests)、性格特质(traits)、常用平台(platform)、与作者关系(authorRelation)】，确认无误后才能调用 create_persona 完成创建。`,
 					},
 				],
 				isError: true,
@@ -288,6 +294,7 @@ export async function handleCreatePersona(
 		authorRelation: input.authorRelation || "未提供",
 		stance: input.stance || "未提供",
 		blindSpot: input.blindSpot || "无特定盲区",
+		gender: input.gender || "未指定",
 	};
 
 	let personaDescription = "";
@@ -316,11 +323,16 @@ export async function handleCreatePersona(
 			input.blindSpot ||
 			(draft.fields && draft.fields.blindSpot) ||
 			"无特定盲区";
+		const gender =
+			input.gender ||
+			(draft.fields && draft.fields.gender) ||
+			"未指定";
 
 		personaDescription += `文化背景：${cultural}\n`;
 		personaDescription += `与作者的关系：${relation}\n`;
 		personaDescription += `立场：${stanceVal}\n`;
 		personaDescription += `盲区：${blind}\n`;
+		personaDescription += `性别：${gender}\n`;
 	} else {
 		personaDescription = description;
 
@@ -328,11 +340,13 @@ export async function handleCreatePersona(
 		const relation = input.authorRelation || "未提供";
 		const stanceVal = input.stance || "未提供";
 		const blind = input.blindSpot || "无特定盲区";
+		const gender = input.gender || "未指定";
 
 		personaDescription += `\n文化背景：${cultural}\n`;
 		personaDescription += `与作者的关系：${relation}\n`;
 		personaDescription += `立场：${stanceVal}\n`;
 		personaDescription += `盲区：${blind}\n`;
+		personaDescription += `性别：${gender}\n`;
 	}
 
 	try {

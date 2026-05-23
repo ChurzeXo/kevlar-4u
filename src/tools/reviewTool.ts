@@ -14,7 +14,7 @@ const MAX_CONTEXT_LENGTH = 5_000; // 5KB
 export const reviewToolDefinition: Tool = {
   name: "review_content",
   description:
-    "将文案交给多个评论员进行压力测试。支持三种执行模式（宿主辅助兜底/MCP采样/直接API）。使用前可先查看可用评论员让用户选择。",
+    "将文案交给多个评论员进行压力测试。支持三种执行模式（宿主辅助兜底/MCP采样/直接API）。使用前可先查看可用评论员让用户选择。[只读] 仅执行评测和返回评论结果。不能生成内容、不能修改人设库、不能修改配置。不会直接返回评测数据文件路径。",
   inputSchema: {
     type: "object" as const,
     properties: {

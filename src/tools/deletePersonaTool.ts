@@ -8,13 +8,13 @@ import { getErrorInfo } from "../utils/observability.js";
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
   description:
-    "删除一个已存在的批评人设。AI 会先列出所有评论员供用户选择，二次确认后执行删除。",
+    "删除一个已存在的批评人设。AI 会先列出所有评论员供用户选择，二次确认后执行删除。不能删除不存在的角色，不能撤销删除操作。必须先调 list_personas 获取可用列表供用户选择。",
   inputSchema: {
     type: "object" as const,
     properties: {
       id: {
         type: "string",
-        description: "要删除的人设 ID",
+        description: "要删除的人设 ID。必须先通过 list_personas 获取目标人设的 ID。",
       },
       confirm: {
         type: "boolean",
