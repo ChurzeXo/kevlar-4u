@@ -5,7 +5,7 @@
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
-🌐 [English](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+🌐 [English](README.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md)
 
 ---
 
