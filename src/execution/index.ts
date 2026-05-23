@@ -61,7 +61,9 @@ export async function executeReview(
     contentLength: ctx.content.length,
   });
 
-  // Acquire lock for non-orchestration modes (they make external calls)
+  const startTime = Date.now();
+  let result: ExecutionResult;
+
   if (resolved !== "orchestration") {
     const { acquireReviewLock, releaseReviewLock, getReviewLock } = await import("./lock.js");
     
@@ -73,14 +75,26 @@ export async function executeReview(
     }
 
     try {
-      return await handler.execute(ctx);
+      result = await handler.execute(ctx);
     } finally {
       releaseReviewLock();
     }
+  } else {
+    result = await handler.execute(ctx);
   }
 
-  // Orchestration mode doesn't need locking
-  return handler.execute(ctx);
+  const durationMs = Date.now() - startTime;
+  const failedCount = result.partialFailures?.length ?? 0;
+  logger.info("Review summary", {
+    event: "review_summary",
+    mode: resolved,
+    personas: ctx.personas.length,
+    success: ctx.personas.length - failedCount,
+    failure: failedCount,
+    durationMs,
+  });
+
+  return result;
 }
 
 // ── Mode Resolution ──────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import { readConfig } from "./config.js";
 import { getRateLimiter, withRetry } from "./limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "./aggregator.js";
 import { logger } from "../utils/logger.js";
+import { getErrorInfo } from "../utils/errors.js";
 import { wrapContent } from "../utils/sanitize.js";
 
 interface ParallelExecutionOptions {
@@ -63,14 +64,16 @@ export async function executePersonasInParallel(
         review: result,
       });
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
+      const info = getErrorInfo(err);
       logger.error("Persona review failed", {
         event: "persona_failed",
         personaId: persona.meta.id,
-        error: errorMsg,
+        error: info.code,
+        message: info.message,
+        recoverable: info.recoverable,
       });
 
-      aggregator.addFailure(persona.meta.id, persona.meta.name, errorMsg);
+      aggregator.addFailure(persona.meta.id, persona.meta.name, info.message);
     } finally {
       limiter.release();
     }

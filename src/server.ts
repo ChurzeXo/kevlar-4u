@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 import { createToolRegistry } from "./tools/index.js";
 import type { ToolDependencies } from "./tools/types.js";
 import { logger } from "./utils/logger.js";
-import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
+import { formatErrorResponse, getErrorInfo } from "./utils/errors.js";
 import { isSamplingSupported, setClientInfo } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import type { SamplingFunction, MultiTurnSamplingFunction } from "./execution/base.js";
@@ -164,6 +164,7 @@ export function createKevlarServer(): McpServer {
 
   underlyingServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const startTime = Date.now();
 
     logger.debug("Tool call received", { event: "tool_called", tool: name });
 
@@ -174,13 +175,23 @@ export function createKevlarServer(): McpServer {
         logger.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
         throw new Error(`Unknown tool: ${name}`);
       }
-      return await handler(sanitizedArgs);
+      const result = await handler(sanitizedArgs);
+      logger.info("Tool completed", {
+        event: "tool_completed",
+        tool: name,
+        durationMs: Date.now() - startTime,
+      });
+      return result;
     } catch (err) {
+      const durationMs = Date.now() - startTime;
+      const info = getErrorInfo(err);
       logger.error("Tool execution failed", {
         event: "tool_error",
         tool: name,
-        error: isKevlarError(err) ? err.code : "INTERNAL_ERROR",
-        message: err instanceof Error ? err.message : String(err),
+        error: info.code,
+        message: info.message,
+        recoverable: info.recoverable,
+        durationMs,
       });
       return formatErrorResponse(err);
     }

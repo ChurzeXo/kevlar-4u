@@ -44,6 +44,29 @@ export function getErrorMessage(err: unknown): string {
 
 import { ToolResult } from "./types.js";
 
+export interface ErrorInfo {
+  code: string;
+  message: string;
+  recoverable: boolean;
+  details?: Record<string, unknown>;
+}
+
+export function getErrorInfo(err: unknown): ErrorInfo {
+  if (isKevlarError(err)) {
+    return {
+      code: err.code,
+      message: err.message,
+      recoverable: err.recoverable,
+      details: err.details,
+    };
+  }
+  return {
+    code: "INTERNAL_ERROR",
+    message: err instanceof Error ? err.message : String(err),
+    recoverable: false,
+  };
+}
+
 export function formatErrorResponse(err: unknown): ToolResult {
   if (isKevlarError(err)) {
     return {
