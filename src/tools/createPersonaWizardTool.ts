@@ -63,6 +63,7 @@ interface WizardState {
     interests?: string[];
     traits?: string[];
     platform?: string;
+    platformNote?: string;
     culturalContext?: string;
     authorRelation?: string;
     stance?: string;
@@ -200,6 +201,7 @@ async function advanceWizard(
         const first = raw.split(/[和、/,]/)[0].trim();
         if (first) {
           state.fields.platform = first;
+          state.fields.platformNote = `⚠️ 你输入了多个平台，将围绕「${first}」创建此评论员。如需覆盖其他平台，请另行创建。`;
           state.step = "authorRelation";
           await saveState(tmpDir, state);
           await saveDraft(tmpDir, state);
@@ -207,7 +209,7 @@ async function advanceWizard(
             state,
             [
               `已记录常用平台：${state.fields.platform}`,
-              "⚠️ 一次只创建一个平台对应的评论员。如需多平台覆盖，请逐一创建。",
+              state.fields.platformNote,
               "",
               "请选择这个角色与作者的关系（回复编号或文字）：",
               "",
@@ -540,19 +542,25 @@ function toolResponse(state: WizardState, assistantMessage: string): ToolResult 
 
 function buildFinalConfirmationMessage(state: WizardState): string {
   const fields = state.fields;
-  return [
+  const lines = [
     "所有信息已收集完毕，请确认是否创建角色。",
     "",
     `年龄段：${fields.ageRange || ""}`,
     `兴趣方向：${fields.interests?.join("、") || ""}`,
     `常用平台：${fields.platform || ""}`,
+  ];
+  if (fields.platformNote) {
+    lines.push(...fields.platformNote.split("\n"));
+  }
+  lines.push(
     `与作者的关系：${fields.authorRelation || ""}`,
     "性格特质：",
     ...(fields.traits || []).map((trait) => `- ${trait}`),
     "",
     "如需修改，请直接说：年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成... / 关系改成...",
     "确认无误请回复：确认创建",
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 function detectModifiedField(input: string): DraftField | undefined {
