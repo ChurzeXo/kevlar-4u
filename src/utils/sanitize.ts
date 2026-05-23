@@ -21,6 +21,28 @@ export function scanForCredentials(text: string): string[] {
   return [...new Set(found)];
 }
 
+/**
+ * Patterns that match the orchestration template's structural markers.
+ * Injected content containing these could break out of the persona block.
+ */
+const ORCHESTRATION_BOUNDARIES = [
+  /\*\*指令\*\*/g,
+  /\*\*角色描述\*\*/g,
+  /\*\*待评审内容\*\*/g,
+  /\*\*发布平台\s*[&＆]\s*目标受众背景\*\*/g,
+  /请严格按照该人设要求的输出格式作答[。.]?/g,
+  /^#{1,6}\s/gm,
+  /^-{3,}\s*$/gm,
+];
+
+export function stripPromptBoundaries(text: string): string {
+  let result = text;
+  for (const pattern of ORCHESTRATION_BOUNDARIES) {
+    result = result.replace(pattern, "");
+  }
+  return result.trim();
+}
+
 export function wrapContent(content: string, tag = "content"): string {
   const suffix = Math.random().toString(36).substring(2, 8);
   const openTag = `<${tag}_${suffix}>`;

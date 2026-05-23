@@ -68,7 +68,7 @@ export async function executeReview(
     if (!acquireReviewLock(resolved)) {
       const lock = getReviewLock();
       throw new Error(
-        `已有 ${lock?.mode || "unknown"} 模式正在执行，请等待完成后再试。`
+        `已有评测任务正在执行（${lock?.mode || "unknown"}），请等待完成后再试。`
       );
     }
 

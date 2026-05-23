@@ -540,7 +540,10 @@ async function saveDraft(tmpDir: string, state: WizardState): Promise<void> {
     step: stepNumber(state),
     fields: state.fields,
   };
-  await fs.promises.writeFile(getDraftPath(tmpDir, state.sessionId), JSON.stringify(draft, null, 2), "utf-8");
+  const draftPath = getDraftPath(tmpDir, state.sessionId);
+  const tmpPath = draftPath + ".tmp";
+  await fs.promises.writeFile(tmpPath, JSON.stringify(draft, null, 2), "utf-8");
+  await fs.promises.rename(tmpPath, draftPath);
 }
 
 async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {
