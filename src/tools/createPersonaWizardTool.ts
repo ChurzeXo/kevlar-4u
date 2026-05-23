@@ -1,9 +1,8 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
-import matter from "gray-matter";
 import { ToolResult } from "../utils/types.js";
-import { MultiTurnSamplingFunction } from "../execution/base.js";
+import type { MultiTurnSamplingFunction } from "../execution/base.js";
 import {
   handleCreatePersona,
   generateIdFromDraft,
@@ -596,50 +595,42 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
   const blindSpot = fields.blindSpot || "无特定盲区";
   const gender = fields.gender || undefined;
 
-  const meta: Record<string, unknown> = {
-    id,
-    name: personaName,
-    name_en: "",
-    version: "1.0.0",
-    author: "ai-generated",
-    tags,
-    description,
-    culturalContext,
-    authorRelation,
-    stance,
-    blindSpot,
-  };
+  const tagsStr = tags.length > 0 ? tags.join("、") : "（无）";
 
-  const bodyParts: string[] = [];
-  bodyParts.push(`角色名：${personaName}`);
-  bodyParts.push(`年龄段：${fields.ageRange || ""}`);
-  if (gender) bodyParts.push(`性别：${gender}`);
-  bodyParts.push(`兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`);
-  bodyParts.push(`常用平台：${fields.platform || ""}`);
-  bodyParts.push("性格特质：");
-  if (Array.isArray(fields.traits)) {
-    fields.traits.forEach((t: string) => bodyParts.push(`- ${t}`));
-  }
-  bodyParts.push(`文化背景：${culturalContext}`);
-  bodyParts.push(`与作者的关系：${authorRelation}`);
-  bodyParts.push(`立场：${stance}`);
-  bodyParts.push(`盲区：${blindSpot}`);
-
-  const fullContent = matter.stringify(bodyParts.join("\n"), meta);
-
-  const filePath = subDir
-    ? `skills/${subDir}/${id}.md`
-    : `skills/${id}.md`;
-
-  const lines = [
+  const lines: string[] = [
     "所有信息已收集完毕，以下是即将创建的角色文件预览：",
     "",
-    `📄 ${filePath}`,
+    `📄 ${subDir ? `skills/${subDir}/${id}.md` : `skills/${id}.md`}`,
     "",
-    "```yaml",
-    fullContent.trimEnd(),
-    "```",
+    `- id: ${id}`,
+    `- name: ${personaName}`,
+    `- tags: ${tagsStr}`,
+    `- description: ${description}`,
+    `- culturalContext: ${culturalContext}`,
+    `- authorRelation: ${authorRelation}`,
+    `- stance: ${stance}`,
+    `- blindSpot: ${blindSpot}`,
+    "",
+    "---",
+    "",
+    `- 角色名：${personaName}`,
+    `- 年龄段：${fields.ageRange || ""}`,
   ];
+  if (gender) lines.push(`- 性别：${gender}`);
+  lines.push(
+    `- 兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`,
+    `- 常用平台：${fields.platform || ""}`,
+    "- 性格特质：",
+  );
+  if (Array.isArray(fields.traits)) {
+    fields.traits.forEach((t: string) => lines.push(`  - ${t}`));
+  }
+  lines.push(
+    `- 文化背景：${culturalContext}`,
+    `- 与作者的关系：${authorRelation}`,
+    `- 立场：${stance}`,
+    `- 盲区：${blindSpot}`,
+  );
 
   if (fields.platformNote) {
     lines.push("", fields.platformNote);

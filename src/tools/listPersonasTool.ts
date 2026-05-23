@@ -65,13 +65,12 @@ export async function handleListPersonas(
     ];
 
     for (const [plat, list] of Object.entries(byPlatform).sort()) {
-      const names = list.map((p) => `**${p.meta.name}**`).join("、");
-      lines.push(`- **${plat}**（${list.length} 位）：${names}`);
+      lines.push(`- **${plat}**（${list.length} 位）`);
     }
 
     lines.push(
       "",
-      "💡 请告诉我你想查看哪个平台的评论员详情？",
+      "💡 请选择你要查看的平台（一次只能选择一个），",
       "例如：列出小红书的评论员 / 查看知乎的评论员",
     );
 
