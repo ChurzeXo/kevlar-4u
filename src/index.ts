@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createKevlarServer } from "./server.js";
+import { getErrorInfo } from "./utils/observability.js";
 
 async function main() {
   const server = createKevlarServer();
@@ -14,6 +15,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[Kevlar] Fatal error:", err);
+  const info = getErrorInfo(err);
+  console.error(`[Kevlar] Fatal error: [${info.code}] ${info.message}`);
   process.exit(1);
 });

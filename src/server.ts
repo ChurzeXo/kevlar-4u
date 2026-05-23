@@ -10,7 +10,8 @@ import { fileURLToPath } from "url";
 import { createToolRegistry } from "./tools/index.js";
 import type { ToolDependencies } from "./tools/types.js";
 import { logger } from "./utils/logger.js";
-import { formatErrorResponse, getErrorInfo } from "./utils/errors.js";
+import { formatErrorResponse } from "./utils/errors.js";
+import { getErrorInfo } from "./utils/observability.js";
 import { isSamplingSupported, setClientInfo } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import type { SamplingFunction, MultiTurnSamplingFunction } from "./execution/base.js";
@@ -48,7 +49,8 @@ async function cleanStaleDrafts(tmpDir: string) {
       }
     }
   } catch (err) {
-    logger.warn("Failed to clean stale wizard states", { event: "clean_stale_wizards_error", error: String(err) });
+    const info = getErrorInfo(err);
+    logger.warn("Failed to clean stale wizard states", { event: "clean_stale_wizards_error", error: info.code, message: info.message });
   }
 }
 
@@ -110,12 +112,14 @@ export function createKevlarServer(): McpServer {
           stopReason: result.stopReason,
         };
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const info = getErrorInfo(err);
         logger.error("Sampling request failed", {
           event: "sampling_request_error",
-          error: errorMsg
+          error: info.code,
+          message: info.message,
+          recoverable: info.recoverable,
         });
-        throw new Error(`Sampling 调用失败: ${errorMsg}`);
+        throw new Error(`Sampling 调用失败: ${info.message}`);
       }
     };
   };
@@ -138,12 +142,14 @@ export function createKevlarServer(): McpServer {
           stopReason: result.stopReason,
         };
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const info = getErrorInfo(err);
         logger.error("Multi-turn Sampling request failed", {
           event: "multi_sampling_request_error",
-          error: errorMsg
+          error: info.code,
+          message: info.message,
+          recoverable: info.recoverable,
         });
-        throw new Error(`多轮 Sampling 调用失败: ${errorMsg}`);
+        throw new Error(`多轮 Sampling 调用失败: ${info.message}`);
       }
     };
   };

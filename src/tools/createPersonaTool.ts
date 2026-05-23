@@ -14,6 +14,7 @@ import {
 	mapPlatformToKey,
 	slugify,
 } from "../utils/personaIdMaps.js";
+import { getErrorInfo } from "../utils/observability.js";
 
 // ── Description creation principles ─────────────────────────────────────────
 // These norms govern the YAML `description` field for every persona:
@@ -199,9 +200,10 @@ export async function handleCreatePersona(
 		try {
 			draft = await handleSaveDraft(tmpDir, input);
 		} catch (err) {
+			const info = getErrorInfo(err);
 			return {
 				content: [
-					{ type: "text", text: `❌ 读取草稿失败：${String(err)}` },
+					{ type: "text", text: `❌ 读取草稿失败：${info.message}` },
 				],
 				isError: true,
 			};
@@ -438,9 +440,10 @@ export async function handleUpdatePersonaDraft(
 			draft = JSON.parse(data);
 		}
 	} catch (err) {
+		const info = getErrorInfo(err);
 		return {
 			content: [
-				{ type: "text", text: `❌ 读取草稿文件失败: ${String(err)}` },
+				{ type: "text", text: `❌ 读取草稿文件失败: ${info.message}` },
 			],
 			isError: true,
 		};
@@ -473,9 +476,10 @@ export async function handleUpdatePersonaDraft(
 			"utf-8",
 		);
 	} catch (err) {
+		const info = getErrorInfo(err);
 		return {
 			content: [
-				{ type: "text", text: `❌ 写入草稿文件失败: ${String(err)}` },
+				{ type: "text", text: `❌ 写入草稿文件失败: ${info.message}` },
 			],
 			isError: true,
 		};
@@ -527,9 +531,10 @@ export async function handleDeletePersonaDraft(
 			};
 		}
 	} catch (err) {
+		const info = getErrorInfo(err);
 		return {
 			content: [
-				{ type: "text", text: `❌ 读取或校验草稿文件失败: ${String(err)}` },
+				{ type: "text", text: `❌ 读取或校验草稿文件失败: ${info.message}` },
 			],
 			isError: true,
 		};
@@ -538,9 +543,10 @@ export async function handleDeletePersonaDraft(
 	try {
 		await fs.promises.unlink(filePath);
 	} catch (err) {
+		const info = getErrorInfo(err);
 		return {
 			content: [
-				{ type: "text", text: `❌ 删除草稿文件失败: ${String(err)}` },
+				{ type: "text", text: `❌ 删除草稿文件失败: ${info.message}` },
 			],
 			isError: true,
 		};

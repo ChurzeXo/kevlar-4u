@@ -7,7 +7,7 @@
 
 import { readFileSync, writeFileSync } from "fs";
 import * as path from "path";
-import { logger } from "../utils/logger.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ExecutionMode, ResolveableMode } from "./base.js";
 
 // ── Config Schema ─────────────────────────────────────────────────────────────
@@ -116,7 +116,8 @@ export async function updateConfig(options: UpdateConfigOptions): Promise<Kevlar
     logger.info("Config updated", { event: "config_update", path: configPath, options });
     return updated;
   } catch (err) {
-    logger.error("Failed to write config", { event: "config_write_error", error: String(err) });
+    const info = getErrorInfo(err);
+    logger.error("Failed to write config", { event: "config_write_error", error: info.code, message: info.message });
     throw err;
   }
 }

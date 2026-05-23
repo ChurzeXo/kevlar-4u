@@ -9,7 +9,7 @@ import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode
 import type { Persona } from "../../utils/parser.js";
 import { isSamplingSupported } from "../client.js";
 import { executePersonasInParallel, buildUserMessage } from "../parallel.js";
-import { logger } from "../../utils/logger.js";
+import { logger, getErrorInfo } from "../../utils/observability.js";
 
 const MODE: ExecutionMode = "mcp_sampling";
 
@@ -41,10 +41,12 @@ async function callSamplingApi(
 
     return result;
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
+    const info = getErrorInfo(err);
     logger.error("Sampling call failed", {
       event: "sampling_error",
-      error: errorMsg,
+      error: info.code,
+      message: info.message,
+      recoverable: info.recoverable,
     });
     throw err;
   }

@@ -11,7 +11,7 @@ import { readConfig } from "./config.js";
 import { getRateLimiter, withRetry } from "./limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "./aggregator.js";
 import { logger } from "../utils/logger.js";
-import { getErrorInfo } from "../utils/errors.js";
+import { getErrorInfo } from "../utils/observability.js";
 import { wrapContent } from "../utils/sanitize.js";
 
 interface ParallelExecutionOptions {

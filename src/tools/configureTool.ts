@@ -13,7 +13,7 @@ import {
 	isValidMode,
 	isValidConcurrency,
 } from "../execution/config.js";
-import { logger } from "../utils/logger.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 
 export const configureToolDefinition: Tool = {
 	name: "configure",
@@ -123,9 +123,9 @@ export async function handleConfigure(
 			],
 		};
 	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
+		const info = getErrorInfo(err);
 		return {
-			content: [{ type: "text", text: `❌ 配置更新失败：${message}` }],
+			content: [{ type: "text", text: `❌ 配置更新失败：${info.message}` }],
 			isError: true,
 		};
 	}

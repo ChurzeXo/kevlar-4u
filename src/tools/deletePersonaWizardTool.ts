@@ -1,11 +1,14 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import * as fs from "fs";
 import * as path from "path";
+import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
-import { loadAllPersonas, Persona } from "../utils/parser.js";
-import { handleDeletePersona } from "./deletePersonaTool.js";
-import { logger } from "../utils/logger.js";
+import type { MultiTurnSamplingFunction } from "../execution/base.js";
 import type { ToolModule } from "./types.js";
+import {
+  handleDeletePersona,
+} from "./deletePersonaTool.js";
+import { loadAllPersonas, Persona } from "../utils/parser.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 
 export const deletePersonaWizardToolDefinition: Tool = {
   name: "delete_persona_wizard",
@@ -68,10 +71,10 @@ export async function handleDeletePersonaWizard(
     const personas = await loadAllPersonas(skillsDir);
     return await advanceDeleteWizard(skillsDir, tmpDir, state, personas, input.userMessage);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error("Delete persona wizard failed", { event: "delete_wizard_error", error: message });
+    const info = getErrorInfo(err);
+    logger.error("Delete persona wizard failed", { event: "delete_wizard_error", error: info.code, message: info.message });
     return {
-      content: [{ type: "text", text: `❌ 人设删除向导失败：${message}` }],
+      content: [{ type: "text", text: `❌ 人设删除向导失败：${info.message}` }],
       isError: true,
     };
   }
@@ -215,10 +218,12 @@ async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {
   try {
     if (fs.existsSync(statePath)) await fs.promises.unlink(statePath);
   } catch (err) {
+    const info = getErrorInfo(err);
     logger.warn("Failed to clean delete wizard state", {
       event: "delete_wizard_cleanup_error",
       path: statePath,
-      error: String(err),
+      error: info.code,
+      message: info.message,
     });
   }
 }

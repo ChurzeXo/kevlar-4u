@@ -1,11 +1,11 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import * as fs from "fs";
 import * as path from "path";
+import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
-import type { ToolModule } from "./types.js";
-import { isValidConcurrency, isValidMode } from "../execution/config.js";
 import { handleConfigure, ConfigureInput } from "./configureTool.js";
-import { logger } from "../utils/logger.js";
+import { isValidMode, isValidConcurrency } from "../execution/config.js";
+import type { ToolModule } from "./types.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 
 export const configureWizardToolDefinition: Tool = {
   name: "configure_wizard",
@@ -90,10 +90,10 @@ export async function handleConfigureWizard(
     }
     return result;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error("Configure wizard failed", { event: "configure_wizard_error", error: message });
+    const info = getErrorInfo(err);
+    logger.error("Configure wizard failed", { event: "configure_wizard_error", error: info.code, message: info.message });
     return {
-      content: [{ type: "text", text: `❌ 配置向导失败：${message}` }],
+      content: [{ type: "text", text: `❌ 配置向导失败：${info.message}` }],
       isError: true,
     };
   }
@@ -183,10 +183,12 @@ async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {
   try {
     if (fs.existsSync(statePath)) await fs.promises.unlink(statePath);
   } catch (err) {
+    const info = getErrorInfo(err);
     logger.warn("Failed to clean configure wizard state", {
       event: "configure_wizard_cleanup_error",
       path: statePath,
-      error: String(err),
+      error: info.code,
+      message: info.message,
     });
   }
 }

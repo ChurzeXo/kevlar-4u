@@ -3,6 +3,7 @@ import * as fs from "fs";
 import { loadPersonaById, validateWritePath, invalidatePersonasCache } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
+import { getErrorInfo } from "../utils/observability.js";
 
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
@@ -72,9 +73,9 @@ export async function handleDeletePersona(
     await fs.promises.unlink(persona.filePath);
     invalidatePersonasCache();
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const info = getErrorInfo(err);
     return {
-      content: [{ type: "text", text: `❌ 删除文件失败：${message}` }],
+      content: [{ type: "text", text: `❌ 删除文件失败：${info.message}` }],
       isError: true,
     };
   }

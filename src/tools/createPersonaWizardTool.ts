@@ -10,7 +10,7 @@ import {
   getSubDirFromDraft,
   applyDedup,
 } from "./createPersonaTool.js";
-import { logger } from "../utils/logger.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 
 const AGE_RANGE_OPTIONS = [
   { value: "18岁以下", label: "18岁以下" },
@@ -132,10 +132,10 @@ export async function handleCreatePersonaWizard(
     const result = await advanceWizard(skillsDir, tmpDir, state, userMessage, samplingFn);
     return result;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error("Create persona wizard failed", { event: "wizard_error", error: message });
+    const info = getErrorInfo(err);
+    logger.error("Create persona wizard failed", { event: "wizard_error", error: info.code, message: info.message });
     return {
-      content: [{ type: "text", text: `❌ 人设创建向导失败：${message}` }],
+      content: [{ type: "text", text: `❌ 人设创建向导失败：${info.message}` }],
       isError: true,
     };
   }
@@ -395,9 +395,11 @@ async function extractInterests(
         };
       }
     } catch (err) {
+      const info = getErrorInfo(err);
       logger.warn("Sampling extraction failed for interests, falling back to heuristic", {
         event: "sampling_interests_fallback",
-        error: String(err),
+        error: info.code,
+        message: info.message,
       });
     }
   }
@@ -431,9 +433,11 @@ async function extractTraits(
         };
       }
     } catch (err) {
+      const info = getErrorInfo(err);
       logger.warn("Sampling extraction failed for traits, falling back to heuristic", {
         event: "sampling_traits_fallback",
-        error: String(err),
+        error: info.code,
+        message: info.message,
       });
     }
   }
@@ -551,7 +555,8 @@ async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {
     try {
       if (fs.existsSync(filePath)) await fs.promises.unlink(filePath);
     } catch (err) {
-      logger.warn("Failed to clean wizard file", { event: "wizard_cleanup_error", path: filePath, error: String(err) });
+      const info = getErrorInfo(err);
+      logger.warn("Failed to clean wizard file", { event: "wizard_cleanup_error", path: filePath, error: info.code, message: info.message });
     }
   }
 }

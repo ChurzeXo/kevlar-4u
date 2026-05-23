@@ -1,7 +1,7 @@
 import { promises as fsp, readdirSync } from "fs";
 import * as path from "path";
 import matter from "gray-matter";
-import { logger } from "./logger.js";
+import { logger, getErrorInfo } from "./observability.js";
 
 export interface PersonaMeta {
   id: string;
@@ -66,7 +66,8 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
     logger.warn("Failed to parse persona file", {
       event: "parse_error",
       path: filePath,
-      error: String(err),
+      error: getErrorInfo(err).code,
+      message: getErrorInfo(err).message,
     });
     return null;
   }
@@ -125,7 +126,8 @@ export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
     logger.error("Failed to stat skills directory", {
       event: "stat_error",
       path: skillsDir,
-      error: String(err),
+      error: getErrorInfo(err).code,
+      message: getErrorInfo(err).message,
     });
     return [];
   }
@@ -147,7 +149,8 @@ export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
     logger.error("Failed to read skills directory", {
       event: "readdir_error",
       path: skillsDir,
-      error: String(err),
+      error: getErrorInfo(err).code,
+      message: getErrorInfo(err).message,
     });
     return [];
   }
@@ -225,7 +228,8 @@ export async function writePersonaFile(
     logger.error("Failed to write persona file", {
       event: "write_error",
       path: filePath,
-      error: String(err),
+      error: getErrorInfo(err).code,
+      message: getErrorInfo(err).message,
     });
     throw err;
   }

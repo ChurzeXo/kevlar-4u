@@ -4,6 +4,7 @@ import { ToolResult } from "../utils/types.js";
 import { executeReview, loadPersonasForReview, MAX_PERSONAS } from "../execution/index.js";
 import type { ExecutionContext, ResolveableMode, SamplingFunction } from "../execution/base.js";
 import type { ToolModule } from "./types.js";
+import { getErrorInfo } from "../utils/observability.js";
 
 // ── Resource limits ────────────────────────────────────────────────────────────
 
@@ -175,12 +176,12 @@ export async function handleReviewContent(
       ],
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const info = getErrorInfo(err);
     return {
       content: [
         {
           type: "text",
-          text: `❌ 评测执行失败：${message}`,
+          text: `❌ 评测执行失败：${info.message}`,
         },
       ],
       isError: true,

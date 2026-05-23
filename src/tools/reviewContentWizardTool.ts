@@ -6,7 +6,7 @@ import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
 import { estimateTokenCost } from "../execution/aggregator.js";
-import { logger } from "../utils/logger.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 import { PLATFORM_TO_EN } from "../utils/personaIdMaps.js";
 import type { ToolModule } from "./types.js";
 
@@ -91,10 +91,10 @@ export async function handleReviewContentWizard(
     const personas = await loadAllPersonas(skillsDir);
     return await advanceWizard(skillsDir, tmpDir, state, personas, input.userMessage, input.samplingFn);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error("Review content wizard failed", { event: "review_wizard_error", error: message });
+    const info = getErrorInfo(err);
+    logger.error("Review content wizard failed", { event: "review_wizard_error", error: info.code, message: info.message });
     return {
-      content: [{ type: "text", text: `❌ 内容评测向导失败：${message}` }],
+      content: [{ type: "text", text: `❌ 内容评测向导失败：${info.message}` }],
       isError: true,
     };
   }
@@ -349,9 +349,11 @@ async function recommendPersonas(
         return { personaIds, assistantMessage: parsed.assistantMessage };
       }
     } catch (err) {
+      const info = getErrorInfo(err);
       logger.warn("AI persona recommendation failed, falling back to heuristic", {
         event: "review_recommendation_fallback",
-        error: String(err),
+        error: info.code,
+        message: info.message,
       });
     }
   }
@@ -424,10 +426,12 @@ async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {
   try {
     if (fs.existsSync(statePath)) await fs.promises.unlink(statePath);
   } catch (err) {
+    const info = getErrorInfo(err);
     logger.warn("Failed to clean review wizard state", {
       event: "review_wizard_cleanup_error",
       path: statePath,
-      error: String(err),
+      error: info.code,
+      message: info.message,
     });
   }
 }

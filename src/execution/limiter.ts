@@ -4,7 +4,7 @@
  * Shared between mcp_sampling and direct_api modes.
  */
 
-import { logger } from "../utils/logger.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -147,7 +147,7 @@ export async function withRetry<T>(
     try {
       return await fn();
     } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+      lastError = err instanceof Error ? err : new Error(getErrorInfo(err).message);
       
       // Check if error is retryable
       const errorType = getErrorType(lastError);
