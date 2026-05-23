@@ -58,7 +58,7 @@ type WizardStep =
   | "finalConfirm"
   | "completed";
 
-type DraftField = "ageRange" | "interests" | "traits" | "platform" | "authorRelation";
+type DraftField = "ageRange" | "interests" | "traits" | "platform" | "authorRelation" | "name" | "gender";
 
 interface WizardState {
   sessionId: string;
@@ -74,6 +74,8 @@ interface WizardState {
     authorRelation?: string;
     stance?: string;
     blindSpot?: string;
+    personaName?: string;
+    gender?: string;
   };
 }
 
@@ -256,6 +258,11 @@ async function advanceWizard(
         );
       }
       state.fields.authorRelation = resolved;
+
+      // Infer name, gender, culturalContext, stance, blindSpot before showing preview
+      const inferred = await inferFinalFields(state, samplingFn);
+      state.fields = { ...state.fields, ...inferred };
+
       state.step = "finalConfirm";
       await saveState(tmpDir, state);
       await saveDraft(tmpDir, state);
@@ -270,7 +277,7 @@ async function advanceWizard(
       {
         const modified = await applyFinalModification(state, userMessage, samplingFn);
         if (!modified) {
-          return toolResponse(state, "请说明要修改哪个字段：年龄段、兴趣方向、性格特质或常用平台。");
+          return toolResponse(state, "请说明要修改哪个字段：名字、性别、年龄段、兴趣方向、性格特质或常用平台。");
         }
         await saveState(tmpDir, state);
         await saveDraft(tmpDir, state);
@@ -297,6 +304,12 @@ async function applyFinalModification(
   if (!valueText) return undefined;
 
   switch (field) {
+    case "name":
+      state.fields.personaName = valueText;
+      break;
+    case "gender":
+      state.fields.gender = valueText === "男" || valueText === "女" ? valueText : "未指定";
+      break;
     case "ageRange":
       state.fields.ageRange = valueText;
       break;
@@ -326,16 +339,14 @@ async function completeWizard(
   skillsDir: string,
   tmpDir: string,
   state: WizardState,
-  samplingFn?: MultiTurnSamplingFunction
+  _samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
-  const inferred = await inferFinalFields(state, samplingFn);
-  state.fields = { ...state.fields, ...inferred };
   state.step = "completed";
   await saveState(tmpDir, state);
   await saveDraft(tmpDir, state);
 
   const createResult = await handleCreatePersona(skillsDir, tmpDir, {
-    name: inferPersonaName(state),
+    name: state.fields.personaName || inferPersonaName(state),
     sessionId: state.sessionId,
     culturalContext: state.fields.culturalContext,
     authorRelation: state.fields.authorRelation,
@@ -425,12 +436,17 @@ async function extractTraits(
 async function inferFinalFields(
   state: WizardState,
   samplingFn?: MultiTurnSamplingFunction
-): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "stance" | "blindSpot">> {
+): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "stance" | "blindSpot" | "personaName" | "gender">> {
+  const interest = state.fields.interests?.[0] || "内容";
+  const platform = state.fields.platform || "通用";
+
   const fallback = {
     culturalContext: inferCulturalContext(state),
     authorRelation: state.fields.authorRelation || "未关注",
     stance: "默认质疑",
     blindSpot: "无特定盲区",
+    personaName: `${platform}${interest}评论员`,
+    gender: "未指定",
   };
 
   if (!samplingFn) return fallback;
@@ -438,10 +454,16 @@ async function inferFinalFields(
   try {
     const json = await runJsonExtraction(samplingFn, {
       systemPrompt:
-        "你是人设属性推断器。根据已确认字段推断 culturalContext、stance、blindSpot，并严格输出 JSON：{\"culturalContext\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
+        "你是人设属性推断器。根据已确认字段推断 personaName（有创意、不公式化的角色名，不要带「评论员」后缀）、gender（男/女/未指定）、culturalContext、stance、blindSpot，并严格输出 JSON：{\"personaName\":\"...\",\"gender\":\"...\",\"culturalContext\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
       userMessage: JSON.stringify(state.fields),
     });
     return {
+      personaName: typeof json.personaName === "string" && json.personaName.trim().length > 0
+        ? json.personaName.trim()
+        : fallback.personaName,
+      gender: typeof json.gender === "string" && (json.gender === "男" || json.gender === "女")
+        ? json.gender
+        : "未指定",
       culturalContext: typeof json.culturalContext === "string" ? json.culturalContext : fallback.culturalContext,
       authorRelation: fallback.authorRelation,
       stance: typeof json.stance === "string" ? json.stance : fallback.stance,
@@ -560,7 +582,7 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
 
   const id = applyDedup(skillsDir, baseId, subDir);
 
-  const personaName = inferPersonaName(state);
+  const personaName = fields.personaName || inferPersonaName(state);
 
   const description = `一个主要活跃在【${fields.platform || ""}】平台，兴趣在于【${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}】，性格特质为【${(fields.traits || []).join("，")}】的评论员角色。`;
 
@@ -568,15 +590,11 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
   if (fields.platform) tags.push(fields.platform);
   if (Array.isArray(fields.interests)) tags.push(...fields.interests);
 
-  const platform = fields.platform || "";
-  const culturalContext = /小红书|微信|公众号|知乎|B站|抖音/.test(platform)
-    ? "中国大陆互联网文化语境"
-    : /Instagram|Reddit|YouTube|Twitter|X/.test(platform)
-      ? "海外互联网文化语境"
-      : "未提供";
+  const culturalContext = fields.culturalContext || "未提供";
   const authorRelation = fields.authorRelation || "未关注";
-  const stance = "默认质疑";
-  const blindSpot = "无特定盲区";
+  const stance = fields.stance || "默认质疑";
+  const blindSpot = fields.blindSpot || "无特定盲区";
+  const gender = fields.gender || undefined;
 
   const meta: Record<string, unknown> = {
     id,
@@ -593,7 +611,9 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
   };
 
   const bodyParts: string[] = [];
+  bodyParts.push(`角色名：${personaName}`);
   bodyParts.push(`年龄段：${fields.ageRange || ""}`);
+  if (gender) bodyParts.push(`性别：${gender}`);
   bodyParts.push(`兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`);
   bodyParts.push(`常用平台：${fields.platform || ""}`);
   bodyParts.push("性格特质：");
@@ -627,7 +647,7 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
 
   lines.push(
     "",
-    "如需修改，请直接说：年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成... / 关系改成...",
+    "如需修改，请直接说：名字改成... / 性别改成... / 年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成... / 关系改成...",
     "确认无误请回复：确认创建",
   );
 
@@ -635,6 +655,8 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
 }
 
 function detectModifiedField(input: string): DraftField | undefined {
+  if (/名字|名|名称|角色名|称呼/.test(input)) return "name";
+  if (/性别|男|女/.test(input)) return "gender";
   if (/年龄|年龄段|\d+\s*[-到至]\s*\d+\s*岁|岁/.test(input)) return "ageRange";
   if (/兴趣|方向|标签/.test(input)) return "interests";
   if (/性格|特质|脾气|行为/.test(input)) return "traits";
@@ -651,6 +673,8 @@ function extractModificationValue(input: string, field: DraftField): string {
   if (explicitMatch?.[1]) return explicitMatch[1].trim();
 
   const fieldWords: Record<DraftField, RegExp> = {
+    name: /名字|名|名称|角色名|称呼/g,
+    gender: /性别/g,
     ageRange: /年龄段?|岁数?/g,
     interests: /兴趣方向|兴趣|方向|标签/g,
     traits: /性格特质|性格|特质|脾气|行为/g,
@@ -668,6 +692,8 @@ function extractModificationValue(input: string, field: DraftField): string {
 
 function fieldLabel(field: DraftField): string {
   const labels: Record<DraftField, string> = {
+    name: "名字",
+    gender: "性别",
     ageRange: "年龄段",
     interests: "兴趣方向",
     traits: "性格特质",
