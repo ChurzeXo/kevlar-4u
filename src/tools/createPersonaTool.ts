@@ -334,7 +334,7 @@ export async function handleCreatePersona(
 	};
 }
 
-function generateIdFromDraft(draft: any): string | undefined {
+export function generateIdFromDraft(draft: any): string | undefined {
 	if (!draft?.fields) return undefined;
 	const traits = draft.fields.traits;
 	const platform = draft.fields.platform || "";
@@ -353,14 +353,14 @@ function generateIdFromDraft(draft: any): string | undefined {
 	return `${traitKey}_${platformKey}`;
 }
 
-function getSubDirFromDraft(draft: any): string | undefined {
+export function getSubDirFromDraft(draft: any): string | undefined {
 	if (!draft?.fields) return undefined;
 	const platform = draft.fields.platform || "";
 	const platformKey = mapPlatformToKey(platform) || slugify(platform);
 	return platformKey || undefined;
 }
 
-function applyDedup(skillsDir: string, baseId: string, subDir?: string): string {
+export function applyDedup(skillsDir: string, baseId: string, subDir?: string): string {
 	let id = baseId;
 	let counter = 1;
 	const dir = subDir ? path.join(skillsDir, subDir) : skillsDir;

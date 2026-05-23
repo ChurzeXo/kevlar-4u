@@ -1,9 +1,15 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
+import matter from "gray-matter";
 import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction } from "../execution/base.js";
-import { handleCreatePersona } from "./createPersonaTool.js";
+import {
+  handleCreatePersona,
+  generateIdFromDraft,
+  getSubDirFromDraft,
+  applyDedup,
+} from "./createPersonaTool.js";
 import { logger } from "../utils/logger.js";
 
 const AGE_RANGE_OPTIONS = [
@@ -253,7 +259,7 @@ async function advanceWizard(
       state.step = "finalConfirm";
       await saveState(tmpDir, state);
       await saveDraft(tmpDir, state);
-      return toolResponse(state, buildFinalConfirmationMessage(state));
+      return toolResponse(state, buildFinalConfirmationMessage(state, skillsDir));
     }
 
     case "finalConfirm":
@@ -270,7 +276,7 @@ async function advanceWizard(
         await saveDraft(tmpDir, state);
         return toolResponse(
           state,
-          [`已更新${fieldLabel(modified)}。`, "", buildFinalConfirmationMessage(state)].join("\n")
+          [`已更新${fieldLabel(modified)}。`, "", buildFinalConfirmationMessage(state, skillsDir)].join("\n")
         );
       }
 
@@ -540,26 +546,91 @@ function toolResponse(state: WizardState, assistantMessage: string): ToolResult 
   };
 }
 
-function buildFinalConfirmationMessage(state: WizardState): string {
+function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): string {
   const fields = state.fields;
-  const lines = [
-    "所有信息已收集完毕，请确认是否创建角色。",
-    "",
-    `年龄段：${fields.ageRange || ""}`,
-    `兴趣方向：${fields.interests?.join("、") || ""}`,
-    `常用平台：${fields.platform || ""}`,
-  ];
-  if (fields.platformNote) {
-    lines.push(...fields.platformNote.split("\n"));
+
+  // Build a preview of the persona file that will be created
+  const previewDraft = { fields };
+  const subDir = getSubDirFromDraft(previewDraft);
+
+  const baseId =
+    generateIdFromDraft(previewDraft) ||
+    inferPersonaName(state).replace(/[^a-zA-Z0-9_]/g, "").toLowerCase() ||
+    `persona_${Math.random().toString(36).substring(2, 8)}`;
+
+  const id = applyDedup(skillsDir, baseId, subDir);
+
+  const personaName = inferPersonaName(state);
+
+  const description = `一个主要活跃在【${fields.platform || ""}】平台，兴趣在于【${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}】，性格特质为【${(fields.traits || []).join("，")}】的评论员角色。`;
+
+  const tags: string[] = [];
+  if (fields.platform) tags.push(fields.platform);
+  if (Array.isArray(fields.interests)) tags.push(...fields.interests);
+
+  const platform = fields.platform || "";
+  const culturalContext = /小红书|微信|公众号|知乎|B站|抖音/.test(platform)
+    ? "中国大陆互联网文化语境"
+    : /Instagram|Reddit|YouTube|Twitter|X/.test(platform)
+      ? "海外互联网文化语境"
+      : "未提供";
+  const authorRelation = fields.authorRelation || "未关注";
+  const stance = "默认质疑";
+  const blindSpot = "无特定盲区";
+
+  const meta: Record<string, unknown> = {
+    id,
+    name: personaName,
+    name_en: "",
+    version: "1.0.0",
+    author: "ai-generated",
+    tags,
+    description,
+    culturalContext,
+    authorRelation,
+    stance,
+    blindSpot,
+  };
+
+  const bodyParts: string[] = [];
+  bodyParts.push(`年龄段：${fields.ageRange || ""}`);
+  bodyParts.push(`兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`);
+  bodyParts.push(`常用平台：${fields.platform || ""}`);
+  bodyParts.push("性格特质：");
+  if (Array.isArray(fields.traits)) {
+    fields.traits.forEach((t: string) => bodyParts.push(`- ${t}`));
   }
+  bodyParts.push(`文化背景：${culturalContext}`);
+  bodyParts.push(`与作者的关系：${authorRelation}`);
+  bodyParts.push(`立场：${stance}`);
+  bodyParts.push(`盲区：${blindSpot}`);
+
+  const fullContent = matter.stringify(bodyParts.join("\n"), meta);
+
+  const filePath = subDir
+    ? `skills/${subDir}/${id}.md`
+    : `skills/${id}.md`;
+
+  const lines = [
+    "所有信息已收集完毕，以下是即将创建的角色文件预览：",
+    "",
+    `📄 ${filePath}`,
+    "",
+    "```yaml",
+    fullContent.trimEnd(),
+    "```",
+  ];
+
+  if (fields.platformNote) {
+    lines.push("", fields.platformNote);
+  }
+
   lines.push(
-    `与作者的关系：${fields.authorRelation || ""}`,
-    "性格特质：",
-    ...(fields.traits || []).map((trait) => `- ${trait}`),
     "",
     "如需修改，请直接说：年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成... / 关系改成...",
     "确认无误请回复：确认创建",
   );
+
   return lines.join("\n");
 }
 
