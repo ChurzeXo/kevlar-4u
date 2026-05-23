@@ -14,3 +14,6 @@ docs/AUDIT-report.md
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
+
+# Custom persona files (platform-specific reviewer personas)
+skills/*/*.md

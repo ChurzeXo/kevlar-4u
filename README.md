@@ -33,7 +33,7 @@ flowchart TD
 ## 核心能力
 
 - **内容压力测试**：用一个或多个评论员人设审查文案、脚本、帖子、宣发内容。
-- **服务端状态机向导**：创建人设、评审内容、删除人设、恢复默认人设、修改配置都有独立 wizard 工具。
+- **服务端状态机向导**：创建人设、评审内容、删除人设、修改配置都有独立 wizard 工具。
 - **动态人设创建**：用户自然描述角色，AI 负责提炼，Kevlar 负责保存结构化草稿并最终写入 `.md` 人设文件。
 - **多执行模式**：支持 `mcp_sampling`、`direct_api`、`orchestration`，`auto` 会按环境自动选择。
 - **本地优先**：人设、草稿、配置默认保存在本地 `skills/` 目录，不把 API Key 写入配置文件。
@@ -134,43 +134,68 @@ Kevlar 支持三种执行模式。默认 `auto` 会按环境自动选择。
 ```text
 kevlar/
 ├── config/
-│   └── mcp-config.json
-├── docs/
+│   └── mcp-config.json                    # MCP 客户端配置模板
+├── docs/                                  # 架构设计、审计报告等
 │   ├── SPEC-execution-modes.md
-│   └── PRE_RELEASE_AUDIT_REQUEST.md
-├── skills/
-│   ├── _template.md
-│   └── tmp/                         # 运行时会话状态，测试或运行时生成
+│   ├── PRE_RELEASE_AUDIT_REQUEST.md
+│   └── ...
+├── scripts/                               # 安装与配置脚本
+│   ├── cli.ts                             # 交互式安装 CLI
+│   ├── registry.ts                        # MCP 客户端检测
+│   └── setup.ts                           # 零配置安装脚本
+├── skills/                                # 评论员人设库（自定义，不提交到仓库）
+│   ├── _template.md                       # 人设模板
+│   └── tmp/                               # 运行时向导会话状态
 ├── src/
-│   ├── index.ts                     # stdio server 入口
-│   ├── server.ts                    # MCP server、tools、prompts 注册与分发
-│   ├── execution/                   # 多执行模式与评审执行层
-│   │   ├── index.ts
-│   │   ├── base.ts
-│   │   ├── client.ts
-│   │   ├── config.ts
-│   │   ├── aggregator.ts
-│   │   ├── limiter.ts
-│   │   ├── lock.ts
+│   ├── index.ts                           # stdio server 入口
+│   ├── server.ts                          # MCP server、依赖注入、工具注册
+│   ├── __tests__/                         # 测试套件
+│   │   ├── configureWizard.test.ts
+│   │   ├── createPersonaWizard.test.ts
+│   │   ├── deletePersonaWizard.test.ts
+│   │   ├── e2e.test.ts
+│   │   ├── execution.test.ts
+│   │   ├── parser.test.ts
+│   │   └── reviewContentWizard.test.ts
+│   ├── execution/                         # 多模式执行层
+│   │   ├── index.ts                       # 执行入口、模式解析
+│   │   ├── base.ts                        # 类型定义与接口
+│   │   ├── client.ts                      # 客户端能力检测
+│   │   ├── config.ts                      # 配置读写
+│   │   ├── aggregator.ts                  # 评审报告聚合
+│   │   ├── limiter.ts                     # 并发限流与重试
+│   │   ├── lock.ts                        # 评审锁
+│   │   ├── parallel.ts                    # 共享并行执行
 │   │   └── modes/
+│   │       ├── index.ts
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
 │   │       └── direct_api.ts
-│   ├── tools/
+│   ├── tools/                             # MCP 工具
+│   │   ├── index.ts                       # 工具注册中心
+│   │   ├── types.ts                       # 类型定义
+│   │   ├── listPersonasTool.ts
+│   │   ├── createPersonaTool.ts           # create_persona + 草稿工具
 │   │   ├── createPersonaWizardTool.ts
-│   │   ├── reviewContentWizardTool.ts
+│   │   ├── deletePersonaTool.ts
 │   │   ├── deletePersonaWizardTool.ts
-│   │   ├── resetPersonasWizardTool.ts
-│   │   ├── configureWizardTool.ts
-│   │   ├── createPersonaTool.ts
 │   │   ├── reviewTool.ts
-│   │   └── ...
+│   │   ├── reviewContentWizardTool.ts
+│   │   ├── configureTool.ts
+│   │   ├── configureWizardTool.ts
+│   │   ├── getModesTool.ts
+│   │   └── helpTool.ts
 │   ├── prompts/
-│   │   └── reviewDispatcherPrompt.ts
+│   │   └── reviewDispatcherPrompt.ts      # 内部设计参考（不再暴露为 MCP Prompts）
 │   └── utils/
-│       ├── parser.ts
-│       ├── errors.ts
-│       └── logger.ts
+│       ├── errors.ts                      # 错误码与格式化
+│       ├── logger.ts                      # 结构化日志
+│       ├── observability.ts               # 可观测性（错误提取、耗时追踪）
+│       ├── parser.ts                      # 人设文件解析与写入
+│       ├── personaIdMaps.ts               # trait/platform 映射字典
+│       ├── sanitize.ts                    # 凭据扫描、Prompt 边界处理
+│       └── types.ts
+├── tsconfig.json
 └── package.json
 ```
 
@@ -196,6 +221,18 @@ npm run dev
 
 ```bash
 npm start
+```
+
+零配置安装（交互式检测 MCP 客户端并写入配置）：
+
+```bash
+npm run setup
+```
+
+交互式安装 CLI：
+
+```bash
+npm run kevlar-mcp
 ```
 
 ---
@@ -270,28 +307,12 @@ node /ABSOLUTE/PATH/TO/kevlar/dist/index.js
 
 API Key 只从环境变量读取，不写入 `kevlar-config.json`。
 
----
-
-## Prompts 与降级说明
-
-Kevlar 仍注册了 MCP Prompts：
-
-- `create_persona`
-- `review_content`
-
-这些 prompt 现在是兼容旧客户端的动态上下文提示，不是主流程真相源。主流程应以 wizard 工具返回的 `kevlar-state` 为准。
-
-对于创建人设，`SYSTEM_PROMPT` 也保留在 `createPersonaTool.ts` 中作为旧流程兼容说明。新流程不要求宿主 AI 修改 system prompt，而是通过 `create_persona_wizard` 把步骤状态、字段提炼和最终写入交给 Kevlar 服务端维护。
-
----
-
 ## 安全边界
 
 - `sessionId` 只允许 `[a-z0-9-]`。
 - 人设写入和删除都通过路径校验限制在 `skills/` 内。
 - 运行时草稿和向导状态写入 `skills/tmp/`，启动时会清理过期草稿。
 - 删除人设必须绑定目标并回复完整确认语。
-- 恢复默认人设不会删除自定义角色。
 - 配置修改必须先预览再确认。
 - API Key 不通过工具参数传递，不写入本地配置。
 - 非 `orchestration` 执行模式会使用评审锁，避免多个外部模型任务同时竞争资源。
@@ -300,7 +321,7 @@ Kevlar 仍注册了 MCP Prompts：
 
 ## 贡献评论员人设
 
-在 `skills/` 下新增 `.md` 文件：
+在 `skills/` 下按平台新增子目录及 `.md` 文件（或直接放在 `skills/` 根目录），自定义人设文件默认被 `.gitignore` 排除，不会提交到仓库：
 
 ```markdown
 ---
