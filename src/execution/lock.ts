@@ -3,13 +3,27 @@
  * 
  * Prevents concurrent execution of sampling/direct_api modes.
  * Orchestration mode is exempt (no external calls).
+ * Includes TTL to prevent deadlocks on crash.
  */
 
-let reviewLock: { mode: string; startedAt: number } | null = null;
+const LOCK_TTL_MS = 300_000; // 5 minutes
+
+interface LockEntry {
+  mode: string;
+  acquiredAt: number;
+}
+
+let reviewLock: LockEntry | null = null;
 
 export function acquireReviewLock(mode: string): boolean {
-  if (reviewLock) return false;
-  reviewLock = { mode, startedAt: Date.now() };
+  if (reviewLock) {
+    if (Date.now() - reviewLock.acquiredAt > LOCK_TTL_MS) {
+      reviewLock = { mode, acquiredAt: Date.now() };
+      return true;
+    }
+    return false;
+  }
+  reviewLock = { mode, acquiredAt: Date.now() };
   return true;
 }
 
@@ -17,10 +31,17 @@ export function releaseReviewLock(): void {
   reviewLock = null;
 }
 
-export function getReviewLock(): { mode: string; startedAt: number } | null {
+export function getReviewLock(): LockEntry | null {
+  if (reviewLock && Date.now() - reviewLock.acquiredAt > LOCK_TTL_MS) {
+    reviewLock = null;
+  }
   return reviewLock;
 }
 
 export function isLocked(): boolean {
+  if (reviewLock && Date.now() - reviewLock.acquiredAt > LOCK_TTL_MS) {
+    reviewLock = null;
+    return false;
+  }
   return reviewLock !== null;
 }

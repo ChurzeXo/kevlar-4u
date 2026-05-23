@@ -1,6 +1,7 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
+import type { ToolModule } from "./types.js";
 import {
 	validateWritePath,
 	writePersonaFile,
@@ -149,6 +150,30 @@ export interface CreatePersonaInput {
 	stance?: string;
 	blindSpot?: string;
 }
+
+export const updatePersonaDraftModule: ToolModule = {
+  definition: updatePersonaDraftToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("需要提供参数");
+    return await handleUpdatePersonaDraft(deps.tmpDir, args as any);
+  },
+};
+
+export const deletePersonaDraftModule: ToolModule = {
+  definition: deletePersonaDraftToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("需要提供参数");
+    return await handleDeletePersonaDraft(deps.tmpDir, args as any);
+  },
+};
+
+export const createPersonaModule: ToolModule = {
+  definition: createPersonaToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("创建评论员需要提供参数");
+    return await handleCreatePersona(deps.skillsDir, deps.tmpDir, args as any);
+  },
+};
 
 export async function handleSaveDraft(
 	tmpDir: string,

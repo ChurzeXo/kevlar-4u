@@ -5,6 +5,7 @@ import { ToolResult } from "../utils/types.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleDeletePersona } from "./deletePersonaTool.js";
 import { logger } from "../utils/logger.js";
+import type { ToolModule } from "./types.js";
 
 export const deletePersonaWizardToolDefinition: Tool = {
   name: "delete_persona_wizard",
@@ -40,6 +41,14 @@ interface DeletePersonaWizardState {
   targetPersonaId?: string;
   targetPersonaName?: string;
 }
+
+export const deletePersonaWizardModule: ToolModule = {
+  definition: deletePersonaWizardToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("删除向导需要提供参数");
+    return await handleDeletePersonaWizard(deps.skillsDir, deps.tmpDir, args as any);
+  },
+};
 
 export async function handleDeletePersonaWizard(
   skillsDir: string,
@@ -195,7 +204,10 @@ async function loadOrCreateState(
 
 async function saveState(tmpDir: string, state: DeletePersonaWizardState): Promise<void> {
   await fs.promises.mkdir(tmpDir, { recursive: true });
-  await fs.promises.writeFile(getStatePath(tmpDir, state.sessionId), JSON.stringify(state, null, 2), "utf-8");
+  const statePath = getStatePath(tmpDir, state.sessionId);
+  const tmpPath = statePath + ".tmp";
+  await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.promises.rename(tmpPath, statePath);
 }
 
 async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {

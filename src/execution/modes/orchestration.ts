@@ -11,7 +11,7 @@ import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode
 import type { Persona } from "../../utils/parser.js";
 import { wrapContent } from "../../utils/sanitize.js";
 
-export const MODE: ExecutionMode = "orchestration";
+const MODE: ExecutionMode = "orchestration";
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ function buildOrchestrationPrompt(
     ? `\n\n**发布平台 & 目标受众背景**：${contextNote}`
     : "";
 
-  return `# 🛡️ Kevlar 宿主辅助评测任务
+  return `# Kevlar 宿主辅助评测任务
 
 **待测试内容**（共 ${content.length} 字）已锁定。${contextSection}
 
@@ -114,15 +114,14 @@ function buildPersonaBlock(
     : "";
 
   const safeContent = wrapContent(content);
+  const safeSystemPrompt = wrapContent(persona.systemPrompt, "sp");
   return `## 第 ${index} 号子代理：${persona.meta.name}
 
 **角色描述**：${persona.meta.description}
 
 **指令**：请你完全进入以下系统人设，用这个角色的思维方式、语言风格和批判标准，独立阅读下方内容并给出评论。
 
-<系统人设开始>
-${persona.systemPrompt}
-</系统人设结束>
+${safeSystemPrompt}
 
 **待评审内容**：
 ${safeContent}${contextSection}

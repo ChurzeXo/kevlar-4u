@@ -1,5 +1,6 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ToolResult } from "../utils/types.js";
+import type { ToolModule } from "./types.js";
 
 export const helpToolDefinition: Tool = {
   name: "kevlar_help",
@@ -51,6 +52,13 @@ Kevlar 是一个内容压力测试工具。把你的文案交给多个独立 AI 
 可以。评论员文件存储在项目目录的 skills 文件夹中，分享文件给对方即可。
 
 `;
+
+export const helpModule: ToolModule = {
+  definition: helpToolDefinition,
+  handler: () => async () => {
+    return await handleHelp();
+  },
+};
 
 export async function handleHelp(): Promise<ToolResult> {
   return {

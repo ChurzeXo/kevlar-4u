@@ -7,13 +7,11 @@
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
-import { readConfig } from "../config.js";
-import { getRateLimiter, withRetry } from "../limiter.js";
-import { ResultAggregator, checkBudget, generateAggregatedReport } from "../aggregator.js";
+import { executePersonasInParallel, buildUserMessage } from "../parallel.js";
 import { logger } from "../../utils/logger.js";
-import { scanForCredentials, wrapContent } from "../../utils/sanitize.js";
+import { scanForCredentials } from "../../utils/sanitize.js";
 
-export const MODE: ExecutionMode = "direct_api";
+const MODE: ExecutionMode = "direct_api";
 
 // ── API Key Management ────────────────────────────────────────────────────────
 
@@ -30,8 +28,6 @@ function getApiKey(): ApiKeyInfo | null {
     process.env.OPENAI_API_KEY;
 
   if (!key) {
-    // If no API key is set, but OLLAMA_BASE_URL is set, or KEVLAR_MODEL is configured and looks like
-    // a local model, allow direct API mode without a key, treating it as Ollama.
     const isOllamaEnv =
       !!process.env.OLLAMA_BASE_URL ||
       (!!process.env.KEVLAR_MODEL &&
@@ -47,15 +43,13 @@ function getApiKey(): ApiKeyInfo | null {
     return null;
   }
 
-  // Detect provider
   if (key.startsWith("sk-ant-")) {
     return { key, provider: "anthropic" };
   }
   if (key.startsWith("sk-")) {
     return { key, provider: "openai" };
   }
-  
-  // Ollama keys are usually local identifiers
+
   return { key, provider: "ollama" };
 }
 
@@ -95,7 +89,18 @@ async function callApi(keyInfo: ApiKeyInfo, request: LlmRequest): Promise<LlmRes
     provider,
     model: request.model,
     systemLength: request.system.length,
+    keyMasked: maskApiKey(key),
   });
+
+  if (provider === "ollama") {
+    const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    if (!baseUrl.includes("localhost") && !baseUrl.includes("127.0.0.1")) {
+      logger.warn("Ollama base URL is not localhost", {
+        event: "ollama_external_url",
+        baseUrl,
+      });
+    }
+  }
 
   if (provider === "anthropic") {
     return callAnthropic(key, request);
@@ -146,7 +151,7 @@ async function callAnthropic(apiKey: string, request: LlmRequest): Promise<LlmRe
 
 async function callOpenAi(apiKey: string, request: LlmRequest): Promise<LlmResponse> {
   const model = request.model || "gpt-4o";
-  
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -185,7 +190,7 @@ async function callOpenAi(apiKey: string, request: LlmRequest): Promise<LlmRespo
 
 async function callOllama(apiKey: string, request: LlmRequest): Promise<LlmResponse> {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-  
+
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: {
@@ -226,16 +231,11 @@ export const directApiHandler: ExecutionHandler = {
   priority: 20, // Medium priority
 
   canExecute(): boolean {
-    // Requires API key to be configured
     return hasApiKey();
   },
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { personas, content, context: contextNote } = ctx;
-    const config = readConfig();
-    
-    // Budget check
-    checkBudget(personas.length, content.length);
 
     const keyInfo = getApiKey();
     if (!keyInfo) {
@@ -248,91 +248,23 @@ export const directApiHandler: ExecutionHandler = {
       provider: keyInfo.provider,
     });
 
-    const limiter = getRateLimiter({
-      maxConcurrent: config.multiAgent.maxConcurrency,
-      minDelayMs: Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000,
-    });
-
-    const aggregator = new ResultAggregator();
-
-    // Parallel execution with rate limiting and startup stagger (jitter)
-    const promises = personas.map(async (persona, index) => {
-      await limiter.acquire();
-      
-      try {
-        // Add a small stagger delay (e.g. 50ms per persona index) to stagger parallel request initiation
-        if (index > 0) {
-          const jitterMs = index * 50 + Math.floor(Math.random() * 30);
-          await new Promise((resolve) => setTimeout(resolve, jitterMs));
-        }
-
-        await limiter.waitForDelay();
-        
-        const result = await withRetry(
-          () => executePersonaReview(keyInfo, persona, content, contextNote),
-          {
-            maxRetries: 3,
-            onRetry: (attempt, error, delay) => {
-              logger.warn("API retry", {
-                event: "api_retry",
-                personaId: persona.meta.id,
-                attempt,
-                delayMs: delay,
-                error: error.message,
-              });
-            },
-          }
-        );
-
-        aggregator.addSuccess({
-          personaId: persona.meta.id,
-          personaName: persona.meta.name,
-          review: result,
-        });
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        logger.error("Persona review failed", {
-          event: "persona_failed",
-          personaId: persona.meta.id,
-          error: errorMsg,
-        });
-
-        aggregator.addFailure(persona.meta.id, persona.meta.name, errorMsg);
-      } finally {
-        limiter.release();
+    const result = await executePersonasInParallel(
+      personas,
+      content,
+      { mode: MODE, retryEventName: "api" },
+      async (persona: Persona) => {
+        const review = await executePersonaReview(keyInfo, persona, content, contextNote);
+        return review;
       }
-    });
-
-    await Promise.all(promises);
-
-    const results = aggregator.getResults();
-    const failed = aggregator.getFailed();
-    const successful = aggregator.getSuccessful();
-
-    // Generate report
-    const contentSummary = summarizeContent(content);
-    
-    const report = generateAggregatedReport({
-      mode: MODE,
-      contentSummary,
-      personas: results,
-    });
+    );
 
     logger.info("Direct API review completed", {
       event: "direct_api_complete",
-      successful: successful.length,
-      failed: failed.length,
+      personas: result.personas.length,
+      partialFailures: result.partialFailures?.length || 0,
     });
 
-    return {
-      report,
-      personas: successful.map((p) => p.personaId),
-      mode: MODE,
-      partialFailures: failed.map((f) => ({
-        personaId: f.personaId,
-        error: f.error || "Unknown error",
-      })),
-    };
+    return result;
   },
 };
 
@@ -345,7 +277,7 @@ async function executePersonaReview(
   contextNote?: string
 ): Promise<string> {
   const userMessage = buildUserMessage(content, contextNote);
-  
+
   const response = await callApi(keyInfo, {
     model: process.env.KEVLAR_MODEL || "",
     system: persona.systemPrompt,
@@ -364,20 +296,4 @@ async function executePersonaReview(
   }
 
   return response.content;
-}
-
-function buildUserMessage(content: string, contextNote?: string): string {
-  const wrapped = wrapContent(content);
-  let message = `请对以下内容进行评论：\n\n${wrapped}`;
-  if (contextNote) {
-    message += `\n\n**发布平台 & 目标受众背景**：${contextNote}`;
-  }
-  return message;
-}
-
-// ── Content Summarizer ────────────────────────────────────────────────────────
-
-function summarizeContent(content: string, maxLength = 50): string {
-  if (content.length <= maxLength) return content;
-  return content.slice(0, maxLength) + "...";
 }

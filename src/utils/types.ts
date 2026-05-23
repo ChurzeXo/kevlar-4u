@@ -1,1 +1,1 @@
-export type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
+export type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };

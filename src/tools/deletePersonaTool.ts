@@ -2,6 +2,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as fs from "fs";
 import { loadPersonaById, validateWritePath, invalidatePersonasCache } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
+import type { ToolModule } from "./types.js";
 
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
@@ -20,6 +21,16 @@ export const deletePersonaToolDefinition: Tool = {
       },
     },
     required: ["id", "confirm"],
+  },
+};
+
+export const deletePersonaModule: ToolModule = {
+  definition: deletePersonaToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("删除评论员需要提供参数");
+    const delInput = args as { id: string; confirm: boolean };
+    if (!delInput.id) throw new Error("请指定要删除的评论员");
+    return await handleDeletePersona(deps.skillsDir, delInput);
   },
 };
 

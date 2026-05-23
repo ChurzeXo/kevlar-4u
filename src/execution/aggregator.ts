@@ -8,20 +8,20 @@ import type { ExecutionMode } from "./base.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
-export interface PersonaResult {
+interface PersonaResult {
   personaId: string;
   personaName: string;
   review: string;
   error?: string;
 }
 
-export interface PersonaResultWithMeta extends PersonaResult {
+interface PersonaResultWithMeta extends PersonaResult {
   completedAt: Date;
 }
 
 // ── Partial Result Container ───────────────────────────────────────────────────
 
-export interface PartialResult<T> {
+interface PartialResult<T> {
   successful: T[];
   failed: Array<{ index: number; error: string }>;
   successRate: number;
@@ -80,7 +80,7 @@ export class ResultAggregator {
 
 // ── Report Generator ─────────────────────────────────────────────────────────
 
-export interface AggregatedReportOptions {
+interface AggregatedReportOptions {
   mode: ExecutionMode;
   contentSummary: string;
   personas: PersonaResultWithMeta[];
@@ -118,47 +118,49 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
     }
   }
 
-  // Risk assessment template
+  // Aggregated review summary
   report += `
 
 ---
 
-## 综合风险评估
+## 综合摘要
 
-| 维度 | 风险等级 | 说明 |
-|------|---------|------|
-| 逻辑严密性 | 🟢/🟡/🔴 | （说明） |
-| 前段留存率 | 🟢/🟡/🔴 | （说明） |
-| 传播潜力 | 🟢/🟡/🔴 | （说明） |
-| 整体可信度 | 🟢/🟡/🔴 | （说明） |
+${resultsSummary(successful)}`;
 
-## 高优先级修改建议
-
-1. **最紧急**：（来自哪个人设的哪个核心槽点）
-2. **次要**：（另一个重要建议）
-3. **锦上添花**：（可选优化点）
-
-## 一句话总评
-
-（一句最犀利的总结：这份内容现在能不能发？）
+  report += `
 
 ---
+
 *由 Kevlar MCP Server 驱动 · 本地多智能体内容防弹衣*`;
 
   return report;
 }
 
+function resultsSummary(successful: PersonaResultWithMeta[]): string {
+  if (successful.length === 0) return "无评论员成功完成评测。";
+
+  const lines: string[] = [];
+  for (const p of successful) {
+    const firstLine = p.review.split("\n")[0]?.replace(/^[#*\s]+/, "").slice(0, 80) || "";
+    lines.push(`- **${p.personaName}**：${firstLine}${firstLine.length >= 80 ? "…" : ""}`);
+  }
+  return lines.join("\n");
+}
+
 // ── Token Budget ──────────────────────────────────────────────────────────────
 
-export const DEFAULT_TOKEN_BUDGET = {
+const DEFAULT_TOKEN_BUDGET = {
   per_task: 50_000,
   per_persona: 10_000,
 };
 
-export function estimateTokenCost(personas: number, contentLength: number, content?: string): number {
-  // Estimate: CJK ~1-2 chars/token, English ~4 chars/token.
-  // Use content sampling to pick a ratio that avoids over- or underestimation.
-  let cjkRatio = 0.5; // default: mixed content (3 chars/token equivalent)
+export function estimateTokenCost(
+  personas: number,
+  contentLength: number,
+  content?: string,
+  personaSystemPrompts?: string[]
+): number {
+  let cjkRatio = 0.5;
   if (content) {
     const sample = content.slice(0, 200);
     let cjkCount = 0;
@@ -167,15 +169,23 @@ export function estimateTokenCost(personas: number, contentLength: number, conte
     }
     cjkRatio = cjkCount / Math.max(sample.length, 1);
   }
-  // Linear interpolation: pure CJK ~2 chars/tok, pure ASCII ~4 chars/tok, mixed → blend
-  const charsPerToken = 4 - cjkRatio * 2; // 4 when 0% CJK, 2 when 100% CJK
-  return Math.floor(contentLength / Math.max(charsPerToken, 1)) + personas * DEFAULT_TOKEN_BUDGET.per_persona;
+  const charsPerToken = 4 - cjkRatio * 2;
+  const contentTokens = Math.floor(contentLength / Math.max(charsPerToken, 1));
+
+  let systemPromptTokens = 0;
+  if (personaSystemPrompts) {
+    for (const sp of personaSystemPrompts) {
+      systemPromptTokens += Math.floor(sp.length / Math.max(charsPerToken, 1));
+    }
+  }
+
+  return contentTokens + personas * DEFAULT_TOKEN_BUDGET.per_persona + systemPromptTokens;
 }
 
-export function checkBudget(personas: number, contentLength: number): void {
+export function checkBudget(personas: number, contentLength: number, personaSystemPrompts?: string[]): void {
   const budget =
     Number(process.env.KEVLAR_TOKEN_BUDGET_PER_TASK) || DEFAULT_TOKEN_BUDGET.per_task;
-  const estimated = estimateTokenCost(personas, contentLength);
+  const estimated = estimateTokenCost(personas, contentLength, undefined, personaSystemPrompts);
 
   if (estimated > budget) {
     throw new Error(

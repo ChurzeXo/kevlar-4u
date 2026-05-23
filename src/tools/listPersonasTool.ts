@@ -2,6 +2,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { PLATFORM_TO_EN } from "../utils/personaIdMaps.js";
 import { ToolResult } from "../utils/types.js";
+import type { ToolModule } from "./types.js";
 
 export const listPersonasToolDefinition: Tool = {
   name: "list_personas",
@@ -31,6 +32,14 @@ function getPersonaPlatform(persona: Persona): string {
   }
   return "通用";
 }
+
+export const listPersonasModule: ToolModule = {
+  definition: listPersonasToolDefinition,
+  handler: (deps) => async (args) => {
+    const platform = args?.platform as string | undefined;
+    return await handleListPersonas(deps.skillsDir, platform);
+  },
+};
 
 export async function handleListPersonas(
   skillsDir: string,

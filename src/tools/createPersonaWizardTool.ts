@@ -3,6 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
 import type { MultiTurnSamplingFunction } from "../execution/base.js";
+import type { ToolModule } from "./types.js";
 import {
   handleCreatePersona,
   generateIdFromDraft,
@@ -82,6 +83,18 @@ interface ExtractionResult {
   value: string | string[];
   assistantMessage: string;
 }
+
+export const createPersonaWizardModule: ToolModule = {
+  definition: createPersonaWizardToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("向导需要提供参数");
+    const input = args as any;
+    if (deps.updateClientSamplingSupport()) {
+      input.samplingFn = deps.createMultiTurnSamplingFn();
+    }
+    return await handleCreatePersonaWizard(deps.skillsDir, deps.tmpDir, input);
+  },
+};
 
 export async function handleCreatePersonaWizard(
   skillsDir: string,
@@ -514,7 +527,10 @@ async function loadOrCreateState(tmpDir: string, inputSessionId?: string): Promi
 
 async function saveState(tmpDir: string, state: WizardState): Promise<void> {
   await fs.promises.mkdir(tmpDir, { recursive: true });
-  await fs.promises.writeFile(getStatePath(tmpDir, state.sessionId), JSON.stringify(state, null, 2), "utf-8");
+  const statePath = getStatePath(tmpDir, state.sessionId);
+  const tmpPath = statePath + ".tmp";
+  await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.promises.rename(tmpPath, statePath);
 }
 
 async function saveDraft(tmpDir: string, state: WizardState): Promise<void> {

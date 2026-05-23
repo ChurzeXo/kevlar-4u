@@ -12,7 +12,7 @@ import type { ExecutionMode, ResolveableMode } from "./base.js";
 
 // ── Config Schema ─────────────────────────────────────────────────────────────
 
-export interface KevlarConfig {
+interface KevlarConfig {
   mode: ResolveableMode;
   multiAgent: {
     maxConcurrency: number;
@@ -44,14 +44,11 @@ export function setConfigPath(skillsDir: string): void {
   configPath = path.join(skillsDir, "kevlar-config.json");
 }
 
-export function getConfigPath(): string | null {
-  return configPath;
-}
-
 // ── Read Config ──────────────────────────────────────────────────────────────
 
 export function readConfig(): KevlarConfig {
   if (!configPath) {
+    logger.warn("Config path not initialized, using defaults", { event: "config_not_initialized" });
     return { ...DEFAULT_CONFIG };
   }
 
@@ -83,7 +80,7 @@ export async function readConfigAsync(): Promise<KevlarConfig> {
 
 // ── Write Config ─────────────────────────────────────────────────────────────
 
-export interface UpdateConfigOptions {
+interface UpdateConfigOptions {
   mode?: ResolveableMode;
   maxConcurrency?: number;
   personaOrder?: string[];

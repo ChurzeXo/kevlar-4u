@@ -8,7 +8,7 @@ import { logger } from "../utils/logger.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-export interface RateLimitConfig {
+interface RateLimitConfig {
   maxConcurrent: number;
   minDelayMs: number;
 }
@@ -92,7 +92,7 @@ export class RateLimiter {
 
 // ── Retry Config ──────────────────────────────────────────────────────────────
 
-export interface RetryConfig {
+interface RetryConfig {
   maxRetries: number;
   backoffMs: number;
   backoffMultiplier: number;
@@ -123,7 +123,7 @@ export function isRetryableError(errorType: string): errorType is RetryableError
 
 // ── Retry Wrapper ─────────────────────────────────────────────────────────────
 
-export interface RetryOptions {
+interface RetryOptions {
   maxRetries?: number;
   backoffMs?: number;
   backoffMultiplier?: number;
@@ -174,30 +174,28 @@ export async function withRetry<T>(
 
 function getErrorType(err: Error): string {
   const message = err.message.toLowerCase();
-  if (message.includes("rate limit") || message.includes("429")) {
-    return "rate_limit_exceeded";
+
+  // Check by status code first (structured API error responses)
+  const statusMatch = message.match(/\b(\d{3})\b/);
+  if (statusMatch) {
+    const code = statusMatch[1];
+    if (code === "429") return "rate_limit_exceeded";
+    if (code === "503") return "service_unavailable";
+    if (code === "504" || code === "408") return "timeout";
+    if (code === "502") return "service_unavailable";
   }
-  if (message.includes("503") || message.includes("unavailable")) {
-    return "service_unavailable";
-  }
-  if (message.includes("timeout") || message.includes("ETIMEDOUT")) {
-    return "timeout";
-  }
-  if (message.includes("network") || message.includes("ECONNREFUSED")) {
-    return "network_error";
-  }
+
+  if (message.includes("rate limit")) return "rate_limit_exceeded";
+  if (message.includes("unavailable")) return "service_unavailable";
+  if (message.includes("timeout") || message.includes("ETIMEDOUT")) return "timeout";
+  if (message.includes("network") || message.includes("ECONNREFUSED") || message.includes("ENOTFOUND")) return "network_error";
   return "unknown";
 }
 
-// ── Singleton Instance ────────────────────────────────────────────────────────
-
-let globalLimiter: RateLimiter | null = null;
+// ── Factory ─────────────────────────────────────────────────────────────────────
 
 export function getRateLimiter(config?: RateLimitConfig): RateLimiter {
-  if (!globalLimiter) {
-    globalLimiter = new RateLimiter(config);
-  }
-  return globalLimiter;
+  return new RateLimiter(config);
 }
 
 

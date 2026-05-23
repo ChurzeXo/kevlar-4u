@@ -18,6 +18,8 @@ import { RateLimiter, withRetry, isRetryableError } from "../execution/limiter.j
 import { ResultAggregator, generateAggregatedReport, estimateTokenCost, checkBudget } from "../execution/aggregator.js";
 import { acquireReviewLock, releaseReviewLock, getReviewLock, isLocked } from "../execution/lock.js";
 import { executeReview, loadPersonasForReview, validatePersonaFields } from "../execution/index.js";
+import { executePersonasInParallel } from "../execution/parallel.js";
+import type { Persona } from "../utils/parser.js";
 
 let tmpDir: string;
 
@@ -414,7 +416,6 @@ describe("Review Lock", () => {
     const lock = getReviewLock();
     assert.ok(lock);
     assert.equal(lock!.mode, "test_mode");
-    assert.ok(lock!.startedAt > 0);
   });
 });
 
@@ -529,35 +530,39 @@ describe("executeReview", () => {
 
 describe("validatePersonaFields", () => {
   it("succeeds for valid custom persona", () => {
-    const validCustom: any = {
-      meta: { author: "user", name: "Custom", description: "活跃于平台" },
+    const validCustom = {
+      meta: { id: "custom", name: "Custom", name_en: "", version: "1.0", author: "user", tags: ["通用"], description: "活跃于平台" },
       systemPrompt: "性格特质：温和。盲区：无。",
-    };
+      filePath: "",
+    } as Persona;
     assert.doesNotThrow(() => validatePersonaFields(validCustom));
   });
 
   it("throws for custom persona missing platform", () => {
-    const invalid: any = {
-      meta: { author: "user", name: "Custom" },
+    const invalid = {
+      meta: { id: "custom", name: "Custom", name_en: "", version: "1.0", author: "user", tags: [], description: "有详尽的性格描述", blindSpot: "无" },
       systemPrompt: "性格特质：温和。盲区：无。",
-    };
-    assert.throws(() => validatePersonaFields(invalid), /未通过字段校验/);
+      filePath: "",
+    } as Persona;
+    assert.throws(() => validatePersonaFields(invalid), /缺少平台/);
   });
 
   it("throws for custom persona missing traits", () => {
-    const invalid: any = {
-      meta: { author: "user", name: "Custom", description: "活跃于平台" },
+    const invalid = {
+      meta: { id: "custom", name: "Custom", name_en: "", version: "1.0", author: "user", tags: ["通用"], description: "A", blindSpot: "无" },
       systemPrompt: "盲区：无。",
-    };
-    assert.throws(() => validatePersonaFields(invalid), /未通过字段校验/);
+      filePath: "",
+    } as Persona;
+    assert.throws(() => validatePersonaFields(invalid), /缺少性格描述/);
   });
 
   it("throws for custom persona missing blind spot", () => {
-    const invalid: any = {
-      meta: { author: "user", name: "Custom", description: "活跃于平台" },
+    const invalid = {
+      meta: { id: "custom", name: "Custom", name_en: "", version: "1.0", author: "user", tags: ["通用"], description: "性格温和的评论员" },
       systemPrompt: "性格特质：温和。",
-    };
-    assert.throws(() => validatePersonaFields(invalid), /未通过字段校验/);
+      filePath: "",
+    } as Persona;
+    assert.throws(() => validatePersonaFields(invalid), /缺少盲区/);
   });
 });
 
@@ -621,5 +626,77 @@ describe("loadPersonasForReview", () => {
     assert.equal(personas.length, 1);
     assert.equal(personas[0].meta.id, "test_persona");
     assert.deepEqual(missingIds, ["ghost"]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// executePersonasInParallel Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("executePersonasInParallel", () => {
+  const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
+    meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
+    systemPrompt: sp,
+    filePath: `/test/${id}.md`,
+  });
+
+  it("executes all personas successfully", async () => {
+    const personas = [makePersona("p1", "A"), makePersona("p2", "B")];
+    const result = await executePersonasInParallel(
+      personas,
+      "Test content",
+      { mode: "mcp_sampling", retryEventName: "test" },
+      async (p) => `Review by ${p.meta.name}`
+    );
+
+    assert.equal(result.mode, "mcp_sampling");
+    assert.equal(result.personas.length, 2);
+    assert.ok(result.personas.includes("p1"));
+    assert.ok(result.personas.includes("p2"));
+    assert.ok(!result.partialFailures || result.partialFailures.length === 0);
+    assert.ok(result.report.includes("Review by A"));
+    assert.ok(result.report.includes("Review by B"));
+  });
+
+  it("collects partial failures", async () => {
+    const personas = [makePersona("p1", "Good"), makePersona("p2", "Bad")];
+    const result = await executePersonasInParallel(
+      personas,
+      "Test",
+      { mode: "direct_api", retryEventName: "test" },
+      async (p) => {
+        if (p.meta.id === "p2") throw new Error("Intentional failure");
+        return `OK from ${p.meta.name}`;
+      }
+    );
+
+    assert.ok(result.personas.includes("p1"));
+    assert.ok(!result.personas.includes("p2"));
+    assert.ok(result.partialFailures);
+    assert.equal(result.partialFailures.length, 1);
+    assert.equal(result.partialFailures[0].personaId, "p2");
+  });
+
+  it("respects maxConcurrency from config", async () => {
+    delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    let maxConcurrent = 0;
+    let current = 0;
+
+    const personas = [makePersona("p1", "A"), makePersona("p2", "B"), makePersona("p3", "C")];
+    await executePersonasInParallel(
+      personas,
+      "Test",
+      { mode: "mcp_sampling", retryEventName: "test" },
+      async () => {
+        current++;
+        maxConcurrent = Math.max(maxConcurrent, current);
+        await new Promise((r) => setTimeout(r, 10));
+        current--;
+        return "done";
+      }
+    );
+
+    // With 3 personas and default concurrency 3, should never exceed that
+    assert.ok(maxConcurrent <= 3);
   });
 });

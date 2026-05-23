@@ -8,6 +8,7 @@ import { handleReviewContent } from "./reviewTool.js";
 import { estimateTokenCost } from "../execution/aggregator.js";
 import { logger } from "../utils/logger.js";
 import { PLATFORM_TO_EN } from "../utils/personaIdMaps.js";
+import type { ToolModule } from "./types.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
@@ -59,6 +60,18 @@ interface Recommendation {
   personaIds: string[];
   assistantMessage: string;
 }
+
+export const reviewContentWizardModule: ToolModule = {
+  definition: reviewContentWizardToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("向导需要提供参数");
+    const input = args as any;
+    if (deps.updateClientSamplingSupport()) {
+      input.samplingFn = deps.createMultiTurnSamplingFn();
+    }
+    return await handleReviewContentWizard(deps.skillsDir, deps.tmpDir, input);
+  },
+};
 
 export async function handleReviewContentWizard(
   skillsDir: string,
@@ -400,7 +413,10 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
 
 async function saveState(tmpDir: string, state: ReviewWizardState): Promise<void> {
   await fs.promises.mkdir(tmpDir, { recursive: true });
-  await fs.promises.writeFile(getStatePath(tmpDir, state.sessionId), JSON.stringify(state, null, 2), "utf-8");
+  const statePath = getStatePath(tmpDir, state.sessionId);
+  const tmpPath = statePath + ".tmp";
+  await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.promises.rename(tmpPath, statePath);
 }
 
 async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {

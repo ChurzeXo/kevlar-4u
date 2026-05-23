@@ -10,11 +10,19 @@ import { getModesInfo } from "../execution/index.js";
 import { readConfigAsync } from "../execution/config.js";
 import { hasApiKey } from "../execution/modes/direct_api.js";
 import { getSamplingClientList, isSamplingSupported } from "../execution/client.js";
+import type { ToolModule } from "./types.js";
 
 export const getModesToolDefinition: Tool = {
   name: "get_execution_modes",
   description: "当用户问「当前模式/配置/可用模式」时，调用此工具。查询宿主辅助兜底、MCP 采样、直接 API 三种执行模式的可用性及当前配置状态。",
   inputSchema: { type: "object" as const, properties: {} },
+};
+
+export const getModesModule: ToolModule = {
+  definition: getModesToolDefinition,
+  handler: () => async () => {
+    return await handleGetModes();
+  },
 };
 
 export async function handleGetModes(): Promise<ToolResult> {
@@ -23,20 +31,17 @@ export async function handleGetModes(): Promise<ToolResult> {
   const samplingClients = getSamplingClientList();
   const apiKeyConfigured = hasApiKey();
 
-  const modeLabels: Record<string, { name: string; emoji: string; desc: string }> = {
+  const modeLabels: Record<string, { name: string; desc: string }> = {
     orchestration: {
       name: "宿主辅助兜底模式",
-      emoji: "✅",
       desc: "单次 Prompt 交给宿主 AI 协助完成，零额外成本，但不是真正隔离的多智能体执行",
     },
     mcp_sampling: {
       name: "MCP 采样模式",
-      emoji: "✅",
       desc: "真正并行执行，深度分析，需宿主客户端支持",
     },
     direct_api: {
       name: "直接 API 模式",
-      emoji: apiKeyConfigured ? "✅" : "❌",
       desc: apiKeyConfigured
         ? "直接调用 LLM API，完全可控"
         : "需设置 KEVLAR_API_KEY 环境变量",
@@ -46,7 +51,7 @@ export async function handleGetModes(): Promise<ToolResult> {
   // Build mode rows
   const rows = modesInfo.modes.map((m) => {
     const label = modeLabels[m.mode];
-    let status = m.available ? "✅ 可用" : (m.mode === "direct_api" ? "❌ 未配置" : "❌ 不可用");
+    let status = m.available ? "可用" : (m.mode === "direct_api" ? "未配置" : "不可用");
     let reason = label.desc;
 
     if (!m.available) {

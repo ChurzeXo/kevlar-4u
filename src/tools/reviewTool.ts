@@ -1,14 +1,14 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
-import { executeReview, loadPersonasForReview } from "../execution/index.js";
+import { executeReview, loadPersonasForReview, MAX_PERSONAS } from "../execution/index.js";
 import type { ExecutionContext, ResolveableMode, SamplingFunction } from "../execution/base.js";
+import type { ToolModule } from "./types.js";
 
 // ── Resource limits ────────────────────────────────────────────────────────────
 
 const MAX_CONTENT_LENGTH = 100_000; // 100KB
 const MAX_CONTEXT_LENGTH = 5_000; // 5KB
-const MAX_PERSONAS = 50;
 
 export const reviewToolDefinition: Tool = {
   name: "review_content",
@@ -49,6 +49,18 @@ export interface ReviewInput {
   mode?: ResolveableMode;
   samplingFn?: SamplingFunction;
 }
+
+export const reviewModule: ToolModule = {
+  definition: reviewToolDefinition,
+  handler: (deps) => async (args) => {
+    if (!args) throw new Error("评测需要提供文案内容");
+    const input = args as any;
+    if (deps.updateClientSamplingSupport()) {
+      input.samplingFn = deps.createSamplingFn();
+    }
+    return await handleReviewContent(deps.skillsDir, input);
+  },
+};
 
 export async function handleReviewContent(
   skillsDir: string,

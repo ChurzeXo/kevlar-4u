@@ -1,4 +1,4 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -7,44 +7,14 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath } from "url";
 
-import {
-  listPersonasToolDefinition,
-  handleListPersonas,
-  handleUpdatePersonaDraft,
-  handleDeletePersonaDraft,
-  UpdatePersonaDraftInput,
-  DeletePersonaDraftInput,
-  handleCreatePersona,
-  handleReviewContent,
-  handleDeletePersona,
-  deletePersonaWizardToolDefinition,
-  handleDeletePersonaWizard,
-  DeletePersonaWizardInput,
-  helpToolDefinition,
-  handleHelp,
-  getModesToolDefinition,
-  handleGetModes,
-  handleConfigure,
-  CreatePersonaInput,
-  ReviewInput,
-  ConfigureInput,
-  configureWizardToolDefinition,
-  handleConfigureWizard,
-  ConfigureWizardInput,
-  createPersonaWizardToolDefinition,
-  handleCreatePersonaWizard,
-  WizardInput,
-  reviewContentWizardToolDefinition,
-  handleReviewContentWizard,
-  ReviewWizardInput,
-} from "./tools/index.js";
+import { createToolRegistry } from "./tools/index.js";
+import type { ToolDependencies } from "./tools/types.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse, isKevlarError } from "./utils/errors.js";
 import { isSamplingSupported, setClientInfo } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import type { SamplingFunction, MultiTurnSamplingFunction } from "./execution/base.js";
 
-// ── Resolve the skills/ directory ────────────────────────────────────────────
 // Priority:
 //   1. KEVLAR_SKILLS_DIR environment variable (absolute path)
 //   2. <repo-root>/skills/  (relative to this file's compiled location)
@@ -52,7 +22,6 @@ function resolveSkillsDir(): string {
   if (process.env.KEVLAR_SKILLS_DIR) {
     return path.resolve(process.env.KEVLAR_SKILLS_DIR);
   }
-  // __dirname equivalent in ESM
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
   // dist/ after compilation; go up one level to repo root
@@ -60,44 +29,35 @@ function resolveSkillsDir(): string {
   return path.join(repoRoot, "skills");
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-
-// ── Clean Stale Drafts ───────────────────────────────────────────────────────
 async function cleanStaleDrafts(tmpDir: string) {
   try {
     if (!fs.existsSync(tmpDir)) return;
     const files = await fs.promises.readdir(tmpDir);
     const now = Date.now();
     for (const file of files) {
-      if (!file.endsWith('_draft.json')) continue;
+      if (!file.endsWith('_draft.json') && !file.endsWith('_wizard.json') && !file.endsWith('_review_wizard.json') && !file.endsWith('_configure_wizard.json') && !file.endsWith('_delete_wizard.json')) continue;
       const filePath = path.join(tmpDir, file);
       try {
         const data = await fs.promises.readFile(filePath, 'utf-8');
-        const draft = JSON.parse(data);
-        if (draft.createdAt && now - draft.createdAt > 86400000) {
+        const state = JSON.parse(data);
+        if (state.createdAt && now - state.createdAt > 86400000) {
           await fs.promises.unlink(filePath);
-          logger.info("Cleaned stale draft", { event: "clean_stale_draft", file });
+          logger.info("Cleaned stale wizard state", { event: "clean_stale_wizard", file });
         }
       } catch (err) {
-        // Ignore parsing errors for individual files
       }
     }
   } catch (err) {
-    logger.warn("Failed to clean stale drafts", { event: "clean_stale_drafts_error", error: String(err) });
+    logger.warn("Failed to clean stale wizard states", { event: "clean_stale_wizards_error", error: String(err) });
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function createKevlarServer(): Server {
+export function createKevlarServer(): McpServer {
   const skillsDir = resolveSkillsDir();
   const tmpDir = path.join(skillsDir, "tmp");
 
-  // Initialize config path
   setConfigPath(skillsDir);
 
-  // Ensure skills directory exists on startup (sync for initialization)
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
     logger.info("Created skills directory", { event: "dir_created", path: skillsDir });
@@ -105,10 +65,9 @@ export function createKevlarServer(): Server {
     logger.info("Using skills directory", { event: "dir_using", path: skillsDir });
   }
 
-  // Background cleanup of stale drafts
   cleanStaleDrafts(tmpDir).catch(() => {});
 
-  const server = new Server(
+  const mcpServer = new McpServer(
     {
       name: "kevlar",
       version: "1.0.0",
@@ -121,8 +80,10 @@ export function createKevlarServer(): Server {
     }
   );
 
+  const underlyingServer = mcpServer.server;
+
   const updateClientSamplingSupport = (): boolean => {
-    const clientVersion = server.getClientVersion();
+    const clientVersion = underlyingServer.getClientVersion();
     if (clientVersion) {
       setClientInfo(clientVersion.name, clientVersion.version);
       return isSamplingSupported(clientVersion.name);
@@ -130,12 +91,11 @@ export function createKevlarServer(): Server {
     return false;
   };
 
-  // ── Create sampling function for MCP Sampling mode ─────────────────────────
-  const createSamplingFn = (serverInstance: Server): SamplingFunction => {
-    return async (params: { 
-      systemPrompt: string; 
-      message: string; 
-      maxTokens?: number 
+  const createSamplingFn = (serverInstance: any): SamplingFunction => {
+    return async (params: {
+      systemPrompt: string;
+      message: string;
+      maxTokens?: number
     }) => {
       try {
         const result = await serverInstance.createMessage({
@@ -151,17 +111,16 @@ export function createKevlarServer(): Server {
         };
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        logger.error("Sampling request failed", { 
-          event: "sampling_request_error", 
-          error: errorMsg 
+        logger.error("Sampling request failed", {
+          event: "sampling_request_error",
+          error: errorMsg
         });
         throw new Error(`Sampling 调用失败: ${errorMsg}`);
       }
     };
   };
 
-  // ── Create multi-turn sampling function for MCP Sampling Wizards ─────────────
-  const createMultiTurnSamplingFn = (serverInstance: Server): MultiTurnSamplingFunction => {
+  const createMultiTurnSamplingFn = (serverInstance: any): MultiTurnSamplingFunction => {
     return async (params) => {
       try {
         const result = await serverInstance.createMessage({
@@ -180,146 +139,42 @@ export function createKevlarServer(): Server {
         };
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        logger.error("Multi-turn Sampling request failed", { 
-          event: "multi_sampling_request_error", 
-          error: errorMsg 
+        logger.error("Multi-turn Sampling request failed", {
+          event: "multi_sampling_request_error",
+          error: errorMsg
         });
         throw new Error(`多轮 Sampling 调用失败: ${errorMsg}`);
       }
     };
   };
 
-  // ── Tool: list tools ────────────────────────────────────────────────────
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        listPersonasToolDefinition,
-        deletePersonaWizardToolDefinition,
-        getModesToolDefinition,
-        configureWizardToolDefinition,
-        helpToolDefinition,
-        createPersonaWizardToolDefinition,
-        reviewContentWizardToolDefinition,
-      ],
-    };
+  const deps: ToolDependencies = {
+    skillsDir,
+    tmpDir,
+    createSamplingFn: () => createSamplingFn(underlyingServer),
+    createMultiTurnSamplingFn: () => createMultiTurnSamplingFn(underlyingServer),
+    updateClientSamplingSupport,
+  };
+
+  const { registry, toolDefinitions } = createToolRegistry(deps);
+
+  underlyingServer.setRequestHandler(ListToolsRequestSchema, async () => {
+    return { tools: toolDefinitions };
   });
 
-  // ── Tool: dispatch calls ────────────────────────────────────────────────
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  underlyingServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
     logger.debug("Tool call received", { event: "tool_called", tool: name });
 
     try {
-      switch (name) {
-        case "list_personas": {
-          const platform = args && typeof args === "object" ? (args as Record<string, unknown>).platform as string | undefined : undefined;
-          return await handleListPersonas(skillsDir, platform);
-        }
-
-        case "update_persona_draft": {
-          if (!args || typeof args !== "object") throw new Error("需要提供参数");
-          return await handleUpdatePersonaDraft(tmpDir, args as unknown as UpdatePersonaDraftInput);
-        }
-
-        case "delete_persona_draft": {
-          if (!args || typeof args !== "object") throw new Error("需要提供参数");
-          return await handleDeletePersonaDraft(tmpDir, args as unknown as DeletePersonaDraftInput);
-        }
-
-        case "create_persona": {
-          if (!args || typeof args !== "object") {
-            throw new Error("创建评论员需要提供参数");
-          }
-          return await handleCreatePersona(skillsDir, tmpDir, args as unknown as CreatePersonaInput);
-        }
-
-        case "create_persona_wizard": {
-          if (!args || typeof args !== "object") {
-            throw new Error("向导需要提供参数");
-          }
-          const input = args as unknown as WizardInput;
-          if (updateClientSamplingSupport()) {
-            input.samplingFn = createMultiTurnSamplingFn(server);
-          }
-          
-          return await handleCreatePersonaWizard(skillsDir, tmpDir, input);
-        }
-
-        case "delete_persona": {
-          if (!args || typeof args !== "object") {
-            throw new Error("删除评论员需要提供参数");
-          }
-          const delInput = args as unknown as { id: string; confirm: boolean };
-          if (!delInput.id) {
-            throw new Error("请指定要删除的评论员");
-          }
-          return await handleDeletePersona(skillsDir, delInput);
-        }
-
-        case "delete_persona_wizard": {
-          if (!args || typeof args !== "object") {
-            throw new Error("删除向导需要提供参数");
-          }
-          return await handleDeletePersonaWizard(skillsDir, tmpDir, args as unknown as DeletePersonaWizardInput);
-        }
-
-        case "review_content": {
-          if (!args || typeof args !== "object") {
-            throw new Error("评测需要提供文案内容");
-          }
-          const input = args as unknown as ReviewInput;
-          
-          const samplingSupported = updateClientSamplingSupport();
-          
-          // Inject sampling function for MCP Sampling mode
-          if (samplingSupported) {
-            input.samplingFn = createSamplingFn(server);
-          }
-          
-          return await handleReviewContent(skillsDir, input);
-        }
-
-        case "review_content_wizard": {
-          if (!args || typeof args !== "object") {
-            throw new Error("向导需要提供参数");
-          }
-          const input = args as unknown as ReviewWizardInput;
-          if (updateClientSamplingSupport()) {
-            input.samplingFn = createMultiTurnSamplingFn(server);
-          }
-          
-          return await handleReviewContentWizard(skillsDir, tmpDir, input);
-        }
-
-        case "get_execution_modes": {
-          return await handleGetModes();
-        }
-
-        case "configure": {
-          if (!args || typeof args !== "object") {
-            throw new Error("配置需要提供参数");
-          }
-          const configureInput = args as unknown as ConfigureInput;
-          return await handleConfigure(configureInput);
-        }
-
-        case "configure_wizard": {
-          if (!args || typeof args !== "object") {
-            throw new Error("配置向导需要提供参数");
-          }
-          return await handleConfigureWizard(tmpDir, args as unknown as ConfigureWizardInput);
-        }
-
-        case "kevlar_help": {
-          return await handleHelp();
-        }
-
-        default: {
-          logger.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
-          throw new Error(`Unknown tool: ${name}`);
-        }
+      const sanitizedArgs = args && typeof args === "object" ? (args as Record<string, unknown>) : undefined;
+      const handler = registry.get(name);
+      if (!handler) {
+        logger.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
+        throw new Error(`Unknown tool: ${name}`);
       }
+      return await handler(sanitizedArgs);
     } catch (err) {
       logger.error("Tool execution failed", {
         event: "tool_error",
@@ -331,5 +186,5 @@ export function createKevlarServer(): Server {
     }
   });
 
-  return server;
+  return mcpServer;
 }

@@ -8,25 +8,6 @@ const KEY_PATTERNS = [
   /xox[bpras]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,}/g,
 ];
 
-const SUSPICIOUS_MARKERS = [
-  "</content>",
-  "</系统人设>",
-  "</系统人设开始>",
-];
-
-export function escapeContent(content: string): { escaped: string; warnings: string[] } {
-  const warnings: string[] = [];
-
-  for (const marker of SUSPICIOUS_MARKERS) {
-    if (content.toLowerCase().includes(marker.toLowerCase())) {
-      warnings.push("Detected pattern that could interfere with prompt structure");
-      break;
-    }
-  }
-
-  return { escaped: content, warnings };
-}
-
 export function scanForCredentials(text: string): string[] {
   const found: string[] = [];
   for (const pattern of KEY_PATTERNS) {

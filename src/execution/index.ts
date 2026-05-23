@@ -29,6 +29,10 @@ const handlers: ExecutionHandler[] = [
   directApiHandler,     // priority: 20 (medium)
 ];
 
+// ── Limits ────────────────────────────────────────────────────────────────────
+
+export const MAX_PERSONAS = 50;
+
 // ── Core Execution Function ───────────────────────────────────────────────────
 
 export async function executeReview(
@@ -36,6 +40,11 @@ export async function executeReview(
   ctx: ExecutionContext
 ): Promise<ExecutionResult> {
   const resolved = mode === "auto" ? await resolveMode() : mode;
+  const personaCount = ctx.personas.length;
+
+  if (personaCount > MAX_PERSONAS) {
+    throw new Error(`评论员数量超出限制（最多${MAX_PERSONAS}个，当前${personaCount}个）。`);
+  }
 
   const handler = handlers.find((h) => h.mode === resolved);
   if (!handler) {
@@ -145,13 +154,15 @@ export interface PersonaLoadingResult {
 
 export function validatePersonaFields(persona: Persona): void {
   const prompt = persona.systemPrompt || "";
-  
-  const hasPlatform = prompt.includes("常用平台") || (persona.meta.description && persona.meta.description.includes("平台"));
-  const hasTraits = prompt.includes("性格特质") || prompt.includes("性格");
-  const hasBlindSpot = prompt.includes("盲区") || !!persona.meta.blindSpot;
+  const tags = persona.meta.tags ?? [];
+
+  // Use structured metadata first, fall back to keyword matching in system prompt
+  const hasPlatform = tags.length > 0 || prompt.includes("常用平台") || (persona.meta.description?.includes("平台") ?? false);
+  const hasTraits = (persona.meta.description?.length ?? 0) >= 4 || prompt.includes("性格特质") || prompt.includes("性格");
+  const hasBlindSpot = !!persona.meta.blindSpot || prompt.includes("盲区");
 
   if (!hasPlatform || !hasTraits || !hasBlindSpot) {
-    throw new Error(`[${persona.meta.name}] 角色描述不完整，未通过字段校验。请确认常用平台、性格特质、盲区已配齐。`);
+    throw new Error(`[${persona.meta.name}] 角色 ${!hasPlatform ? "缺少平台标签/描述, " : ""}${!hasTraits ? "缺少性格描述, " : ""}${!hasBlindSpot ? "缺少盲区" : ""}`);
   }
 }
 

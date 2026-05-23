@@ -7,6 +7,7 @@
 
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ToolResult } from "../utils/types.js";
+import type { ToolModule } from "./types.js";
 import {
 	updateConfig,
 	isValidMode,
@@ -43,6 +44,14 @@ export interface ConfigureInput {
 	mode?: "auto" | "orchestration" | "mcp_sampling" | "direct_api";
 	maxConcurrency?: number;
 }
+
+export const configureModule: ToolModule = {
+  definition: configureToolDefinition,
+  handler: () => async (args) => {
+    if (!args) throw new Error("配置需要提供参数");
+    return await handleConfigure(args as ConfigureInput);
+  },
+};
 
 export async function handleConfigure(
 	input: ConfigureInput,
