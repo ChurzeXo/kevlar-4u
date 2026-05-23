@@ -194,8 +194,30 @@ async function advanceWizard(
       );
     }
 
-    case "platform":
-      state.fields.platform = userMessage.trim();
+    case "platform": {
+      const raw = userMessage.trim();
+      if (/[和、/,]/.test(raw)) {
+        const first = raw.split(/[和、/,]/)[0].trim();
+        if (first) {
+          state.fields.platform = first;
+          state.step = "authorRelation";
+          await saveState(tmpDir, state);
+          await saveDraft(tmpDir, state);
+          return toolResponse(
+            state,
+            [
+              `已记录常用平台：${state.fields.platform}`,
+              "⚠️ 一次只创建一个平台对应的评论员。如需多平台覆盖，请逐一创建。",
+              "",
+              "请选择这个角色与作者的关系（回复编号或文字）：",
+              "",
+              "1. 已关注（信任阈值较高，但期望值也更高）",
+              "2. 未关注（信任阈值较低，更容易因细节问题流失注意力）",
+            ].join("\n")
+          );
+        }
+      }
+      state.fields.platform = raw;
       state.step = "authorRelation";
       await saveState(tmpDir, state);
       await saveDraft(tmpDir, state);
@@ -210,6 +232,7 @@ async function advanceWizard(
           "2. 未关注（信任阈值较低，更容易因细节问题流失注意力）",
         ].join("\n")
       );
+    }
 
     case "authorRelation": {
       const resolved = resolveAuthorRelation(userMessage);

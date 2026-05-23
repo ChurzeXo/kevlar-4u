@@ -7,6 +7,7 @@ import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
 import { estimateTokenCost } from "../execution/aggregator.js";
 import { logger } from "../utils/logger.js";
+import { PLATFORM_TO_EN } from "../utils/personaIdMaps.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
@@ -39,6 +40,7 @@ export interface ReviewWizardInput {
 type ReviewWizardStep =
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
+  | "collectPlatforms"
   | "confirmSelection"
   | "completed";
 
@@ -48,6 +50,7 @@ interface ReviewWizardState {
   step: ReviewWizardStep;
   content: string;
   context?: string;
+  targetPlatforms: string[];
   selectedPersonaIds: string[];
   remainingPersonaIds: string[];
 }
@@ -94,10 +97,13 @@ async function advanceWizard(
 ): Promise<ToolResult> {
   switch (state.step) {
     case "checkPersonaInventory":
-      return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+      return handleInventoryCheck(tmpDir, state, personas);
 
     case "waitingForPersonaCreation":
-      return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+      return handleInventoryCheck(tmpDir, state, personas);
+
+    case "collectPlatforms":
+      return handleCollectPlatforms(tmpDir, state, personas, userMessage, samplingFn);
 
     case "confirmSelection":
       return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage);
@@ -110,8 +116,7 @@ async function advanceWizard(
 async function handleInventoryCheck(
   tmpDir: string,
   state: ReviewWizardState,
-  personas: Persona[],
-  samplingFn?: MultiTurnSamplingFunction
+  personas: Persona[]
 ): Promise<ToolResult> {
   if (personas.length === 0) {
     state.step = "waitingForPersonaCreation";
@@ -128,7 +133,30 @@ async function handleInventoryCheck(
     );
   }
 
-  if (personas.length <= 2) {
+  state.step = "collectPlatforms";
+  await saveState(tmpDir, state);
+  return toolResponse(
+    state,
+    [
+      "这份内容准备投放在哪些平台？",
+      "",
+      "例如：小红书、抖音、B站、微博、通用……",
+      "可同时指定多个，用空格或逗号分隔。",
+    ].join("\n")
+  );
+}
+
+async function handleCollectPlatforms(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  const platforms = extractTargetPlatforms(userMessage);
+
+  if (platforms.length === 0) {
+    state.targetPlatforms = [];
     state.step = "confirmSelection";
     state.selectedPersonaIds = personas.map((p) => p.meta.id);
     state.remainingPersonaIds = [];
@@ -136,24 +164,65 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        `当前只有 ${personas.length} 位评论员可用，已为你展示全部角色，请确认是否使用。`,
+        "未识别到指定平台，将展示全部评论员。",
         "",
-        ...personas.map((p) => `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
+        ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
+        "",
+        "确认使用以上评论员，还是想指定平台重新筛选？",
+      ].join("\n")
+    );
+  }
+
+  state.targetPlatforms = platforms;
+  const { matched, unmatched } = filterPersonasByPlatform(personas, platforms);
+
+  if (matched.length === 0) {
+    state.step = "confirmSelection";
+    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.remainingPersonaIds = [];
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        `目前还没有匹配「${platforms.join("、")}」的评论员，建议先创建针对这些平台的虚拟评论员。`,
+        "当前已为你展示全部评论员，可确认使用或稍后创建。",
+        "",
+        ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
         "",
         "确认使用以上评论员吗？",
       ].join("\n")
     );
   }
 
-  const recommendation = await recommendPersonas(state, personas, samplingFn);
-  const selected = personas.filter((p) => recommendation.personaIds.includes(p.meta.id));
-  state.step = "confirmSelection";
-  state.selectedPersonaIds = selected.map((p) => p.meta.id);
-  state.remainingPersonaIds = personas
-    .filter((p) => !state.selectedPersonaIds.includes(p.meta.id))
-    .map((p) => p.meta.id);
-  await saveState(tmpDir, state);
+  state.selectedPersonaIds = matched.map((p) => p.meta.id);
+  state.remainingPersonaIds = unmatched.map((p) => p.meta.id);
 
+  if (matched.length <= 2) {
+    state.step = "confirmSelection";
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        `已为你筛选出匹配「${platforms.join("、")}」平台的评论员：`,
+        "",
+        ...matched.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
+        ...(unmatched.length > 0
+          ? ["", "其余评论员与目标平台不匹配，已自动剔除。如需使用全部，请说「使用全部」。"]
+          : []),
+        "",
+        "确认使用以上评论员吗？",
+      ].join("\n")
+    );
+  }
+
+  const recommendation = await recommendPersonas(state, matched, samplingFn);
+  const recommendedIds = new Set(recommendation.personaIds);
+  state.selectedPersonaIds = matched.filter((p) => recommendedIds.has(p.meta.id)).map((p) => p.meta.id);
+  state.remainingPersonaIds = matched
+    .filter((p) => !recommendedIds.has(p.meta.id))
+    .map((p) => p.meta.id);
+  state.step = "confirmSelection";
+  await saveState(tmpDir, state);
   return toolResponse(state, recommendation.assistantMessage);
 }
 
@@ -164,6 +233,17 @@ async function handleSelectionConfirmation(
   personas: Persona[],
   userMessage: string
 ): Promise<ToolResult> {
+  if (/使用全部|全部|全选|所有/.test(userMessage)) {
+    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.remainingPersonaIds = [];
+    await saveState(tmpDir, state);
+    const costEstimate = estimateTokenCost(personas.length, state.content.length);
+    return toolResponse(
+      state,
+      `已选择全部 ${personas.length} 位评论员。\n预估 Token 消耗：约 ${costEstimate.toLocaleString()} tokens\n确认开始评测吗？`
+    );
+  }
+
   const explicitIds = extractPersonaIds(userMessage, personas);
   if (explicitIds.length > 0) {
     state.selectedPersonaIds = explicitIds;
@@ -228,15 +308,19 @@ async function recommendPersonas(
         tags: p.meta.tags,
         description: p.meta.description,
       }));
+      const platformContext =
+        state.targetPlatforms.length > 0
+          ? `\n目标投放平台：${state.targetPlatforms.join("、")}`
+          : "";
       const response = await samplingFn({
-        systemPrompt:
-          "你是 Kevlar 评论员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id，并严格输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"展示推荐名单和理由，并询问用户是否确认\"}。不要输出 markdown。",
+        systemPrompt: `你是 Kevlar 评论员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id${platformContext}，并严格输出 JSON：{"personaIds":["id"],"assistantMessage":"展示推荐名单和理由，并询问用户是否确认"}。不要输出 markdown。`,
         messages: [
           {
             role: "user",
             content: JSON.stringify({
               content: state.content,
               context: state.context || "",
+              targetPlatforms: state.targetPlatforms,
               personas: personaSummary,
             }),
           },
@@ -267,9 +351,12 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
   const scored = personas
     .map((p) => {
       const haystack = [p.meta.name, p.meta.description, ...p.meta.tags, p.systemPrompt].join("\n").toLowerCase();
-      const score = p.meta.tags.reduce((sum, tag) => sum + (terms.includes(tag.toLowerCase()) ? 2 : 0), 0) +
-        (terms.includes(p.meta.name.toLowerCase()) ? 3 : 0) +
-        (haystack.includes("小红书") && terms.includes("小红书") ? 1 : 0);
+      const platformBoost = state.targetPlatforms.some(
+        (t) => p.meta.tags.includes(t) || p.meta.name.includes(t)
+      ) ? 5 : 0;
+      const score = platformBoost +
+        p.meta.tags.reduce((sum, tag) => sum + (terms.includes(tag.toLowerCase()) ? 2 : 0), 0) +
+        (terms.includes(p.meta.name.toLowerCase()) ? 3 : 0);
       return { persona: p, score };
     })
     .sort((a, b) => b.score - a.score);
@@ -305,6 +392,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     createdAt: Date.now(),
     step: "checkPersonaInventory",
     content: input.userMessage.trim(),
+    targetPlatforms: [],
     selectedPersonaIds: [],
     remainingPersonaIds: [],
   };
@@ -344,6 +432,7 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
           `sessionId: ${state.sessionId}`,
           "workflow: review_content",
           `currentStep: ${state.step}`,
+          `targetPlatforms: ${state.targetPlatforms.join(", ") || "none"}`,
           `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
           `remainingPersonaIds: ${state.remainingPersonaIds.join(", ") || "none"}`,
           "```",
@@ -351,6 +440,42 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
       },
     ],
   };
+}
+
+const REVIEW_KNOWN_PLATFORMS = Object.keys(PLATFORM_TO_EN);
+
+function extractTargetPlatforms(userMessage: string): string[] {
+  const found = new Set<string>();
+  for (const platform of REVIEW_KNOWN_PLATFORMS) {
+    if (userMessage.includes(platform)) {
+      found.add(platform);
+    }
+  }
+  return [...found];
+}
+
+function filterPersonasByPlatform(
+  personas: Persona[],
+  targetPlatforms: string[]
+): { matched: Persona[]; unmatched: Persona[] } {
+  const enKeys = targetPlatforms.map((p) => PLATFORM_TO_EN[p]).filter(Boolean);
+
+  const matched: Persona[] = [];
+  const unmatched: Persona[] = [];
+
+  for (const p of personas) {
+    const tagMatch = targetPlatforms.some((t) => p.meta.tags.includes(t));
+    const idMatch = enKeys.some((k) => p.meta.id.includes(k));
+    const nameMatch = targetPlatforms.some((t) => p.meta.name.includes(t));
+
+    if (tagMatch || idMatch || nameMatch) {
+      matched.push(p);
+    } else {
+      unmatched.push(p);
+    }
+  }
+
+  return { matched, unmatched };
 }
 
 function extractPersonaIds(input: string, personas: Persona[]): string[] {
