@@ -50,7 +50,6 @@ flowchart TD
 | `create_persona_wizard` | 创建评论员人设 | 年龄段 -> 兴趣方向 -> 性格特质 -> 平台 -> 最终确认。中间步骤不反复确认，最终确认阶段可修改字段。 |
 | `review_content_wizard` | 内容评审流程 | 暂存内容，检查人设库，推荐或展示评论员，用户确认后执行评审。 |
 | `delete_persona_wizard` | 删除人设 | 匹配并绑定删除目标，要求回复 `确认删除{人设名}`。 |
-| `reset_personas_wizard` | 恢复默认评论员 | 展示影响范围，要求回复 `确认恢复默认评论员`。 |
 | `configure_wizard` | 修改运行配置 | 解析配置意图，预览变更，要求回复 `确认修改配置` 后写入。 |
 
 底层直调工具仍保留，适合测试、脚本或已具备完整参数的场景：
@@ -60,7 +59,6 @@ flowchart TD
 | `review_content` | 直接执行内容评审 |
 | `create_persona` | 直接创建人设，或基于已完成草稿创建 |
 | `delete_persona` | 直接删除指定人设，需要 `confirm: true` |
-| `reset_personas` | 直接恢复默认人设，需要 `confirm: true` |
 | `configure` | 直接写入配置 |
 | `get_execution_modes` | 查看当前模式、可用性和推荐模式 |
 | `list_personas` | 列出本地人设 |
@@ -142,9 +140,6 @@ kevlar/
 │   └── PRE_RELEASE_AUDIT_REQUEST.md
 ├── skills/
 │   ├── _template.md
-│   ├── impatient_passerby.md
-│   ├── keyboard_warrior.md
-│   ├── first_time_reader.md
 │   └── tmp/                         # 运行时会话状态，测试或运行时生成
 ├── src/
 │   ├── index.ts                     # stdio server 入口

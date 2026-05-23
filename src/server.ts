@@ -20,10 +20,6 @@ import {
   deletePersonaWizardToolDefinition,
   handleDeletePersonaWizard,
   DeletePersonaWizardInput,
-  handleResetPersonas,
-  resetPersonasWizardToolDefinition,
-  handleResetPersonasWizard,
-  ResetPersonasWizardInput,
   helpToolDefinition,
   handleHelp,
   getModesToolDefinition,
@@ -199,7 +195,6 @@ export function createKevlarServer(): Server {
       tools: [
         listPersonasToolDefinition,
         deletePersonaWizardToolDefinition,
-        resetPersonasWizardToolDefinition,
         getModesToolDefinition,
         configureWizardToolDefinition,
         helpToolDefinition,
@@ -218,7 +213,8 @@ export function createKevlarServer(): Server {
     try {
       switch (name) {
         case "list_personas": {
-          return await handleListPersonas(skillsDir);
+          const platform = args && typeof args === "object" ? (args as Record<string, unknown>).platform as string | undefined : undefined;
+          return await handleListPersonas(skillsDir, platform);
         }
 
         case "update_persona_draft": {
@@ -266,21 +262,6 @@ export function createKevlarServer(): Server {
             throw new Error("删除向导需要提供参数");
           }
           return await handleDeletePersonaWizard(skillsDir, tmpDir, args as unknown as DeletePersonaWizardInput);
-        }
-
-        case "reset_personas": {
-          if (!args || typeof args !== "object") {
-            throw new Error("恢复操作需要提供参数");
-          }
-          const resetInput = args as unknown as { confirm: boolean };
-          return await handleResetPersonas(skillsDir, resetInput);
-        }
-
-        case "reset_personas_wizard": {
-          if (!args || typeof args !== "object") {
-            throw new Error("恢复向导需要提供参数");
-          }
-          return await handleResetPersonasWizard(skillsDir, tmpDir, args as unknown as ResetPersonasWizardInput);
         }
 
         case "review_content": {

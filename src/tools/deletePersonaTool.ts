@@ -6,7 +6,7 @@ import { ToolResult } from "../utils/types.js";
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
   description:
-    "删除一个已存在的批评人设。AI 会先列出所有评论员供用户选择，二次确认后执行删除。系统内置角色同样可以删除，之后可以恢复。",
+    "删除一个已存在的批评人设。AI 会先列出所有评论员供用户选择，二次确认后执行删除。",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -57,8 +57,6 @@ export async function handleDeletePersona(
     };
   }
 
-  const isBuiltIn = persona.meta.author === "kevlar-core";
-
   try {
     await fs.promises.unlink(persona.filePath);
     invalidatePersonasCache();
@@ -70,16 +68,7 @@ export async function handleDeletePersona(
     };
   }
 
-  const lines: string[] = [
-    `✅ 人设「${persona.meta.name}」已删除。`,
-  ];
-
-  if (isBuiltIn) {
-    lines.push("");
-    lines.push("📌 这是系统内置角色，如需恢复可以告诉我。");
-  }
-
   return {
-    content: [{ type: "text", text: lines.join("\n") }],
+    content: [{ type: "text", text: `✅ 人设「${persona.meta.name}」已删除。` }],
   };
 }

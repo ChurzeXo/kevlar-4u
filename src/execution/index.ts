@@ -144,11 +144,6 @@ export interface PersonaLoadingResult {
 }
 
 export function validatePersonaFields(persona: Persona): void {
-  // Built-in personas (author === "kevlar-core") are already complete and valid
-  if (persona.meta.author === "kevlar-core") {
-    return;
-  }
-
   const prompt = persona.systemPrompt || "";
   
   const hasPlatform = prompt.includes("常用平台") || (persona.meta.description && persona.meta.description.includes("平台"));

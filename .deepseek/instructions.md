@@ -47,9 +47,7 @@ DIR: scripts
   FILE: setup.ts
 DIR: skills
   FILE: _template.md
-  FILE: first_time_reader.md
-  FILE: impatient_passerby.md
-  FILE: keyboard_warrior.md
+
 DIR: src
   DIR: __tests__
   DIR: execution

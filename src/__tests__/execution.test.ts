@@ -528,14 +528,6 @@ describe("executeReview", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("validatePersonaFields", () => {
-  it("bypasses validation for built-in personas", () => {
-    const builtin: any = {
-      meta: { author: "kevlar-core", name: "Built-in" },
-      systemPrompt: "You are a test.",
-    };
-    assert.doesNotThrow(() => validatePersonaFields(builtin));
-  });
-
   it("succeeds for valid custom persona", () => {
     const validCustom: any = {
       meta: { author: "user", name: "Custom", description: "活跃于平台" },
@@ -583,12 +575,15 @@ describe("loadPersonasForReview", () => {
       "name: 测试人设",
       "name_en: Test",
       "version: 1.0.0",
-      "author: kevlar-core",
+      "author: test",
       "tags:",
       "  - test",
       "description: A test persona",
+      "blindSpot: none",
       "---",
-      "You are a test.",
+      "常用平台：通用",
+      "性格特质：温和",
+      "盲区：无",
     ].join("\n"), "utf-8");
   });
 

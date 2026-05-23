@@ -34,9 +34,12 @@ describe("End-to-End integration test", () => {
       "version: 1.0.0",
       "author: kevlar-core",
       "tags: [e2e]",
-      "description: Testing persona",
+      "description: E2E test persona",
+      "blindSpot: none",
       "---",
-      "You are an E2E test persona.",
+      "常用平台：通用",
+      "性格特质：温和",
+      "盲区：无",
     ].join("\n"), "utf-8");
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
