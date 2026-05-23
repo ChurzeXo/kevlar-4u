@@ -399,7 +399,7 @@ export function applyDedup(skillsDir: string, baseId: string, subDir?: string): 
 
 export interface UpdatePersonaDraftInput {
 	sessionId: string;
-	field: "ageRange" | "interests" | "traits" | "platform";
+	field: "ageRange" | "interests" | "traits" | "platform" | "authorRelation";
 	value: string | string[];
 }
 
@@ -461,6 +461,7 @@ export async function handleUpdatePersonaDraft(
 		interests: 2,
 		traits: 3,
 		platform: 4,
+		authorRelation: 5,
 	};
 
 	if (stepMapping[input.field]) {
