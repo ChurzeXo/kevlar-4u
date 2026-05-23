@@ -1,72 +1,74 @@
-# Kevlar — 社交媒体作品发布前的反馈模拟器
+# Kevlar — Feedback Simulator Before You Hit Publish
 
 ![Release](https://img.shields.io/github/actions/workflow/status/9Churze/Kevlar-MCP/release.yml?label=Release&logo=github)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
----
-
-> **它会模拟普通用户、挑剔网友、技术用户、媒体视角等不同人群的真实反应，帮你提前发现表达问题、误解点与传播风险。**
+🌐 [English](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 ---
 
-你可以把准备发布的内容——**文章、推文、视频脚本、产品介绍、新闻稿、公告、Reddit 帖子、V2EX 帖子、Hacker News 标题**——直接丢给 Kevlar。它不会只告诉你"写得不错"，而是像真实互联网一样，对内容进行**质疑、误解、吐槽、挑刺与理解测试**。
-
-很多时候，作者已经陷入**"当局者迷"**：
-你以为讲清楚了，但别人根本没看懂；
-你以为重点很突出，但用户甚至不知道你到底想表达什么。
-
-而大多数平台几乎不给真正的 **A/B 测试**机会。内容一旦发出去，**第一波自然流量**过去后，再修改往往已经太晚。
-
-**Kevlar 的作用，就是帮你在正式发布前，提前暴露这些问题。**
-
-## 谁会需要 Kevlar
-
-**独立开发者** / **自媒体创作者** / **产品团队** / **PR 团队** / 经常发 X、Reddit、V2EX、Hacker News 的用户 / 想提升内容表达与传播效果的人
+> **It simulates real reactions from different audiences — casual users, picky netizens, technical users, media perspectives — helping you spot expression issues, misunderstandings, and communication risks before you publish.**
 
 ---
 
-## 核心特性
+Drop any content you're about to publish — **articles, tweets, video scripts, product intros, press releases, announcements, Reddit posts, V2EX posts, Hacker News headlines** — directly into Kevlar. It won't just say "looks good." Instead, it'll **question, misinterpret, roast, nitpick, and comprehension-test** your content, just like the real internet.
 
-### 1. 高度定制的虚拟评论员（Persona Customization）
+Writers often suffer from the **"curse of knowledge"**:
+You think you've made it clear, but others don't get it.
+You think the key point stands out, but readers can't tell what you're trying to say.
 
-打破单一的 AI 视角，支持全方位的评论员画像定制：
+And most platforms don't offer a real **A/B test**. Once content goes live, by the time the **first wave of organic traffic** passes, it's usually too late to revise.
 
-- **核心属性**：年龄、兴趣、性格、立场。
-- **认知与关系**：自定义其认知盲区（如特定领域的偏见）以及与作者的社交关系（如严苛的导师、激进的反对者）。
-- **文化自适应**：系统会根据输入内容的语言，由 AI 自动推断并匹配契合的本地化文化背景。
+**Kevlar helps you surface these problems before you hit publish.**
 
-### 2. 全自动反馈流水线（Automated Feedback Pipeline）
+## Who needs Kevlar
 
-- **智能调度**：粘贴作品后，AI 调度员会自动解析文本的内容特征。
-- **精准匹配**：动态筛选并调度最合适的虚拟评论员。
-- **多维碰撞**：即时触发来自不同立场、不同专业视角的差异化评论与反馈。
+**Indie developers** / **Content creators** / **Product teams** / **PR teams** / Heavy users of X, Reddit, V2EX, Hacker News / Anyone who wants to improve content quality and reach
 
 ---
 
-## 快速开始
+## Core Features
 
-要求 **Node.js 20+**。
+### 1. Highly Customizable Virtual Commentators (Persona Customization)
+
+Break out of the single-AI perspective with comprehensive persona customization:
+
+- **Core attributes**: Age, interests, personality, stance.
+- **Cognition & relationship**: Define blind spots (e.g., domain-specific biases) and social relationship with the author (e.g., a strict mentor, a radical opponent).
+- **Cultural adaptation**: The system automatically detects the language of input content and infers a matching localized cultural context.
+
+### 2. Fully Automated Feedback Pipeline
+
+- **Smart dispatch**: Paste your work and the AI dispatcher automatically analyzes the content's characteristics.
+- **Precise matching**: Dynamically filters and schedules the most relevant virtual commentators.
+- **Multi-dimensional collision**: Triggers differentiated comments and feedback from diverse stances and professional perspectives.
+
+---
+
+## Quick Start
+
+Requires **Node.js 20+**.
 
 ```bash
-npm install           # 安装依赖
-npm run build         # 编译 TypeScript
-npm run setup         # 零配置安装（自动检测 MCP 客户端并写入配置）
-npm run kevlar-mcp    # 交互式安装 CLI（手动选择客户端）
+npm install           # Install dependencies
+npm run build         # Compile TypeScript
+npm run setup         # Zero-config setup (auto-detect MCP client and write config)
+npm run kevlar-mcp    # Interactive install CLI (manually select client)
 ```
 
-安装完成后重启 AI 客户端即可开始使用。支持以下客户端自动配置：
+Once installed, restart your AI client to start using Kevlar. Supports auto-configuration for:
 
 **Claude Desktop** / **Cursor** / **Windsurf** / **OpenCode** / **Codex** / **Antigravity** / **CodeBuddy CN** / **WorkBuddy**
 
-本地开发：
+Local development:
 
 ```bash
 npm run dev
 ```
 
-生产启动：
+Production start:
 
 ```bash
 npm start
@@ -74,88 +76,88 @@ npm start
 
 ---
 
-## 使用指南
+## Usage Guide
 
-### 核心流程
+### Core Workflow
 
-Kevlar 的所有核心操作都通过向导工具（Wizard）完成，你只需要用自然语言告诉 AI 你想做什么，剩下的步骤由 Kevlar 自动推进。
+All core operations in Kevlar are handled through Wizard tools — just tell the AI what you want in natural language, and Kevlar takes care of the rest.
 
-### 推荐工具流
+### Recommended Tool Flow
 
-| 向导工具 | 用途 | 关键行为 |
+| Wizard Tool | Purpose | Key Behavior |
 | --- | --- | --- |
-| `review_content_wizard` | 评审内容 | 提交文案 → 选择评论员 → 确认 → 输出多维反馈 |
-| `create_persona_wizard` | 创建评论员 | 描述角色 → AI 提炼字段 → 最终确认 → 保存人设 |
-| `delete_persona_wizard` | 删除人设 | 选择目标 → 回复 `确认删除{人设名}` → 完成 |
-| `configure_wizard` | 修改配置 | 预览变更 → 回复 `确认修改配置` → 写入 |
+| `review_content_wizard` | Review content | Submit content → Select commentators → Confirm → Multi-dimensional feedback |
+| `create_persona_wizard` | Create a persona | Describe the role → AI extracts fields → Final confirmation → Save persona |
+| `delete_persona_wizard` | Delete a persona | Select target → Reply `confirm delete {persona name}` → Done |
+| `configure_wizard` | Modify config | Preview changes → Reply `confirm config changes` → Write |
 
-底层直调工具（适合自动化脚本）：
+Low-level direct tools (suitable for automation scripts):
 
-| 工具 | 用途 |
+| Tool | Purpose |
 | --- | --- |
-| `review_content` | 直接执行内容评审 |
-| `create_persona` | 直接创建人设或基于草稿创建 |
-| `delete_persona` | 直接删除人设（需 `confirm: true`） |
-| `configure` | 直接写入配置 |
-| `get_execution_modes` | 查看当前模式和可用性 |
-| `list_personas` | 列出本地人设 |
-| `kevlar_help` | 查看帮助 |
+| `review_content` | Execute content review directly |
+| `create_persona` | Create persona directly or from draft |
+| `delete_persona` | Delete persona directly (requires `confirm: true`) |
+| `configure` | Write config directly |
+| `get_execution_modes` | Check current mode and availability |
+| `list_personas` | List local personas |
+| `kevlar_help` | View help |
 
-### 内容评审流程
+### Content Review Flow
 
-`review_content_wizard` 负责把"内容暂存、评论员选择、确认执行"串成稳定流程。
+`review_content_wizard` chains "save content, select commentators, confirm execution" into a stable flow.
 
 ```mermaid
 flowchart TD
-  A["提交待评测内容"] --> B{"本地人设数量"}
-  B -->|0 个| C["提示先创建人设，并保留本次内容状态"]
-  B -->|1-2 个| D["展示全部评论员，请用户确认"]
-  B -->|3 个以上| E["Sampling 推荐或启发式推荐 1-3 个评论员"]
-  D --> F["确认后调用 review_content"]
+  A["Submit content for review"] --> B{"Number of local personas"}
+  B -->|0| C["Prompt to create a persona first, save current content state"]
+  B -->|1-2| D["Show all commentators, ask user to confirm"]
+  B -->|3+| E["Sampling recommendation or heuristic recommendation of 1-3 commentators"]
+  D --> F["Call review_content after confirmation"]
   E --> F
 ```
 
-### 创建评论员人设
+### Creating a Commentator Persona
 
-`create_persona_wizard` 会引导你逐步完成人设创建。
+`create_persona_wizard` guides you through persona creation step by step.
 
 ```mermaid
 flowchart LR
-  A["年龄段"] --> B["兴趣方向"]
-  B --> C["性格特质"]
-  C --> D["常用平台"]
-  D --> E["最终确认"]
-  E -->|确认创建| F["保存人设"]
-  E -->|修改字段| E
+  A["Age range"] --> B["Interests"]
+  B --> C["Personality traits"]
+  C --> D["Platforms"]
+  D --> E["Final confirmation"]
+  E -->|Confirm creation| F["Save persona"]
+  E -->|Edit fields| E
 ```
 
-创建完成后，Kevlar 会自动推断文化背景、与作者关系、立场和盲区，保存到 `skills/*.md`。
+After creation, Kevlar automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.md`.
 
 ---
 
-## 执行模式
+## Execution Modes
 
-Kevlar 支持三种执行模式。默认 `auto` 会按环境自动选择。
+Kevlar supports three execution modes. The default `auto` selects the best mode based on your environment.
 
-| 模式 | 标识符 | 说明 | 适用场景 |
+| Mode | Identifier | Description | Best for |
 | --- | --- | --- | --- |
-| MCP Sampling 模式 | `mcp_sampling` | 每个评论员发起独立采样请求，隔离度最高 | 客户端支持 Sampling，追求真实多视角评审 |
-| Direct API 模式 | `direct_api` | 直接调用外部模型 API | 无 Sampling 客户端，或需要脚本自动化 |
-| 宿主辅助兜底模式 | `orchestration` | 由宿主 AI 辅助完成，低隔离 fallback | 无 Sampling、无 API Key 时的最后兜底 |
+| MCP Sampling | `mcp_sampling` | Each commentator gets an independent sampling request, maximum isolation | Clients that support Sampling, pursuing authentic multi-perspective review |
+| Direct API | `direct_api` | Directly calls external model API | Clients without Sampling, or script automation |
+| Orchestration (Host-assisted fallback) | `orchestration` | Host AI assists completion, low-isolation fallback | Last resort when neither Sampling nor API Key is available |
 
-`auto` 模式解析顺序：
+`auto` mode resolution order:
 
-1. 优先使用配置文件 `skills/kevlar-config.json` 中指定的模式
-2. 否则读取 `KEVLAR_MODE` 环境变量
-3. 否则按可用性自动选择：`mcp_sampling` → `direct_api` → `orchestration`
+1. Uses the mode specified in `skills/kevlar-config.json` (if set)
+2. Otherwise reads the `KEVLAR_MODE` environment variable
+3. Otherwise auto-selects by availability: `mcp_sampling` → `direct_api` → `orchestration`
 
 ---
 
-## 配置
+## Configuration
 
-### 运行时配置
+### Runtime Configuration
 
-通过 `configure_wizard` 修改运行偏好，配置写入 `skills/kevlar-config.json`（本地化，不提交到仓库）。
+Use `configure_wizard` to modify runtime preferences. Configuration is written to `skills/kevlar-config.json` (local only, not committed to the repository).
 
 ```json
 {
@@ -166,25 +168,25 @@ Kevlar 支持三种执行模式。默认 `auto` 会按环境自动选择。
 }
 ```
 
-### 环境变量
+### Environment Variables
 
-| 环境变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `KEVLAR_MODE` | `auto` | `auto`、`orchestration`、`mcp_sampling`、`direct_api` |
-| `KEVLAR_MAX_CONCURRENT` | `3` | 多评论员最大并发数 |
-| `KEVLAR_TOKEN_BUDGET_PER_TASK` | `50000` | 单次评审预算上限 |
-| `KEVLAR_MIN_DELAY_MS` | `1000` | 请求间最小延迟 |
-| `KEVLAR_SKILLS_DIR` | `<repo>/skills` | 自定义人设与配置目录 |
-| `KEVLAR_API_KEY` | — | Direct API 首选 Key |
-| `ANTHROPIC_API_KEY` | — | Anthropic API Key |
-| `OPENAI_API_KEY` | — | OpenAI API Key |
-| `LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
+| `KEVLAR_MODE` | `auto` | `auto`, `orchestration`, `mcp_sampling`, `direct_api` |
+| `KEVLAR_MAX_CONCURRENT` | `3` | Max concurrent commentators |
+| `KEVLAR_TOKEN_BUDGET_PER_TASK` | `50000` | Token budget per review task |
+| `KEVLAR_MIN_DELAY_MS` | `1000` | Minimum delay between requests |
+| `KEVLAR_SKILLS_DIR` | `<repo>/skills` | Custom persona and config directory |
+| `KEVLAR_API_KEY` | — | Preferred Direct API key |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key |
+| `OPENAI_API_KEY` | — | OpenAI API key |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
-> API Key 只从环境变量读取，不写入配置文件。
+> API keys are read from environment variables only — they are never written to config files.
 
-### MCP 客户端手动配置
+### Manual MCP Client Configuration
 
-Claude Desktop 示例：
+Claude Desktop example:
 
 ```json
 {
@@ -201,7 +203,7 @@ Claude Desktop 示例：
 }
 ```
 
-自定义人设目录：
+Custom persona directory:
 
 ```json
 {
@@ -213,75 +215,75 @@ Claude Desktop 示例：
 
 ---
 
-## 安全边界
+## Security Boundaries
 
-- `sessionId` 只允许 `[a-z0-9-]`。
-- 人设写入和删除都通过路径校验限制在 `skills/` 内。
-- 运行时草稿和向导状态写入 `skills/tmp/`，启动时会清理过期草稿。
-- 删除人设必须绑定目标并回复完整确认语。
-- 配置修改必须先预览再确认。
-- API Key 不通过工具参数传递，不写入本地配置。
-- 非 `orchestration` 执行模式会使用评审锁，避免多个外部模型任务同时竞争资源。
+- `sessionId` only allows `[a-z0-9-]`.
+- Persona write and delete operations are restricted to the `skills/` directory via path validation.
+- Runtime drafts and wizard states are stored in `skills/tmp/`, with expired drafts cleaned up on startup.
+- Deleting a persona requires selecting a target and replying with the full confirmation phrase.
+- Config changes require preview before confirmation.
+- API keys are never passed via tool parameters or written to local config.
+- Non-`orchestration` modes use a review lock to prevent resource contention between multiple external model tasks.
 
 ---
 
-## 架构概览
+## Architecture Overview
 
-Kevlar 采用 **Server-side Workflow + Execution Layer** 架构。
+Kevlar uses a **Server-side Workflow + Execution Layer** architecture.
 
 ```mermaid
 flowchart TD
-  User["用户"] --> Client["MCP 客户端 / 宿主 AI"]
+  User["User"] --> Client["MCP Client / Host AI"]
   Client --> Tools["Kevlar MCP Tools"]
-  Tools --> Wizards["服务端状态机向导"]
-  Tools --> Execution["多模式执行层"]
-  Wizards --> Tmp["skills/tmp 会话状态"]
-  Execution --> Personas["skills/*.md 评论员人设"]
-  Execution --> Report["结构化评审报告"]
+  Tools --> Wizards["Server-side State Machine Wizards"]
+  Tools --> Execution["Multi-mode Execution Layer"]
+  Wizards --> Tmp["skills/tmp Session State"]
+  Execution --> Personas["skills/*.md Commentator Personas"]
+  Execution --> Report["Structured Review Report"]
 ```
 
-设计原则：
+Design principles:
 
-- **状态机驱动流程**：关键流程由工具状态机维护，不依赖宿主 AI 记住长提示词。
-- **AI 负责理解与表达**：AI 负责自然语言提炼、润色和推荐，但结果会写入 Kevlar 可验证状态。
-- **自适应执行**：支持 MCP Sampling 时用 Sampling 做字段提炼或评论员推荐；不支持时自动走启发式逻辑或宿主辅助兜底。
-- **安全确认**：删除、重置、配置写入等高风险操作都通过确认向导执行。
+- **State machine-driven workflows**: Key flows are maintained by tool state machines, not dependent on the host AI remembering long prompts.
+- **AI handles understanding & expression**: AI handles natural language extraction, refinement, and recommendations, while results are written to Kevlar-verifiable state.
+- **Adaptive execution**: When MCP Sampling is available, use it for field extraction and commentator recommendations; otherwise, fall back to heuristic logic or host-assisted orchestration.
+- **Safe confirmation**: High-risk operations like deletion, reset, and config writes all go through confirmation wizards.
 
-### 目录结构
+### Directory Structure
 
 ```text
 kevlar/
 ├── config/
-│   └── mcp-config.json                    # MCP 客户端配置模板
-├── docs/                                  # 架构设计、审计报告
-├── scripts/                               # 安装与配置脚本
-│   ├── cli.ts                             # 交互式安装 CLI
-│   ├── registry.ts                        # MCP 客户端检测
-│   └── setup.ts                           # 零配置安装脚本
-├── skills/                                # 评论员人设库
-│   ├── _template.md                       # 人设模板
-│   └── tmp/                               # 运行时向导会话状态
+│   └── mcp-config.json                    # MCP client config template
+├── docs/                                  # Architecture design, audit reports
+├── scripts/                               # Install & config scripts
+│   ├── cli.ts                             # Interactive install CLI
+│   ├── registry.ts                        # MCP client detection
+│   └── setup.ts                           # Zero-config setup script
+├── skills/                                # Commentator persona library
+│   ├── _template.md                       # Persona template
+│   └── tmp/                               # Runtime wizard session state
 ├── src/
-│   ├── index.ts                           # stdio server 入口
-│   ├── server.ts                          # MCP server、依赖注入、工具注册
-│   ├── __tests__/                         # 测试套件
-│   ├── execution/                         # 多模式执行层
-│   │   ├── index.ts                       # 执行入口、模式解析
-│   │   ├── base.ts                        # 类型定义与接口
-│   │   ├── client.ts                      # 客户端能力检测
-│   │   ├── config.ts                      # 配置读写
-│   │   ├── aggregator.ts                  # 评审报告聚合
-│   │   ├── limiter.ts                     # 并发限流与重试
-│   │   ├── lock.ts                        # 评审锁
-│   │   ├── parallel.ts                    # 共享并行执行
+│   ├── index.ts                           # stdio server entry
+│   ├── server.ts                          # MCP server, DI, tool registration
+│   ├── __tests__/                         # Test suite
+│   ├── execution/                         # Multi-mode execution layer
+│   │   ├── index.ts                       # Execution entry, mode resolution
+│   │   ├── base.ts                        # Type definitions & interfaces
+│   │   ├── client.ts                      # Client capability detection
+│   │   ├── config.ts                      # Config read/write
+│   │   ├── aggregator.ts                  # Review report aggregation
+│   │   ├── limiter.ts                     # Concurrency limiting & retry
+│   │   ├── lock.ts                        # Review lock
+│   │   ├── parallel.ts                    # Shared parallel execution
 │   │   └── modes/
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
 │   │       └── direct_api.ts
-│   ├── tools/                             # MCP 工具
-│   │   ├── index.ts                       # 工具注册中心
+│   ├── tools/                             # MCP tools
+│   │   ├── index.ts                       # Tool registry
 │   │   ├── listPersonasTool.ts
-│   │   ├── createPersonaTool.ts           # 创建人设 + 草稿管理
+│   │   ├── createPersonaTool.ts           # Create persona + draft management
 │   │   ├── createPersonaWizardTool.ts
 │   │   ├── deletePersonaTool.ts
 │   │   ├── deletePersonaWizardTool.ts
@@ -292,56 +294,56 @@ kevlar/
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
 │   ├── prompts/
-│   │   └── reviewDispatcherPrompt.ts      # 内部设计参考
+│   │   └── reviewDispatcherPrompt.ts      # Internal design reference
 │   └── utils/
-│       ├── errors.ts                      # 错误码与格式化
-│       ├── logger.ts                      # 结构化日志
-│       ├── parser.ts                      # 人设文件解析与写入
-│       ├── sanitize.ts                    # 凭据扫描、Prompt 边界处理
+│       ├── errors.ts                      # Error codes & formatting
+│       ├── logger.ts                      # Structured logging
+│       ├── parser.ts                      # Persona file parsing & writing
+│       ├── sanitize.ts                    # Credential scanning, prompt boundary handling
 │       └── ...
 └── package.json
 ```
 
 ---
 
-## 贡献评论员人设
+## Contributing Commentator Personas
 
-在 `skills/` 下按平台新增子目录及 `.md` 文件（或直接放在 `skills/` 根目录），自定义人设文件默认被 `.gitignore` 排除，不会提交到仓库。
+Add a subdirectory and `.md` file under `skills/` by platform (or place it directly in the `skills/` root). Custom persona files are excluded by `.gitignore` by default and will not be committed to the repository.
 
-参考模板 `skills/_template.md`：
+Refer to the template `skills/_template.md`:
 
 ```markdown
 ---
 id: your_persona_id
-name: 角色显示名称
-description: 一句话描述这个评论员关注什么问题
+name: Display name
+description: One-line description of what this commentator focuses on
 tags:
-  - 平台
-  - 兴趣
+  - Platform
+  - Interest
 author: custom
 ---
 
-年龄段：
-兴趣方向：
-常用平台：
-性格特质：
-- 特质 → 行为
+Age range:
+Interests:
+Platforms:
+Personality traits:
+- Trait → Behavior
 
-文化背景：
-与作者的关系：
-立场：
-盲区：
+Cultural background:
+Relationship with author:
+Stance:
+Blind spots:
 ```
 
-自定义人设参与评审前会做字段完整性校验。至少要保证常用平台、性格特质、盲区等信息可被解析或出现在描述中。
+Custom personas undergo field completeness validation before participating in reviews. At minimum, platforms, personality traits, blind spots, and similar information must be parseable or present in the description.
 
 ---
 
-## 发布前检查
+## Pre-Release Checklist
 
 ```bash
 npm run build
 npm test
 ```
 
-上线前建议使用 [docs/PRE_RELEASE_AUDIT_REQUEST.md](docs/PRE_RELEASE_AUDIT_REQUEST.md) 交给本地 AI 做一次独立审计。
+Before release, it is recommended to hand [docs/PRE_RELEASE_AUDIT_REQUEST.md](docs/PRE_RELEASE_AUDIT_REQUEST.md) to your local AI for an independent audit.
