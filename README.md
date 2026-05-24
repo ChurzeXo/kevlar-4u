@@ -1,4 +1,4 @@
-# Kevlar-4u — Feedback Simulator Before You Hit Publish
+# Kevlar-4u — Comment Section Simulator
 
 ![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
 ![License](https://img.shields.io/badge/license-ISC-blue)
@@ -31,7 +31,7 @@ And most platforms don't offer a real **A/B test**. Once content goes live, by t
 
 ## Core Features
 
-### 1. Highly Customizable Virtual Commentators (Persona Customization)
+### 1. Highly Customizable Reviewers (Persona Customization)
 
 Break out of the single-AI perspective with comprehensive persona customization:
 
@@ -42,7 +42,7 @@ Break out of the single-AI perspective with comprehensive persona customization:
 ### 2. Fully Automated Feedback Pipeline
 
 - **Smart dispatch**: Paste your work and the AI dispatcher automatically analyzes the content's characteristics.
-- **Precise matching**: Dynamically filters and schedules the most relevant virtual commentators.
+- **Precise matching**: Dynamically filters and schedules the most relevant reviewers.
 - **Multi-dimensional collision**: Triggers differentiated comments and feedback from diverse stances and professional perspectives.
 
 ---
@@ -86,7 +86,7 @@ All core operations in Kevlar-4u are handled through Wizard tools — just tell 
 
 | Wizard Tool | Purpose | Key Behavior |
 | --- | --- | --- |
-| `review_content_wizard` | Review content | Submit content → Select platform → Pick commentators → Confirm → Multi-dimensional feedback |
+| `review_content_wizard` | Review content | Submit content → Select platform → Pick reviewers → Confirm → Multi-dimensional feedback |
 | `create_persona_wizard` | Create a persona | Describe the role → Fill 6 attributes (age/interests/traits/tone/platform/relation) → Preview → Confirm → Save persona |
 | `delete_persona_wizard` | Delete a persona | Select target → Reply `确认删除{persona name}` → Done |
 | `configure_wizard` | Modify config | Preview changes → Reply `确认修改配置` → Write |
@@ -103,7 +103,7 @@ Low-level direct tools (suitable for automation scripts):
 
 ### Content Review Flow
 
-`review_content_wizard` chains "save content, select commentators, confirm execution" into a stable flow.
+`review_content_wizard` chains "save content, select reviewers, confirm execution" into a stable flow.
 
 ```mermaid
 flowchart TD
@@ -123,7 +123,7 @@ flowchart TD
   K -->|No| I
 ```
 
-### Creating a Commentator Persona
+### Creating a Reviewer Persona
 
 `create_persona_wizard` guides you through persona creation step by step.
 
@@ -149,7 +149,7 @@ Kevlar-4u supports three execution modes. The default `auto` selects the best mo
 
 | Mode | Identifier | Description | Best for |
 | --- | --- | --- | --- |
-| MCP Sampling | `mcp_sampling` | Each commentator gets an independent sampling request, maximum isolation | Clients that support Sampling, pursuing authentic multi-perspective review |
+| MCP Sampling | `mcp_sampling` | Each reviewer gets an independent sampling request, maximum isolation | Clients that support Sampling, pursuing authentic multi-perspective review |
 | Direct API | `direct_api` | Directly calls external model API | Clients without Sampling, or script automation |
 | Orchestration (Host-assisted fallback) | `orchestration` | Host AI assists completion, low-isolation fallback | Last resort when neither Sampling nor API Key is available |
 
@@ -181,7 +181,7 @@ Use `configure_wizard` to modify runtime preferences. Configuration is written t
 | Variable | Default | Description |
 | --- | --- | --- |
 | `KEVLAR_MODE` | `auto` | `auto`, `orchestration`, `mcp_sampling`, `direct_api` |
-| `KEVLAR_MAX_CONCURRENT` | `3` | Max concurrent commentators |
+| `KEVLAR_MAX_CONCURRENT` | `3` | Max concurrent reviewers |
 | `KEVLAR_TOKEN_BUDGET_PER_TASK` | `50000` | Token budget per review task |
 | `KEVLAR_MIN_DELAY_MS` | `1000` | Minimum delay between requests |
 | `KEVLAR_SKILLS_DIR` | `<repo>/skills` | Custom persona and config directory |
@@ -246,7 +246,7 @@ flowchart TD
   Tools --> Wizards["Server-side State Machine Wizards"]
   Tools --> Execution["Multi-mode Execution Layer"]
   Wizards --> Tmp["skills/tmp Session State"]
-  Execution --> Personas["skills/*.md Commentator Personas"]
+  Execution --> Personas["skills/*.md Reviewer Personas"]
   Execution --> Report["Structured Review Report"]
 ```
 
@@ -254,7 +254,7 @@ Design principles:
 
 - **State machine-driven workflows**: Key flows are maintained by tool state machines, not dependent on the host AI remembering long prompts.
 - **AI handles understanding & expression**: AI handles natural language extraction, refinement, and recommendations, while results are written to Kevlar-4u-verifiable state.
-- **Adaptive execution**: When MCP Sampling is available, use it for field extraction and commentator recommendations; otherwise, fall back to heuristic logic or host-assisted orchestration.
+- **Adaptive execution**: When MCP Sampling is available, use it for field extraction and reviewer recommendations; otherwise, fall back to heuristic logic or host-assisted orchestration.
 - **Safe confirmation**: High-risk operations like deletion, reset, and config writes all go through confirmation wizards.
 
 ### Directory Structure
@@ -268,7 +268,7 @@ kevlar-4u/
 │   ├── cli.ts                             # Interactive install CLI
 │   ├── registry.ts                        # MCP client detection
 │   └── setup.ts                           # Zero-config setup script
-├── skills/                                # Commentator persona library
+├── skills/                                # Reviewer persona library
 │   ├── _template.md                       # Persona template
 │   └── tmp/                               # Runtime wizard session state
 ├── src/
@@ -314,7 +314,7 @@ kevlar-4u/
 
 ---
 
-## Contributing Commentator Personas
+## Contributing Reviewer Personas
 
 Add a subdirectory and `.md` file under `skills/` by platform (or place it directly in the `skills/` root). Custom persona files are excluded by `.gitignore` by default and will not be committed to the repository.
 
@@ -324,7 +324,7 @@ Refer to the template `skills/_template.md`:
 ---
 id: your_persona_id
 name: Display name
-description: One-line description of what this commentator focuses on
+description: One-line description of what this reviewer focuses on
 tags:
   - Platform
   - Interest
