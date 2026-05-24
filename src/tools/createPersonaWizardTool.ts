@@ -24,7 +24,7 @@ const AGE_RANGE_OPTIONS = [
 export const createPersonaWizardToolDefinition: Tool = {
   name: "create_persona_wizard",
   description:
-    "当用户说「创建/新建/自定义评论员/人设/角色」时，调用此工具。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。",
+    "当用户说「创建/新建/自定义评论员/人设/角色」时，调用此工具。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、讲话语气、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。",
   inputSchema: {
     type: "object",
     properties: {
@@ -53,12 +53,13 @@ type WizardStep =
   | "ageRange"
   | "interests"
   | "traits"
+  | "tone"
   | "platform"
   | "authorRelation"
   | "finalConfirm"
   | "completed";
 
-type DraftField = "ageRange" | "interests" | "traits" | "platform" | "authorRelation" | "name" | "gender";
+type DraftField = "ageRange" | "interests" | "traits" | "tone" | "platform" | "authorRelation" | "name" | "gender";
 
 interface WizardState {
   sessionId: string;
@@ -68,6 +69,7 @@ interface WizardState {
     ageRange?: string;
     interests?: string[];
     traits?: string[];
+    tone?: string[];
     platform?: string;
     platformNote?: string;
     culturalContext?: string;
@@ -200,7 +202,7 @@ async function advanceWizard(
     case "traits": {
       const extracted = await extractTraits(userMessage, samplingFn);
       state.fields.traits = normalizeStringArray(extracted.value);
-      state.step = "platform";
+      state.step = "tone";
       await saveState(tmpDir, state);
       await saveDraft(tmpDir, state);
       return toolResponse(
@@ -208,7 +210,24 @@ async function advanceWizard(
         [
           extracted.assistantMessage,
           "",
-          "第四步：内容主要投放平台",
+          "第四步：请描述这个角色的讲话语气",
+          "自由描述即可，例如：毒舌犀利、温柔耐心、幽默风趣、一本正经……",
+        ].join("\n")
+      );
+    }
+
+    case "tone": {
+      const toneExtracted = await extractTone(userMessage, samplingFn);
+      state.fields.tone = normalizeStringArray(toneExtracted.value);
+      state.step = "platform";
+      await saveState(tmpDir, state);
+      await saveDraft(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          toneExtracted.assistantMessage,
+          "",
+          "第五步：内容主要投放平台",
           "如果多平台投放，建议创建更多针对某一平台的虚拟评论员。",
         ].join("\n")
       );
@@ -271,7 +290,7 @@ async function advanceWizard(
       state.fields.authorRelation = resolved;
 
       // Infer name, gender, culturalContext, stance, blindSpot before showing preview
-      const inferred = await inferFinalFields(state, samplingFn);
+      const inferred = await inferFinalFields(state, skillsDir, samplingFn);
       state.fields = { ...state.fields, ...inferred };
 
       state.step = "finalConfirm";
@@ -332,6 +351,11 @@ async function applyFinalModification(
     case "traits": {
       const extracted = await extractTraits(valueText, samplingFn);
       state.fields.traits = normalizeStringArray(extracted.value);
+      break;
+    }
+    case "tone": {
+      const extracted = await extractTone(valueText, samplingFn);
+      state.fields.tone = normalizeStringArray(extracted.value);
       break;
     }
     case "platform":
@@ -449,12 +473,50 @@ async function extractTraits(
   };
 }
 
+async function extractTone(
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ExtractionResult> {
+  if (samplingFn) {
+    try {
+      const json = await runJsonExtraction(samplingFn, {
+        systemPrompt:
+          "你是字段提炼器。请把用户对讲话语气的自然语言描述提炼为最多 4 个中文短标签（每个标签是独立描述，简洁自然），并严格输出 JSON：{\"tone\":[\"标签\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的语气特点，不要要求用户确认。不要输出 markdown。",
+        userMessage,
+      });
+      const tone = normalizeStringArray(json.tone).slice(0, 4);
+      if (tone.length > 0) {
+        return {
+          value: tone,
+          assistantMessage:
+            typeof json.assistantMessage === "string"
+              ? sanitizeStepAssistantMessage(json.assistantMessage)
+              : `我帮你总结为以下讲话特点：\n${tone.map((t) => `- ${t}`).join("\n")}`,
+        };
+      }
+    } catch (err) {
+      const info = getErrorInfo(err);
+      logger.warn("Sampling extraction failed for tone, falling back to heuristic", {
+        event: "sampling_tone_fallback",
+        error: info.code,
+        message: info.message,
+      });
+    }
+  }
+
+  const tone = splitUserText(userMessage, 4);
+  return {
+    value: tone,
+    assistantMessage: `我帮你总结为以下讲话特点：\n${tone.map((t) => `- ${t}`).join("\n")}`,
+  };
+}
+
 async function inferFinalFields(
   state: WizardState,
+  skillsDir: string,
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "stance" | "blindSpot" | "personaName" | "gender">> {
   const interest = state.fields.interests?.[0] || "内容";
-  const platform = state.fields.platform || "通用";
 
   const fallback = {
     culturalContext: inferCulturalContext(state),
@@ -465,12 +527,23 @@ async function inferFinalFields(
     gender: "未指定",
   };
 
+  const platformRefs = loadPlatformStanceBlindSpotRefs(state, skillsDir);
+
   if (!samplingFn) return fallback;
 
   try {
     const json = await runJsonExtraction(samplingFn, {
-      systemPrompt:
-        "你是人设属性推断器。根据已确认字段推断 personaName（有创意、像真实互联网网名，不要带「评论员」后缀，也不要带平台名）、gender（男/女/未指定）、culturalContext、stance、blindSpot，并严格输出 JSON：{\"personaName\":\"...\",\"gender\":\"...\",\"culturalContext\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
+      systemPrompt: [
+        "你是人设属性推断器。根据已确认字段推断以下字段，必须全部填写，不能为空：",
+        "- personaName：有创意、像真实互联网网名，不要带「评论员」后缀，也不要带平台名",
+        "- gender：男 / 女 / 未指定",
+        "- culturalContext",
+        "- stance：该角色看问题的基本立场（参考同平台已有角色的风格，但不要照搬）",
+        "- blindSpot：该角色因自身局限可能忽略的视角（参考同平台已有角色的风格，但不要照搬）",
+        platformRefs ? `\n同平台已有人设参考：\n${platformRefs}` : "",
+        `\n严格输出 JSON：{"personaName":"...","gender":"...","culturalContext":"...","stance":"...","blindSpot":"..."}`,
+        "authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
+      ].filter(Boolean).join("\n"),
       userMessage: JSON.stringify(state.fields),
     });
     return {
@@ -482,11 +555,37 @@ async function inferFinalFields(
         : "未指定",
       culturalContext: typeof json.culturalContext === "string" ? json.culturalContext : fallback.culturalContext,
       authorRelation: fallback.authorRelation,
-      stance: typeof json.stance === "string" ? json.stance : fallback.stance,
-      blindSpot: typeof json.blindSpot === "string" ? json.blindSpot : fallback.blindSpot,
+      stance: typeof json.stance === "string" && json.stance.trim().length > 0 ? json.stance.trim() : fallback.stance,
+      blindSpot: typeof json.blindSpot === "string" && json.blindSpot.trim().length > 0 ? json.blindSpot.trim() : fallback.blindSpot,
     };
   } catch {
     return fallback;
+  }
+}
+
+function loadPlatformStanceBlindSpotRefs(state: WizardState, skillsDir: string): string {
+  const subDir = getSubDirFromDraft({ fields: state.fields });
+  if (!subDir) return "";
+  const dir = path.join(skillsDir, subDir);
+  try {
+    if (!fs.statSync(dir).isDirectory()) return "";
+    const files = fs.readdirSync(dir).filter(f => f.endsWith(".md") && f !== "_template.md");
+    if (files.length === 0) return "";
+
+    const refs: string[] = [];
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(dir, file), "utf-8");
+      const nameMatch = content.match(/^name:\s*(.+)/m);
+      const stanceMatch = content.match(/^stance:\s*(.+)/m);
+      const blindSpotMatch = content.match(/^blindSpot:\s*(.+)/m);
+      const name = nameMatch ? nameMatch[1].trim() : file.replace(".md", "");
+      const stance = stanceMatch ? stanceMatch[1].trim() : "（未设置）";
+      const blindSpot = blindSpotMatch ? blindSpotMatch[1].trim() : "（未设置）";
+      refs.push(`- ${name}：立场="${stance}"，盲区="${blindSpot}"`);
+    }
+    return refs.join("\n");
+  } catch {
+    return "";
   }
 }
 
@@ -631,6 +730,10 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
   if (Array.isArray(fields.traits)) {
     fields.traits.forEach((t: string) => lines.push(`  ${t}`));
   }
+  lines.push("讲话语气：");
+  if (Array.isArray(fields.tone)) {
+    fields.tone.forEach((t: string) => lines.push(`  ${t}`));
+  }
   lines.push(`与作者关系：${authorRelation}`);
 
   if (fields.platformNote) {
@@ -639,7 +742,7 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
 
   lines.push(
     "",
-    "如需修改，请直接说：名字改成... / 性别改成... / 年龄段改成... / 兴趣方向改成... / 性格特质改成... / 平台改成... / 关系改成...",
+    "如需修改，请直接说：名字改成... / 性别改成... / 年龄段改成... / 兴趣方向改成... / 性格特质改成... / 讲话语气改成... / 平台改成... / 关系改成...",
     "确认无误请回复：确认创建",
   );
 
@@ -652,6 +755,7 @@ function detectModifiedField(input: string): DraftField | undefined {
   if (/年龄|年龄段|\d+\s*[-到至]\s*\d+\s*岁|岁/.test(input)) return "ageRange";
   if (/兴趣|方向|标签/.test(input)) return "interests";
   if (/性格|特质|脾气|行为/.test(input)) return "traits";
+  if (/语气|讲话|说话|口吻/.test(input)) return "tone";
   if (/平台|渠道|小红书|知乎|B站|公众号|微信|微博|Instagram|Reddit|YouTube|Twitter|X\b/i.test(input)) {
     return "platform";
   }
@@ -670,6 +774,7 @@ function extractModificationValue(input: string, field: DraftField): string {
     ageRange: /年龄段?|岁数?/g,
     interests: /兴趣方向|兴趣|方向|标签/g,
     traits: /性格特质|性格|特质|脾气|行为/g,
+    tone: /讲话语气|语气|讲话|说话|口吻/g,
     platform: /常用平台|平台|渠道/g,
     authorRelation: /与作者的关系|关系|关注/g,
   };
@@ -689,6 +794,7 @@ function fieldLabel(field: DraftField): string {
     ageRange: "年龄段",
     interests: "兴趣方向",
     traits: "性格特质",
+    tone: "讲话语气",
     platform: "常用平台",
     authorRelation: "与作者的关系",
   };
@@ -778,6 +884,7 @@ function stepNumber(state: WizardState): number {
     "ageRange",
     "interests",
     "traits",
+    "tone",
     "platform",
     "authorRelation",
     "finalConfirm",

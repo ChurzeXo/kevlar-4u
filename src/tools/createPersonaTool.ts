@@ -136,7 +136,10 @@ export async function handleCreatePersona(
 		draft.fields &&
 		Array.isArray(draft.fields.traits)
 	) {
-		description = `一个主要活跃在【${draft.fields.platform || ""}】平台，兴趣在于【${Array.isArray(draft.fields.interests) ? draft.fields.interests.join("、") : ""}】，性格特质为【${draft.fields.traits.join("，")}】的评论员角色。`;
+		const tonePart = Array.isArray(draft.fields.tone) && draft.fields.tone.length > 0
+			? `，讲话风格${draft.fields.tone.join("、")}`
+			: "";
+		description = `一个主要活跃在【${draft.fields.platform || ""}】平台，兴趣在于【${Array.isArray(draft.fields.interests) ? draft.fields.interests.join("、") : ""}】，性格特质为【${draft.fields.traits.join("，")}】${tonePart}的评论员角色。`;
 	}
 	if (!description) {
 		description = "由模型推断自动生成的角色";
