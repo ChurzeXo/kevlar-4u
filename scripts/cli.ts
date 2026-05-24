@@ -17,7 +17,7 @@ const CYAN  = chalk.cyan;
 const BRAND = chalk.hex("#FFD700"); // Kevlar gold
 
 const MCP_NAME    = "kevlar";
-const GITHUB_REPO = "yourusername/kevlar-mcp"; // update before release
+const GITHUB_REPO = "9Churze/kevlar-mcp";
 
 // Resolve package version from nearest package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

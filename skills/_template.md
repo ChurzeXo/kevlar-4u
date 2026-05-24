@@ -58,7 +58,7 @@ description: "用一句话描述这个人设的核心特质和阅读视角"
 ---
 <!-- 
 贡献指南：
-1. 将此文件复制为 skills/your_persona_id.md
+1. 将此文件复制为 skills/your_platform/your_persona_id.md
 2. 填写所有 YAML Frontmatter 字段
 3. 替换系统提示词中的所有占位符
 4. 确保角色有鲜明的个性，避免平淡泛化

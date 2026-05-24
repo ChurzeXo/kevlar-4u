@@ -28,7 +28,8 @@
  *   logger.info("Work done", { event: "work_complete", durationMs });
  */
 
-export { logger, LogContext } from "./logger.js";
+export { logger } from "./logger.js";
+export type { LogContext } from "./logger.js";
 
 // ── Structured Error Info ─────────────────────────────────────────────────────
 

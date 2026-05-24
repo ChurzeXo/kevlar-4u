@@ -102,6 +102,11 @@ describe("handleCreatePersonaWizard fallback state machine", () => {
       sessionId,
       userMessage: "挑剔，表达直接",
     });
+    // Tone step
+    await handleCreatePersonaWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "毒舌犀利",
+    });
     const platformRecorded = await handleCreatePersonaWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "小红书",
