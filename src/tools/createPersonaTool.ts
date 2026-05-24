@@ -14,6 +14,44 @@ import {
 } from "../utils/personaIdMaps.js";
 import { getErrorInfo } from "../utils/observability.js";
 
+// ── Persistent Prompt Injection Defense ──────────────────────────────────────
+// These patterns represent common prompt-injection / jailbreak tokens that
+// must NEVER be persisted into persona fields (name, stance, blindSpot, etc.).
+// If a user input contains any of these, the tokens are stripped before storage.
+// ────────────────────────────────────────────────────────────────────────────
+const DANGEROUS_PATTERNS = [
+	/ignore\s+previous/gi,
+	/system\s+prompt/gi,
+	/developer\s+message/gi,
+	/api\s*key/gi,
+	/<\/?system>/gi,
+	/<\/?assistant>/gi,
+	/<\/?user>/gi,
+	/```/g,
+	/yaml/gi,
+	/markdown/gi,
+	/xml/gi,
+	/json/gi,
+	/role:/gi,
+];
+
+/**
+ * Sanitize a string value that will be persisted into persona YAML/memory.
+ * Strips dangerous tokens, special characters, collapses whitespace,
+ * and truncates to 200 characters maximum.
+ */
+export function sanitizePersistentField(input: string): string {
+	let output = input;
+	for (const pattern of DANGEROUS_PATTERNS) {
+		output = output.replace(pattern, "");
+	}
+	output = output
+		.replace(/[{}<>]/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+	return output.slice(0, 200);
+}
+
 // ── Description creation principles ─────────────────────────────────────────
 // These norms govern the YAML `description` field for every persona:
 //
@@ -158,49 +196,60 @@ export async function handleCreatePersona(
 
 	const meta: PersonaMeta = {
 		id,
-		name: input.name,
-		name_en: input.name_en ?? "",
+		name: sanitizePersistentField(input.name),
+		name_en: sanitizePersistentField(input.name_en ?? ""),
 		version: "1.0.0",
 		author: input.author ?? "ai-generated",
-		tags: tags,
-		description,
-		culturalContext: input.culturalContext || "未提供",
-		authorRelation: input.authorRelation || "未提供",
-		stance: input.stance || "未提供",
-		blindSpot: input.blindSpot || "无特定盲区",
-		gender: input.gender || "未指定",
+		tags: tags.map((t: string) => sanitizePersistentField(t)),
+		description: sanitizePersistentField(description),
+		culturalContext: sanitizePersistentField(input.culturalContext || "未提供"),
+		authorRelation: sanitizePersistentField(input.authorRelation || "未提供"),
+		stance: sanitizePersistentField(input.stance || "未提供"),
+		blindSpot: sanitizePersistentField(input.blindSpot || "无特定盲区"),
+		gender: sanitizePersistentField(input.gender || "未指定"),
 	};
 
 	let personaDescription = "";
 	if (draft && draft.fields) {
-		personaDescription += `年龄段：${draft.fields.ageRange || ""}\n`;
-		personaDescription += `兴趣方向：${Array.isArray(draft.fields.interests) ? draft.fields.interests.join("、") : draft.fields.interests || ""}\n`;
-		personaDescription += `常用平台：${draft.fields.platform || ""}\n`;
+		const ageRange = sanitizePersistentField(draft.fields.ageRange || "");
+		const interests = Array.isArray(draft.fields.interests)
+			? draft.fields.interests.map((t: string) => sanitizePersistentField(t)).join("、")
+			: sanitizePersistentField(draft.fields.interests || "");
+		const platform = sanitizePersistentField(draft.fields.platform || "");
+
+		personaDescription += `年龄段：${ageRange}\n`;
+		personaDescription += `兴趣方向：${interests}\n`;
+		personaDescription += `常用平台：${platform}\n`;
 		personaDescription += `性格特质：\n`;
 		if (Array.isArray(draft.fields.traits)) {
 			draft.fields.traits.forEach(
-				(t: string) => (personaDescription += `- ${t}\n`),
+				(t: string) => (personaDescription += `- ${sanitizePersistentField(t)}\n`),
 			);
 		}
 
-		const cultural =
+		const cultural = sanitizePersistentField(
 			input.culturalContext ||
 			(draft.fields && draft.fields.culturalContext) ||
-			"未提供";
-		const relation =
+			"未提供"
+		);
+		const relation = sanitizePersistentField(
 			input.authorRelation ||
 			(draft.fields && draft.fields.authorRelation) ||
-			"未提供";
-		const stanceVal =
-			input.stance || (draft.fields && draft.fields.stance) || "未提供";
-		const blind =
+			"未提供"
+		);
+		const stanceVal = sanitizePersistentField(
+			input.stance || (draft.fields && draft.fields.stance) || "未提供"
+		);
+		const blind = sanitizePersistentField(
 			input.blindSpot ||
 			(draft.fields && draft.fields.blindSpot) ||
-			"无特定盲区";
-		const gender =
+			"无特定盲区"
+		);
+		const gender = sanitizePersistentField(
 			input.gender ||
 			(draft.fields && draft.fields.gender) ||
-			"未指定";
+			"未指定"
+		);
 
 		personaDescription += `文化背景：${cultural}\n`;
 		personaDescription += `与作者的关系：${relation}\n`;
@@ -210,11 +259,11 @@ export async function handleCreatePersona(
 	} else {
 		personaDescription = description;
 
-		const cultural = input.culturalContext || "未提供";
-		const relation = input.authorRelation || "未提供";
-		const stanceVal = input.stance || "未提供";
-		const blind = input.blindSpot || "无特定盲区";
-		const gender = input.gender || "未指定";
+		const cultural = sanitizePersistentField(input.culturalContext || "未提供");
+		const relation = sanitizePersistentField(input.authorRelation || "未提供");
+		const stanceVal = sanitizePersistentField(input.stance || "未提供");
+		const blind = sanitizePersistentField(input.blindSpot || "无特定盲区");
+		const gender = sanitizePersistentField(input.gender || "未指定");
 
 		personaDescription += `\n文化背景：${cultural}\n`;
 		personaDescription += `与作者的关系：${relation}\n`;
