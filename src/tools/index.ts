@@ -1,8 +1,4 @@
 import { listPersonasModule } from "./listPersonasTool.js";
-import {
-  updatePersonaDraftModule,
-  deletePersonaDraftModule,
-} from "./createPersonaTool.js";
 import { createPersonaWizardModule } from "./createPersonaWizardTool.js";
 import { deletePersonaModule } from "./deletePersonaTool.js";
 import { deletePersonaWizardModule } from "./deletePersonaWizardTool.js";
@@ -19,8 +15,6 @@ type ToolHandler = (args: Record<string, unknown> | undefined) => Promise<any>;
 
 const allModules: ToolModule[] = [
   listPersonasModule,
-  updatePersonaDraftModule,
-  deletePersonaDraftModule,
   createPersonaWizardModule,
   deletePersonaModule,
   deletePersonaWizardModule,

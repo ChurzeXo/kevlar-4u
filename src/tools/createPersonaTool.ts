@@ -1,7 +1,5 @@
-import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
-import type { ToolModule } from "./types.js";
 import {
 	validateWritePath,
 	writePersonaFile,
@@ -39,109 +37,6 @@ export const DESCRIPTION_PRINCIPLES = {
 	CONCISE: "Single sentence, under 120 characters",
 } as const;
 
-export const updatePersonaDraftToolDefinition: Tool = {
-	name: "update_persona_draft",
-	description: `角色构建草稿暂存工具。在人设创建流程中暂存各个字段（ageRange, interests, traits, platform, authorRelation）的值，最终调用 create_persona 完成创建。`,
-	inputSchema: {
-		type: "object",
-		properties: {
-			sessionId: {
-				type: "string",
-				description: "会话唯一标识，格式：[a-z0-9-]",
-			},
-			field: {
-				type: "string",
-				enum: ["ageRange", "interests", "traits", "platform", "authorRelation"],
-				description: "需要更新的字段名",
-			},
-			value: {
-				type: ["string", "array"],
-				items: { type: "string" },
-				description: "字段值。标量字段传 string（ageRange、platform、authorRelation），列表字段传 string[]（interests、traits）",
-			},
-		},
-		required: ["sessionId", "field", "value"],
-	},
-};
-
-export const deletePersonaDraftToolDefinition: Tool = {
-	name: "delete_persona_draft",
-	description: "角色创建成功后由 LLM 调用，删除临时记忆文件",
-	inputSchema: {
-		type: "object",
-		properties: {
-			sessionId: {
-				type: "string",
-				description: "会话唯一标识，格式：[a-z0-9-]",
-			},
-		},
-		required: ["sessionId"],
-	},
-};
-
-export const createPersonaToolDefinition: Tool = {
-	name: "create_persona",
-	description:
-		"根据草稿或直接参数创建并保存一个新的批评人设。当用户已完成 create_persona_wizard 的流程后调用此工具完成最终创建；也可直接传入 name 和各字段一步创建。[只写] 不负责收集用户偏好或引导对话——收集阶段应使用 create_persona_wizard。name 为必填，其余字段均可选。",
-	inputSchema: {
-		type: "object" as const,
-		properties: {
-			name: {
-				type: "string",
-				description: "人设的中文名称，例如：挑剔的视觉强迫症设计师",
-			},
-			id: {
-				type: "string",
-				description:
-					"唯一标识符（可选），只能包含小写英文字母、数字和下划线，例如：fast_critic",
-			},
-			name_en: {
-				type: "string",
-				description: "英文名称（可选），例如：Fast Critic",
-			},
-			description: {
-				type: "string",
-				description: "人设一句话描述（可选），如果不提供且有草稿则自动推断",
-			},
-			tags: {
-				type: "array",
-				items: { type: "string" },
-				description: '人设标签数组（可选），例如：["设计", "视觉", "挑剔"]',
-			},
-			sessionId: {
-				type: "string",
-				description:
-					"当前会话 ID（可选，若提供则基于已完成的草稿来创建角色）",
-			},
-			author: {
-				type: "string",
-				description: "创建者署名（可选），默认为 ai-generated",
-			},
-			culturalContext: {
-				type: "string",
-				description: "文化背景描述（可选），例如：日本二次元文化圈、一线城市职场文化。传空字符串则由草稿或系统推断。",
-			},
-			authorRelation: {
-				type: "string",
-				description: "该人设与内容作者的关系（可选），例如：路人、粉丝、同行。传空字符串则由草稿或系统推断。",
-			},
-			stance: {
-				type: "string",
-				description: "评论立场倾向（可选），例如：默认质疑、温和包容、技术导向。传空字符串则由草稿或系统推断。",
-			},
-			blindSpot: {
-				type: "string",
-				description: "认知盲区描述（可选），例如：对价格不敏感、忽略小众需求。传空字符串则由草稿或系统推断。",
-			},
-			gender: {
-				type: "string",
-				description: "性别（可选），可选值：男 / 女 / 未指定",
-			},
-		},
-		required: ["name"],
-	},
-};
-
 export interface CreatePersonaInput {
 	id?: string;
 	name: string;
@@ -156,30 +51,6 @@ export interface CreatePersonaInput {
 	blindSpot?: string;
 	gender?: string;
 }
-
-export const updatePersonaDraftModule: ToolModule = {
-  definition: updatePersonaDraftToolDefinition,
-  handler: (deps) => async (args) => {
-    if (!args) throw new Error("需要提供参数");
-    return await handleUpdatePersonaDraft(deps.tmpDir, args as any);
-  },
-};
-
-export const deletePersonaDraftModule: ToolModule = {
-  definition: deletePersonaDraftToolDefinition,
-  handler: (deps) => async (args) => {
-    if (!args) throw new Error("需要提供参数");
-    return await handleDeletePersonaDraft(deps.tmpDir, args as any);
-  },
-};
-
-export const createPersonaModule: ToolModule = {
-  definition: createPersonaToolDefinition,
-  handler: (deps) => async (args) => {
-    if (!args) throw new Error("创建评论员需要提供参数");
-    return await handleCreatePersona(deps.skillsDir, deps.tmpDir, args as any);
-  },
-};
 
 export async function handleSaveDraft(
 	tmpDir: string,
