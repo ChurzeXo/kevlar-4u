@@ -24,7 +24,7 @@ const AGE_RANGE_OPTIONS = [
 export const createPersonaWizardToolDefinition: Tool = {
   name: "create_persona_wizard",
   description:
-    "当用户说「创建/新建/自定义评审员/人设/角色」时，调用此工具（评论区模拟器）。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、讲话语气、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。",
+    "当用户说「创建/新建/自定义评审员/人设/角色」时，调用此工具（评论区模拟器）。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、讲话语气、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。最后一步返回的【人设预览】请完整展示给用户，不要改写或添加额外话术，用户可直接回复「确认创建」或说出修改指令。",
   inputSchema: {
     type: "object",
     properties: {
@@ -693,7 +693,6 @@ function toolResponse(state: WizardState, assistantMessage: string): ToolResult 
 function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): string {
   const fields = state.fields;
 
-  // Build a preview of the persona file that will be created
   const previewDraft = { fields };
   const subDir = getSubDirFromDraft(previewDraft);
 
@@ -705,7 +704,6 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
   const id = applyDedup(skillsDir, baseId, subDir);
 
   const personaName = fields.personaName || inferPersonaName(state);
-
   const culturalContext = fields.culturalContext || "未提供";
   const authorRelation = fields.authorRelation || "未关注";
   const stance = fields.stance || "默认质疑";
@@ -713,37 +711,43 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
   const gender = fields.gender || undefined;
 
   const lines: string[] = [
+    "【人设预览】",
+    "",
     "基本信息：",
-    `角色名：${personaName}`,
-    `ID：${id}`,
-    `年龄段：${fields.ageRange || ""}`,
+    `- 角色名：${personaName}（AI 推断）`,
+    `- ID：${id}（自动生成 + 去重）`,
+    `- 年龄段：${fields.ageRange || ""}（用户选择）`,
   ];
-  if (gender) lines.push(`性别：${gender}`);
+  if (gender) lines.push(`- 性别：${gender}（AI 推断）`);
   lines.push(
-    `兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`,
-    `常用平台：${fields.platform || ""}`,
-    `文化背景：${culturalContext}`,
-    `立场：${stance}`,
-    `盲区：${blindSpot}`,
+    `- 兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}（用户描述后 AI 提取）`,
+    `- 常用平台：${fields.platform || ""}（用户输入）`,
+    `- 文化背景：${culturalContext}（AI 推断）`,
+    `- 立场：${stance}（AI 推断）`,
+    `- 盲区：${blindSpot}（AI 推断）`,
+    "",
     "性格特质：",
   );
   if (Array.isArray(fields.traits)) {
-    fields.traits.forEach((t: string) => lines.push(`  ${t}`));
+    fields.traits.forEach((t: string) => lines.push(`- ${t}（用户描述后 AI 提取）`));
   }
   lines.push("讲话语气：");
   if (Array.isArray(fields.tone)) {
-    fields.tone.forEach((t: string) => lines.push(`  ${t}`));
+    fields.tone.forEach((t: string) => lines.push(`- ${t}`));
   }
-  lines.push(`与作者关系：${authorRelation}`);
+  lines.push(`与作者关系：${authorRelation}（用户选择）`);
 
   if (fields.platformNote) {
-    lines.push("", fields.platformNote);
+    lines.push("", `备注：${fields.platformNote}`);
   }
 
   lines.push(
     "",
+    "------------------------",
     "如需修改，请直接说：名字改成... / 性别改成... / 年龄段改成... / 兴趣方向改成... / 性格特质改成... / 讲话语气改成... / 平台改成... / 关系改成...",
     "确认无误请回复：确认创建",
+    "",
+    "【以上内容请完整展示，不要改写】",
   );
 
   return lines.join("\n");
@@ -814,7 +818,7 @@ function isAffirmative(input: string): boolean {
   // Short/ambiguous words require exact match to avoid false positives.
   // e.g. "确认没问题" should match via containsMatchWords; "这是什么" should NOT match.
   const exactMatchWords = ["是", "对", "好", "y"];
-  const containsMatchWords = ["确认", "可以", "没问题", "ok", "yes"];
+  const containsMatchWords = ["确认", "可以", "没问题", "ok", "yes", "创建"];
   return (
     exactMatchWords.some((w) => normalized === w) ||
     containsMatchWords.some((w) => normalized.includes(w))
