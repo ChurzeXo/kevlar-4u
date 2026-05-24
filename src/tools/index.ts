@@ -2,7 +2,6 @@ import { listPersonasModule } from "./listPersonasTool.js";
 import {
   updatePersonaDraftModule,
   deletePersonaDraftModule,
-  createPersonaModule,
 } from "./createPersonaTool.js";
 import { createPersonaWizardModule } from "./createPersonaWizardTool.js";
 import { deletePersonaModule } from "./deletePersonaTool.js";
@@ -22,7 +21,6 @@ const allModules: ToolModule[] = [
   listPersonasModule,
   updatePersonaDraftModule,
   deletePersonaDraftModule,
-  createPersonaModule,
   createPersonaWizardModule,
   deletePersonaModule,
   deletePersonaWizardModule,
