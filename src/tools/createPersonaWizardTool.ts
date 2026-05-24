@@ -175,8 +175,7 @@ async function advanceWizard(
         [
           `已记录年龄段：${state.fields.ageRange}`,
           "",
-          "第二步：请描述这个角色的兴趣方向",
-          "副标题：举几个例子，例如：美食、旅行、科技、育儿、健身……",
+          "第二步：告诉我这个角色的日常兴趣与关注焦点？",
         ].join("\n")
       );
     }
@@ -382,7 +381,7 @@ async function extractInterests(
     try {
       const json = await runJsonExtraction(samplingFn, {
         systemPrompt:
-          "你是字段提炼器。请把用户对兴趣方向的自然语言描述提炼为最多 3 个中文短标签，并严格输出 JSON：{\"interests\":[\"标签\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 只说明已总结的标签，不要要求用户确认。不要输出 markdown。",
+          "你是字段提炼器。请把用户对兴趣方向的自然语言描述提炼为最多 3 个中文短标签，并严格输出 JSON：{\"interests\":[\"标签\"],\"assistantMessage\":\"整理说明\"}。assistantMessage 可自由给出贴合场景的引导性举例辅助说明，再总结标签。不要要求用户确认。不要输出 markdown。",
         userMessage,
       });
       const interests = normalizeStringArray(json.interests).slice(0, 3);
@@ -462,7 +461,7 @@ async function inferFinalFields(
     authorRelation: state.fields.authorRelation || "未关注",
     stance: "默认质疑",
     blindSpot: "无特定盲区",
-    personaName: `${platform}${interest}评论员`,
+    personaName: inferPersonaName(state),
     gender: "未指定",
   };
 
@@ -471,7 +470,7 @@ async function inferFinalFields(
   try {
     const json = await runJsonExtraction(samplingFn, {
       systemPrompt:
-        "你是人设属性推断器。根据已确认字段推断 personaName（有创意、不公式化的角色名，不要带「评论员」后缀）、gender（男/女/未指定）、culturalContext、stance、blindSpot，并严格输出 JSON：{\"personaName\":\"...\",\"gender\":\"...\",\"culturalContext\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
+        "你是人设属性推断器。根据已确认字段推断 personaName（有创意、像真实互联网网名，不要带「评论员」后缀，也不要带平台名）、gender（男/女/未指定）、culturalContext、stance、blindSpot，并严格输出 JSON：{\"personaName\":\"...\",\"gender\":\"...\",\"culturalContext\":\"...\",\"stance\":\"...\",\"blindSpot\":\"...\"}。authorRelation 已由用户明确选择，不要覆盖。不要输出 markdown。",
       userMessage: JSON.stringify(state.fields),
     });
     return {
@@ -608,54 +607,31 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
 
   const personaName = fields.personaName || inferPersonaName(state);
 
-  const description = `一个主要活跃在【${fields.platform || ""}】平台，兴趣在于【${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}】，性格特质为【${(fields.traits || []).join("，")}】的评论员角色。`;
-
-  const tags: string[] = [];
-  if (fields.platform) tags.push(fields.platform);
-  if (Array.isArray(fields.interests)) tags.push(...fields.interests);
-
   const culturalContext = fields.culturalContext || "未提供";
   const authorRelation = fields.authorRelation || "未关注";
   const stance = fields.stance || "默认质疑";
   const blindSpot = fields.blindSpot || "无特定盲区";
   const gender = fields.gender || undefined;
 
-  const tagsStr = tags.length > 0 ? tags.join("、") : "（无）";
-
   const lines: string[] = [
-    "所有信息已收集完毕，以下是即将创建的角色文件预览：",
-    "",
-    `📄 ${subDir ? `skills/${subDir}/${id}.md` : `skills/${id}.md`}`,
-    "",
-    `- id: ${id}`,
-    `- name: ${personaName}`,
-    `- tags: ${tagsStr}`,
-    `- description: ${description}`,
-    `- culturalContext: ${culturalContext}`,
-    `- authorRelation: ${authorRelation}`,
-    `- stance: ${stance}`,
-    `- blindSpot: ${blindSpot}`,
-    "",
-    "---",
-    "",
-    `- 角色名：${personaName}`,
-    `- 年龄段：${fields.ageRange || ""}`,
+    "基本信息：",
+    `角色名：${personaName}`,
+    `ID：${id}`,
+    `年龄段：${fields.ageRange || ""}`,
   ];
-  if (gender) lines.push(`- 性别：${gender}`);
+  if (gender) lines.push(`性别：${gender}`);
   lines.push(
-    `- 兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`,
-    `- 常用平台：${fields.platform || ""}`,
-    "- 性格特质：",
+    `兴趣方向：${Array.isArray(fields.interests) ? fields.interests.join("、") : ""}`,
+    `常用平台：${fields.platform || ""}`,
+    `文化背景：${culturalContext}`,
+    `立场：${stance}`,
+    `盲区：${blindSpot}`,
+    "性格特质：",
   );
   if (Array.isArray(fields.traits)) {
-    fields.traits.forEach((t: string) => lines.push(`  - ${t}`));
+    fields.traits.forEach((t: string) => lines.push(`  ${t}`));
   }
-  lines.push(
-    `- 文化背景：${culturalContext}`,
-    `- 与作者的关系：${authorRelation}`,
-    `- 立场：${stance}`,
-    `- 盲区：${blindSpot}`,
-  );
+  lines.push(`与作者关系：${authorRelation}`);
 
   if (fields.platformNote) {
     lines.push("", fields.platformNote);
@@ -794,8 +770,7 @@ function inferCulturalContext(state: WizardState): string {
 
 function inferPersonaName(state: WizardState): string {
   const interest = state.fields.interests?.[0] || "内容";
-  const platform = state.fields.platform || "通用";
-  return `${platform}${interest}评论员`;
+  return interest;
 }
 
 function stepNumber(state: WizardState): number {
