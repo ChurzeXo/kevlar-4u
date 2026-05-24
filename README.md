@@ -86,16 +86,15 @@ All core operations in Kevlar are handled through Wizard tools — just tell the
 
 | Wizard Tool | Purpose | Key Behavior |
 | --- | --- | --- |
-| `review_content_wizard` | Review content | Submit content → Select commentators → Confirm → Multi-dimensional feedback |
-| `create_persona_wizard` | Create a persona | Describe the role → AI extracts fields → Final confirmation → Save persona |
-| `delete_persona_wizard` | Delete a persona | Select target → Reply `confirm delete {persona name}` → Done |
-| `configure_wizard` | Modify config | Preview changes → Reply `confirm config changes` → Write |
+| `review_content_wizard` | Review content | Submit content → Select platform → Pick commentators → Confirm → Multi-dimensional feedback |
+| `create_persona_wizard` | Create a persona | Describe the role → Fill 6 attributes (age/interests/traits/tone/platform/relation) → Preview → Confirm → Save persona |
+| `delete_persona_wizard` | Delete a persona | Select target → Reply `确认删除{persona name}` → Done |
+| `configure_wizard` | Modify config | Preview changes → Reply `确认修改配置` → Write |
 
 Low-level direct tools (suitable for automation scripts):
 
 | Tool | Purpose |
 | --- | --- |
-| `create_persona` | Create persona directly or from draft |
 | `delete_persona` | Delete persona directly (requires `confirm: true`) |
 | `configure` | Write config directly |
 | `get_execution_modes` | Check current mode and availability |
@@ -108,12 +107,20 @@ Low-level direct tools (suitable for automation scripts):
 
 ```mermaid
 flowchart TD
-  A["Submit content for review"] --> B{"Number of local personas"}
-  B -->|0| C["Prompt to create a persona first, save current content state"]
-  B -->|1-2| D["Show all commentators, ask user to confirm"]
-  B -->|3+| E["Sampling recommendation or heuristic recommendation of 1-3 commentators"]
-  D --> F["Execute review internally"]
-  E --> F
+  A["Submit content for review"] --> B{"Any personas?"}
+  B -->|No| C["Prompt to create persona, save state"]
+  C -.->|"Same sessionId"| B
+  B -->|Yes| D["Collect target platform"]
+  D --> E["Filter personas by platform"]
+  E --> F{"Count matched"}
+  F -->|"≤2"| G["Show matched personas"]
+  F -->|"3+"| H["AI recommend 1-3 personas"]
+  G --> I["Confirm selection"]
+  H --> I
+  I --> J["Token cost estimate"]
+  J --> K{"Confirm?"}
+  K -->|Yes| L["Execute review"]
+  K -->|No| I
 ```
 
 ### Creating a Commentator Persona
@@ -124,10 +131,12 @@ flowchart TD
 flowchart LR
   A["Age range"] --> B["Interests"]
   B --> C["Personality traits"]
-  C --> D["Platforms"]
-  D --> E["Final confirmation"]
-  E -->|Confirm creation| F["Save persona"]
-  E -->|Edit fields| E
+  C --> D["Tone of voice"]
+  D --> E["Platforms"]
+  E --> F["Author relation"]
+  F --> G["Final confirmation & preview"]
+  G -->|Confirm| H["Save persona"]
+  G -->|Edit| G
 ```
 
 After creation, Kevlar automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.md`.
