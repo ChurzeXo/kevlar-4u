@@ -95,7 +95,6 @@ Kevlar의 모든 핵심 작업은 Wizard 도구를 통해 처리됩니다 — AI
 
 | 도구 | 목적 |
 | --- | --- |
-| `review_content` | 콘텐츠 리뷰 직접 실행 |
 | `create_persona` | 페르소나 직접 생성 또는 초안에서 생성 |
 | `delete_persona` | 페르소나 직접 삭제 (`confirm: true` 필요) |
 | `configure` | 설정 직접 저장 |
@@ -113,7 +112,7 @@ flowchart TD
   B -->|0| C["Prompt to create a persona first, save current content state"]
   B -->|1-2| D["Show all commentators, ask user to confirm"]
   B -->|3+| E["Sampling recommendation or heuristic recommendation of 1-3 commentators"]
-  D --> F["Call review_content after confirmation"]
+  D --> F["Execute review internally"]
   E --> F
 ```
 

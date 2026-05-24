@@ -9,17 +9,15 @@ import { getErrorInfo } from "../utils/observability.js";
 const MAX_CONTENT_LENGTH = 100_000; // 100KB
 const MAX_CONTEXT_LENGTH = 5_000; // 5KB
 
-export interface ReviewInput {
-  content: string;
-  persona_ids?: string[];
-  context?: string;
-  mode?: ResolveableMode;
-  samplingFn?: SamplingFunction;
-}
-
 export async function handleReviewContent(
   skillsDir: string,
-  input: ReviewInput
+  input: {
+    content: string;
+    persona_ids?: string[];
+    context?: string;
+    mode?: ResolveableMode;
+    samplingFn?: SamplingFunction;
+  }
 ): Promise<ToolResult> {
   // ── Resource limits validation ───────────────────────────────────────────
   if (!input.content || typeof input.content !== "string") {

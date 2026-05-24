@@ -14,7 +14,7 @@ import { formatErrorResponse } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { isSamplingSupported, setClientInfo } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
-import type { SamplingFunction, MultiTurnSamplingFunction } from "./execution/base.js";
+import type { MultiTurnSamplingFunction } from "./execution/base.js";
 
 // Priority:
 //   1. KEVLAR_SKILLS_DIR environment variable (absolute path)
@@ -93,37 +93,6 @@ export function createKevlarServer(): McpServer {
     return false;
   };
 
-  const createSamplingFn = (serverInstance: any): SamplingFunction => {
-    return async (params: {
-      systemPrompt: string;
-      message: string;
-      maxTokens?: number
-    }) => {
-      try {
-        const result = await serverInstance.createMessage({
-          systemPrompt: params.systemPrompt,
-          messages: [{ role: "user", content: { type: "text", text: params.message } }],
-          maxTokens: params.maxTokens || 4096,
-        });
-
-        const textContent = result.content.type === "text" ? result.content.text : "";
-        return {
-          content: textContent,
-          stopReason: result.stopReason,
-        };
-      } catch (err) {
-        const info = getErrorInfo(err);
-        logger.error("Sampling request failed", {
-          event: "sampling_request_error",
-          error: info.code,
-          message: info.message,
-          recoverable: info.recoverable,
-        });
-        throw new Error(`Sampling 调用失败: ${info.message}`);
-      }
-    };
-  };
-
   const createMultiTurnSamplingFn = (serverInstance: any): MultiTurnSamplingFunction => {
     return async (params) => {
       try {
@@ -157,7 +126,6 @@ export function createKevlarServer(): McpServer {
   const deps: ToolDependencies = {
     skillsDir,
     tmpDir,
-    createSamplingFn: () => createSamplingFn(underlyingServer),
     createMultiTurnSamplingFn: () => createMultiTurnSamplingFn(underlyingServer),
     updateClientSamplingSupport,
   };

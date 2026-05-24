@@ -95,7 +95,6 @@ Low-level direct tools (suitable for automation scripts):
 
 | Tool | Purpose |
 | --- | --- |
-| `review_content` | Execute content review directly |
 | `create_persona` | Create persona directly or from draft |
 | `delete_persona` | Delete persona directly (requires `confirm: true`) |
 | `configure` | Write config directly |
@@ -113,7 +112,7 @@ flowchart TD
   B -->|0| C["Prompt to create a persona first, save current content state"]
   B -->|1-2| D["Show all commentators, ask user to confirm"]
   B -->|3+| E["Sampling recommendation or heuristic recommendation of 1-3 commentators"]
-  D --> F["Call review_content after confirmation"]
+  D --> F["Execute review internally"]
   E --> F
 ```
 
