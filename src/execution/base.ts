@@ -1,5 +1,5 @@
 /**
- * Base types and interfaces for Kevlar execution modes
+ * Base types and interfaces for Kevlar-4u execution modes
  */
 
 import type { Persona } from "../utils/parser.js";

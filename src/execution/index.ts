@@ -1,5 +1,5 @@
 /**
- * Kevlar Execution Engine
+ * Kevlar-4u Execution Engine
  * 
  * Unified entry point for all execution modes with automatic mode resolution.
  */

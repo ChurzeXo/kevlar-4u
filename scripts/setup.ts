@@ -1,4 +1,4 @@
-// Kevlar — scripts/setup.ts
+// Kevlar-4u — scripts/setup.ts
 // Automated installation and MCP configuration injection script (Zero-Config fallback)
 // This is the lightweight alternative to the full CLI (scripts/cli.ts).
 // It runs without @inquirer/prompts and is suitable for postinstall hooks.
@@ -8,7 +8,7 @@ import path from "path";
 import os from "os";
 import { execSync } from "child_process";
 
-const MCP_NAME = "kevlar";
+const MCP_NAME = "kevlar-4u";
 
 function getClaudeConfigPath(): string {
   const H = os.homedir();
@@ -23,7 +23,7 @@ function getClaudeConfigPath(): string {
 }
 
 async function setup() {
-  console.log("🛡️  Setting up Kevlar MCP Server (Zero-Config)...");
+  console.log("🛡️  Setting up Kevlar-4u Server (Zero-Config)...");
 
   const projectDir = process.cwd();
 
@@ -102,13 +102,13 @@ async function setup() {
   }
 
   // ── 4. Done ───────────────────────────────────────────────────
-  console.log("\n🎉 Kevlar is ready!");
+  console.log("\n🎉 Kevlar-4u is ready!");
   console.log(
     "   Fully quit and restart Claude Desktop, then say to the AI:"
   );
   console.log(
     '\x1b[36m%s\x1b[0m',
-    '   "Help me stress-test my content with Kevlar."'
+    '   "Help me stress-test my content with Kevlar-4u."'
   );
 }
 

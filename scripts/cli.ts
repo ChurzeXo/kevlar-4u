@@ -14,10 +14,10 @@ const DIM   = chalk.gray;
 const GREEN = chalk.greenBright;
 const RED   = chalk.red;
 const CYAN  = chalk.cyan;
-const BRAND = chalk.hex("#FFD700"); // Kevlar gold
+const BRAND = chalk.hex("#FFD700"); // Kevlar-4u gold
 
-const MCP_NAME    = "kevlar";
-const GITHUB_REPO = "9Churze/kevlar-mcp";
+const MCP_NAME    = "kevlar-4u";
+const GITHUB_REPO = "9Churze/kevlar-4u";
 
 // Resolve package version from nearest package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -302,9 +302,9 @@ async function runCLI() {
     ? path.dirname(pkg.__path)
     : path.resolve(__dirname, "..");
 
-  // Resolve the command that the AI client will use to launch Kevlar
+  // Resolve the command that the AI client will use to launch Kevlar-4u
   const { cmd, args } = isRemoteRun
-    ? { cmd: "npx", args: ["-y", "kevlar-mcp@latest", "--stdio"] }
+    ? { cmd: "npx", args: ["-y", "kevlar-4u@latest", "--stdio"] }
     : {
         cmd: "node",
         args: [
@@ -354,13 +354,13 @@ async function runCLI() {
   const proceed = await select({
     message: `  ${CYAN("λ")} 按 ${chalk.bold("Enter")} 开始安装，或 Cancel 退出`,
     choices: [
-      { name: `${GREEN("▶")}  开始安装 Kevlar MCP 服务`, value: "go" },
+      { name: `${GREEN("▶")}  开始安装 Kevlar-4u 服务`, value: "go" },
       { name: "Cancel", value: "cancel" },
     ],
   });
 
   if (proceed === "cancel") {
-    console.log(DIM("\n  安装已取消。下次运行：npm run kevlar-mcp\n"));
+    console.log(DIM("\n  安装已取消。下次运行：npm run kevlar-4u\n"));
     process.exit(0);
   }
 
@@ -392,7 +392,7 @@ async function runCLI() {
   const confirm = await select({
     message: `  ${CYAN("λ")} ${chalk.bold("KEVLAR")} ${DIM("»")} Configure detected clients?`,
     choices: [
-      { name: "🛡️  Yes, inject Kevlar MCP config", value: "go" },
+      { name: "🛡️  Yes, inject Kevlar-4u config", value: "go" },
       { name: "Cancel", value: "cancel" },
     ],
   });
@@ -451,7 +451,7 @@ async function runCLI() {
       `\n  ${GREEN.bold("ARMOR FITTED")} 🛡️  Restart your AI client, then say:\n`
     );
     console.log(
-      `  ${chalk.cyan('"Help me stress-test my content with Kevlar."')}\n`
+      `  ${chalk.cyan('"Help me stress-test my content with Kevlar-4u."')}\n`
     );
   }
 }

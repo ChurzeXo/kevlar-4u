@@ -1,6 +1,6 @@
 # Kevlar — 게시 전 피드백 시뮬레이터
 
-![Release](https://img.shields.io/github/actions/workflow/status/9Churze/Kevlar-MCP/release.yml?label=Release&logo=github)
+![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
@@ -55,7 +55,7 @@
 npm install           # 의존성 설치
 npm run build         # TypeScript 컴파일
 npm run setup         # 제로-설정 셋업 (MCP 클라이언트 자동 감지 및 설정 작성)
-npm run kevlar-mcp    # 인터랙티브 설치 CLI (수동으로 클라이언트 선택)
+npm run kevlar-4u    # 인터랙티브 설치 CLI (수동으로 클라이언트 선택)
 ```
 
 설치가 완료되면 AI 클라이언트를 재시작하여 Kevlar를 사용하세요. 다음 클라이언트의 자동 구성을 지원합니다:

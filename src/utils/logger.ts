@@ -1,5 +1,5 @@
 /**
- * Structured logging module for Kevlar
+ * Structured logging module for Kevlar-4u
  * Uses pino for production-grade performance
  */
 

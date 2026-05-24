@@ -1,5 +1,5 @@
 /**
- * Structured error types for Kevlar MCP Server
+ * Structured error types for Kevlar-4u
  */
 
 export enum ErrorCode {

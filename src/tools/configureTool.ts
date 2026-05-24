@@ -18,7 +18,7 @@ import { logger, getErrorInfo } from "../utils/observability.js";
 export const configureToolDefinition: Tool = {
 	name: "configure",
 	description:
-		"直接修改 Kevlar 运行配置（执行模式、并发数等），改动即时写入 kevlar-config.json。" +
+		"直接修改 Kevlar-4u 运行配置（执行模式、并发数等），改动即时写入 kevlar-config.json。" +
 		"无需对话确认，适合明确的单次配置变更场景。" +
 		"如需先预览再写入，请使用 configure_wizard。",
 	inputSchema: {

@@ -1,17 +1,17 @@
 {
-  "name": "kevlar-mcp",
-  "version": "1.0.0",
-  "description": "Kevlar: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
+  "name": "kevlar-4u",
+  "version": "1.0.1",
+  "description": "Kevlar-4u: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
   "main": "dist/index.js",
   "bin": {
-    "kevlar": "dist/index.js"
+    "kevlar-4u": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "setup": "tsx scripts/setup.ts",
-    "kevlar-mcp": "tsx scripts/cli.ts",
+    "kevlar-4u": "tsx scripts/cli.ts",
     "test": "tsx --test src/__tests__/**/*.test.ts",
     "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts"
   },

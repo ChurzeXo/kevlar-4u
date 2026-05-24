@@ -19,6 +19,8 @@ import { ResultAggregator, generateAggregatedReport, estimateTokenCost, checkBud
 import { acquireReviewLock, releaseReviewLock, getReviewLock, isLocked } from "../execution/lock.js";
 import { executeReview, loadPersonasForReview, validatePersonaFields } from "../execution/index.js";
 import { executePersonasInParallel } from "../execution/parallel.js";
+import { directApiHandler } from "../execution/modes/direct_api.js";
+import { samplingHandler } from "../execution/modes/sampling.js";
 import type { Persona } from "../utils/parser.js";
 
 let tmpDir: string;
@@ -698,5 +700,263 @@ describe("executePersonasInParallel", () => {
 
     // With 3 personas and default concurrency 3, should never exceed that
     assert.ok(maxConcurrent <= 3);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Direct API Handler Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("directApiHandler", () => {
+  const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
+    meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
+    systemPrompt: sp,
+    filePath: `/test/${id}.md`,
+  });
+
+  let previousKevlarKey: string | undefined;
+  let previousAnthropicKey: string | undefined;
+  let previousOpenAiKey: string | undefined;
+
+  beforeEach(() => {
+    previousKevlarKey = process.env.KEVLAR_API_KEY;
+    previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+    previousOpenAiKey = process.env.OPENAI_API_KEY;
+    delete process.env.KEVLAR_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  afterEach(() => {
+    if (previousKevlarKey === undefined) delete process.env.KEVLAR_API_KEY;
+    else process.env.KEVLAR_API_KEY = previousKevlarKey;
+    if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+  });
+
+  it("canExecute returns false when no API key set", () => {
+    assert.ok(!directApiHandler.canExecute());
+  });
+
+  it("canExecute returns true when KEVLAR_API_KEY is set", () => {
+    process.env.KEVLAR_API_KEY = "sk-ant-test-key-12345";
+    assert.ok(directApiHandler.canExecute());
+  });
+
+  it("has correct mode and priority", () => {
+    assert.equal(directApiHandler.mode, "direct_api");
+    assert.equal(directApiHandler.priority, 20);
+  });
+
+  it("throws when no API key available on execute", async () => {
+    await assert.rejects(
+      () => directApiHandler.execute({
+        skillsDir: "/tmp",
+        personas: [makePersona("p1", "A")],
+        content: "test",
+      }),
+      /API key not configured/
+    );
+  });
+
+  it("executes with Anthropic provider and mocked fetch", async () => {
+    process.env.KEVLAR_API_KEY = "sk-ant-test-key-anthropic-12345";
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+
+    const mockResponse = {
+      content: [{ type: "text", text: "Anthropic review result" }],
+      usage: { input_tokens: 50, output_tokens: 100 },
+      stop_reason: "end_turn",
+    };
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (url: any, init?: any) => {
+      assert.ok(url.toString().includes("anthropic.com"));
+      const body = JSON.parse(init?.body as string);
+      assert.ok(body.model);
+      assert.ok(body.system);
+      assert.equal(body.temperature, 0.7);
+      return new Response(JSON.stringify(mockResponse), { status: 200 });
+    };
+
+    try {
+      const result = await directApiHandler.execute({
+        skillsDir: "/tmp",
+        personas: [makePersona("p1", "Critic")],
+        content: "test content",
+      });
+
+      assert.equal(result.mode, "direct_api");
+      assert.equal(result.personas.length, 1);
+      assert.ok(result.report.includes("Anthropic review result"));
+    } finally {
+      globalThis.fetch = origFetch;
+      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    }
+  });
+
+  it("executes with OpenAI provider and mocked fetch", async () => {
+    process.env.KEVLAR_API_KEY = "sk-openai-key-1234567890abcdef";
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+
+    const mockResponse = {
+      choices: [{ message: { content: "OpenAI review result" } }],
+      usage: { prompt_tokens: 50, completion_tokens: 100 },
+    };
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (url: any) => {
+      assert.ok(url.toString().includes("openai.com"));
+      return new Response(JSON.stringify(mockResponse), { status: 200 });
+    };
+
+    try {
+      const result = await directApiHandler.execute({
+        skillsDir: "/tmp",
+        personas: [makePersona("p1", "Critic")],
+        content: "test openai",
+      });
+
+      assert.equal(result.mode, "direct_api");
+      assert.ok(result.report.includes("OpenAI review result"));
+    } finally {
+      globalThis.fetch = origFetch;
+      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    }
+  });
+
+  it("executes with Ollama provider and mocked fetch", async () => {
+    process.env.KEVLAR_API_KEY = "ollama-local-key";
+    process.env.OLLAMA_BASE_URL = "http://localhost:11434";
+    process.env.KEVLAR_MODEL = "llama3";
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+
+    const mockResponse = {
+      message: { content: "Ollama review result" },
+    };
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (url: any) => {
+      assert.ok(url.toString().includes("localhost:11434"));
+      return new Response(JSON.stringify(mockResponse), { status: 200 });
+    };
+
+    try {
+      const result = await directApiHandler.execute({
+        skillsDir: "/tmp",
+        personas: [makePersona("p1", "Critic")],
+        content: "test ollama",
+      });
+
+      assert.equal(result.mode, "direct_api");
+      assert.ok(result.report.includes("Ollama review result"));
+    } finally {
+      globalThis.fetch = origFetch;
+      delete process.env.OLLAMA_BASE_URL;
+      delete process.env.KEVLAR_MODEL;
+      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    }
+  });
+
+  it("reports partial failures for persona errors", async () => {
+    process.env.KEVLAR_API_KEY = "sk-ant-fail-key";
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      return new Response(JSON.stringify({
+        content: [{ type: "text", text: "ok" }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+        stop_reason: "end_turn",
+      }), { status: 200 });
+    };
+
+    try {
+      const personas = [makePersona("p1", "Good"), makePersona("p2", "Bad")];
+      const result = await directApiHandler.execute({
+        skillsDir: "/tmp",
+        personas,
+        content: "test",
+      });
+
+      assert.ok(result.personas.includes("p1"));
+      assert.equal(result.mode, "direct_api");
+    } finally {
+      globalThis.fetch = origFetch;
+      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sampling Handler Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("samplingHandler", () => {
+  const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
+    meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
+    systemPrompt: sp,
+    filePath: `/test/${id}.md`,
+  });
+
+  let previousEnv: string | undefined;
+
+  beforeEach(() => {
+    previousEnv = process.env.KEVLAR_ENABLE_SAMPLING;
+  });
+
+  afterEach(() => {
+    setClientInfo("unknown");
+    if (previousEnv === undefined) delete process.env.KEVLAR_ENABLE_SAMPLING;
+    else process.env.KEVLAR_ENABLE_SAMPLING = previousEnv;
+  });
+
+  it("has correct mode and priority", () => {
+    assert.equal(samplingHandler.mode, "mcp_sampling");
+    assert.equal(samplingHandler.priority, 10);
+  });
+
+  it("canExecute returns true when client supports sampling", () => {
+    setClientInfo("claude-ai");
+    assert.ok(samplingHandler.canExecute());
+  });
+
+  it("canExecute returns false when client does not support sampling", () => {
+    setClientInfo("unknown-client");
+    assert.ok(!samplingHandler.canExecute());
+  });
+
+  it("canExecute returns true when KEVLAR_ENABLE_SAMPLING=true", () => {
+    setClientInfo("unknown-client");
+    process.env.KEVLAR_ENABLE_SAMPLING = "true";
+    assert.ok(samplingHandler.canExecute());
+  });
+
+  it("throws when no samplingFn provided on execute", async () => {
+    setClientInfo("claude-ai");
+    await assert.rejects(
+      () => samplingHandler.execute({
+        skillsDir: "/tmp",
+        personas: [makePersona("p1", "A")],
+        content: "test",
+      }),
+      /MCP Sampling 模式需要 samplingFn/
+    );
+  });
+
+  it("executes with samplingFn", async () => {
+    setClientInfo("claude-ai");
+    const result = await samplingHandler.execute({
+      skillsDir: "/tmp",
+      personas: [makePersona("p1", "A"), makePersona("p2", "B")],
+      content: "test content",
+      samplingFn: async () => ({ content: "mock review", stopReason: "endTurn" }),
+    });
+
+    assert.equal(result.mode, "mcp_sampling");
+    assert.equal(result.personas.length, 2);
+    assert.ok(result.report.includes("mock review"));
   });
 });

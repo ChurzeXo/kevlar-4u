@@ -326,7 +326,7 @@ async function recommendPersonas(
           ? `\n目标投放平台：${state.targetPlatforms.join("、")}`
           : "";
       const response = await samplingFn({
-        systemPrompt: `你是 Kevlar 评论员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id${platformContext}，并严格输出 JSON：{"personaIds":["id"],"assistantMessage":"展示推荐名单和理由，并询问用户是否确认"}。不要输出 markdown。`,
+        systemPrompt: `你是 Kevlar-4u 评论员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id${platformContext}，并严格输出 JSON：{"personaIds":["id"],"assistantMessage":"展示推荐名单和理由，并询问用户是否确认"}。不要输出 markdown。`,
         messages: [
           {
             role: "user",

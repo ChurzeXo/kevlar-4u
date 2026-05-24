@@ -1,6 +1,6 @@
 # Kevlar — 社交媒体作品发布前的反馈模拟器
 
-![Release](https://img.shields.io/github/actions/workflow/status/9Churze/Kevlar-MCP/release.yml?label=Release&logo=github)
+![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
@@ -55,7 +55,7 @@
 npm install           # 安装依赖
 npm run build         # 编译 TypeScript
 npm run setup         # 零配置安装（自动检测 MCP 客户端并写入配置）
-npm run kevlar-mcp    # 交互式安装 CLI（手动选择客户端）
+npm run kevlar-4u    # 交互式安装 CLI（手动选择客户端）
 ```
 
 安装完成后重启 AI 客户端即可开始使用。支持以下客户端自动配置：

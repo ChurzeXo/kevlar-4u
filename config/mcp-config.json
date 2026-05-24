@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "kevlar": {
+    "kevlar-4u": {
       "command": "node",
-      "args": ["/Users/churze/Documents/MCP-Service/kevlar/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/kevlar-4u/dist/index.js"],
       "env": {}
     }
   }

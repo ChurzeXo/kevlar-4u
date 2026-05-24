@@ -1,6 +1,6 @@
-# Kevlar — Feedback Simulator Before You Hit Publish
+# Kevlar-4u — Feedback Simulator Before You Hit Publish
 
-![Release](https://img.shields.io/github/actions/workflow/status/9Churze/Kevlar-MCP/release.yml?label=Release&logo=github)
+![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
@@ -13,7 +13,7 @@
 
 ---
 
-Drop any content you're about to publish — **articles, tweets, video scripts, product intros, press releases, announcements, Reddit posts, V2EX posts, Hacker News headlines** — directly into Kevlar. It won't just say "looks good." Instead, it'll **question, misinterpret, roast, nitpick, and comprehension-test** your content, just like the real internet.
+Drop any content you're about to publish — **articles, tweets, video scripts, product intros, press releases, announcements, Reddit posts, V2EX posts, Hacker News headlines** — directly into Kevlar-4u. It won't just say "looks good." Instead, it'll **question, misinterpret, roast, nitpick, and comprehension-test** your content, just like the real internet.
 
 Writers often suffer from the **"curse of knowledge"**:
 You think you've made it clear, but others don't get it.
@@ -21,7 +21,7 @@ You think the key point stands out, but readers can't tell what you're trying to
 
 And most platforms don't offer a real **A/B test**. Once content goes live, by the time the **first wave of organic traffic** passes, it's usually too late to revise.
 
-**Kevlar helps you surface these problems before you hit publish.**
+**Kevlar-4u helps you surface these problems before you hit publish.**
 
 ## Who needs Kevlar
 
@@ -55,10 +55,10 @@ Requires **Node.js 20+**.
 npm install           # Install dependencies
 npm run build         # Compile TypeScript
 npm run setup         # Zero-config setup (auto-detect MCP client and write config)
-npm run kevlar-mcp    # Interactive install CLI (manually select client)
+npm run kevlar-4u     # Interactive install CLI (manually select client)
 ```
 
-Once installed, restart your AI client to start using Kevlar. Supports auto-configuration for:
+Once installed, restart your AI client to start using Kevlar-4u. Supports auto-configuration for:
 
 **Claude Desktop** / **Cursor** / **Windsurf** / **OpenCode** / **Codex** / **Antigravity** / **CodeBuddy CN** / **WorkBuddy**
 
@@ -80,7 +80,7 @@ npm start
 
 ### Core Workflow
 
-All core operations in Kevlar are handled through Wizard tools — just tell the AI what you want in natural language, and Kevlar takes care of the rest.
+All core operations in Kevlar-4u are handled through Wizard tools — just tell the AI what you want in natural language, and Kevlar-4u takes care of the rest.
 
 ### Recommended Tool Flow
 
@@ -139,13 +139,13 @@ flowchart LR
   G -->|Edit| G
 ```
 
-After creation, Kevlar automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.md`.
+After creation, Kevlar-4u automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.md`.
 
 ---
 
 ## Execution Modes
 
-Kevlar supports three execution modes. The default `auto` selects the best mode based on your environment.
+Kevlar-4u supports three execution modes. The default `auto` selects the best mode based on your environment.
 
 | Mode | Identifier | Description | Best for |
 | --- | --- | --- | --- |
@@ -199,9 +199,9 @@ Claude Desktop example:
 ```json
 {
   "mcpServers": {
-    "kevlar": {
+    "kevlar-4u": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/kevlar/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/kevlar-4u/dist/index.js"],
       "env": {
         "KEVLAR_MODE": "auto",
         "KEVLAR_MAX_CONCURRENT": "3"
@@ -237,12 +237,12 @@ Custom persona directory:
 
 ## Architecture Overview
 
-Kevlar uses a **Server-side Workflow + Execution Layer** architecture.
+Kevlar-4u uses a **Server-side Workflow + Execution Layer** architecture.
 
 ```mermaid
 flowchart TD
   User["User"] --> Client["MCP Client / Host AI"]
-  Client --> Tools["Kevlar MCP Tools"]
+  Client --> Tools["Kevlar-4u MCP Tools"]
   Tools --> Wizards["Server-side State Machine Wizards"]
   Tools --> Execution["Multi-mode Execution Layer"]
   Wizards --> Tmp["skills/tmp Session State"]
@@ -253,14 +253,14 @@ flowchart TD
 Design principles:
 
 - **State machine-driven workflows**: Key flows are maintained by tool state machines, not dependent on the host AI remembering long prompts.
-- **AI handles understanding & expression**: AI handles natural language extraction, refinement, and recommendations, while results are written to Kevlar-verifiable state.
+- **AI handles understanding & expression**: AI handles natural language extraction, refinement, and recommendations, while results are written to Kevlar-4u-verifiable state.
 - **Adaptive execution**: When MCP Sampling is available, use it for field extraction and commentator recommendations; otherwise, fall back to heuristic logic or host-assisted orchestration.
 - **Safe confirmation**: High-risk operations like deletion, reset, and config writes all go through confirmation wizards.
 
 ### Directory Structure
 
 ```text
-kevlar/
+kevlar-4u/
 ├── config/
 │   └── mcp-config.json                    # MCP client config template
 ├── docs/                                  # Architecture design, audit reports

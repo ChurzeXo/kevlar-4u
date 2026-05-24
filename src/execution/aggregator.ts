@@ -98,7 +98,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
     direct_api: "直接 API 模式",
   };
 
-  let report = `## 🛡️ Kevlar 压力测试报告
+  let report = `## 🛡️ Kevlar-4u 压力测试报告
 
 **执行模式**：${modeLabels[mode]}
 **测试内容摘要**：${contentSummary}
@@ -131,7 +131,7 @@ ${resultsSummary(successful)}`;
 
 ---
 
-*由 Kevlar MCP Server 驱动 · 本地多智能体内容防弹衣*`;
+*由 Kevlar-4u 驱动 · 本地多智能体内容防弹衣*`;
 
   return report;
 }

@@ -1,6 +1,6 @@
 # Kevlar — 公開前フィードバックシミュレーター
 
-![Release](https://img.shields.io/github/actions/workflow/status/9Churze/Kevlar-MCP/release.yml?label=Release&logo=github)
+![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
 ![License](https://img.shields.io/badge/license-ISC-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
@@ -55,7 +55,7 @@
 npm install           # 依存関係をインストール
 npm run build         # TypeScript をコンパイル
 npm run setup         # ゼロコンフィグセットアップ（MCPクライアントを自動検出して設定を書き込み）
-npm run kevlar-mcp    # インタラクティブインストールCLI（クライアントを手動選択）
+npm run kevlar-4u    # インタラクティブインストールCLI（クライアントを手動選択）
 ```
 
 インストール後、AIクライアントを再起動すればKevlarを使い始められます。以下のクライアントを自動設定に対応：

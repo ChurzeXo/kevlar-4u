@@ -13,11 +13,11 @@ export const helpToolDefinition: Tool = {
   },
 };
 
-const HELP_TEXT = `# Kevlar 使用帮助
+const HELP_TEXT = `# Kevlar-4u 使用帮助
 
-## Kevlar 是什么
+## Kevlar-4u 是什么
 
-Kevlar 是一个内容压力测试工具。把你的文案交给多个独立 AI 批评人设，每个人设从不同视角给出犀利的评审意见，帮你发帖前发现潜在问题。
+Kevlar-4u 是一个内容压力测试工具。把你的文案交给多个独立 AI 批评人设，每个人设从不同视角给出犀利的评审意见，帮你发帖前发现潜在问题。
 
 ---
 

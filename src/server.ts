@@ -71,7 +71,7 @@ export function createKevlarServer(): McpServer {
 
   const mcpServer = new McpServer(
     {
-      name: "kevlar",
+      name: "kevlar-4u",
       version: "1.0.0",
     },
     {

@@ -1,5 +1,5 @@
 /**
- * Kevlar Configuration Management
+ * Kevlar-4u Configuration Management
  * 
  * Reads and writes the kevlar-config.json file for user preferences.
  * API keys are NEVER stored here - only environment variables.
