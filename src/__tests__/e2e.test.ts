@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("End-to-End integration test", () => {
-  it("calls review_content via MCP client", async () => {
+  it("calls review_content_wizard via MCP client (multi-turn)", async () => {
     const server = createKevlarServer();
 
     // Seed a test persona
@@ -55,23 +55,57 @@ describe("End-to-End integration test", () => {
     ]);
 
     try {
-      const response = await client.callTool({
-        name: "review_content",
+      // Step 1: Start wizard with content
+      const step1 = await client.callTool({
+        name: "review_content_wizard",
         arguments: {
-          content: "这是一个用于 E2E 测试的文本",
-          context: "自动化测试环境",
-          mode: "orchestration",
+          userMessage: "请评测这篇内容：这是一个用于 E2E 测试的文本",
         },
       });
 
-      assert.ok(response, "Response should exist");
-      assert.ok(Array.isArray(response.content), "Response should have content array");
-      assert.equal(response.content[0].type, "text");
+      assert.ok(step1, "Step 1 response should exist");
+      assert.ok(Array.isArray(step1.content), "Step 1 response should have content array");
+      assert.equal(step1.content[0].type, "text");
 
-      const textOutput = response.content[0].text;
-      assert.ok(textOutput.includes("E2E Tester"), "Should include persona name");
-      assert.ok(textOutput.includes("宿主辅助兜底模式"), "Should indicate orchestration fallback mode");
-      assert.ok(textOutput.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
+      const step1Text = step1.content[0].text;
+      assert.ok(step1Text.includes("这份内容准备投放在哪些平台"), "Should ask about target platform");
+
+      // Extract sessionId
+      const sessionIdMatch = step1Text.match(/sessionId:\s*([a-z0-9-]+)/);
+      assert.ok(sessionIdMatch, "Should include sessionId");
+      const sessionId = sessionIdMatch[1];
+
+      // Step 2: Specify no platform → show all personas
+      const step2 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: {
+          sessionId,
+          userMessage: "通用",
+        },
+      });
+
+      assert.ok(step2, "Step 2 response should exist");
+      assert.ok(Array.isArray(step2.content), "Step 2 response should have content array");
+      assert.equal(step2.content[0].type, "text");
+      const step2Text = step2.content[0].text;
+      assert.ok(step2Text.includes("E2E Tester"), "Should list the persona");
+      assert.ok(step2Text.includes("currentStep: confirmSelection"), "Should be in confirmation step");
+
+      // Step 3: Confirm → execute review
+      const step3 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: {
+          sessionId,
+          userMessage: "确认",
+        },
+      });
+
+      assert.ok(step3, "Step 3 response should exist");
+      assert.ok(Array.isArray(step3.content), "Step 3 response should have content array");
+      assert.equal(step3.content[0].type, "text");
+      const step3Text = step3.content[0].text;
+      assert.ok(step3Text.includes("E2E Tester"), "Should include persona name in report");
+      assert.ok(step3Text.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
     } finally {
       await client.close();
       await server.close();

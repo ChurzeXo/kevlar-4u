@@ -118,7 +118,7 @@ export async function handleConfigure(
 					text: `✅ 配置已更新
 - ${changesText}
 
-下次调用 review_content 时自动生效。`,
+下次评测（review_content_wizard）时自动生效。`,
 				},
 			],
 		};

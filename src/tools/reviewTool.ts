@@ -1,47 +1,13 @@
-import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
+import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 import { executeReview, loadPersonasForReview, MAX_PERSONAS } from "../execution/index.js";
 import type { ExecutionContext, ResolveableMode, SamplingFunction } from "../execution/base.js";
-import type { ToolModule } from "./types.js";
 import { getErrorInfo } from "../utils/observability.js";
 
 // ── Resource limits ────────────────────────────────────────────────────────────
 
 const MAX_CONTENT_LENGTH = 100_000; // 100KB
 const MAX_CONTEXT_LENGTH = 5_000; // 5KB
-
-export const reviewToolDefinition: Tool = {
-  name: "review_content",
-  description:
-    "将文案交给多个评论员进行压力测试。支持三种执行模式（宿主辅助兜底/MCP采样/直接API）。使用前可先查看可用评论员让用户选择。[只读] 仅执行评测和返回评论结果。不能生成内容、不能修改人设库、不能修改配置。不会直接返回评测数据文件路径。",
-  inputSchema: {
-    type: "object" as const,
-    properties: {
-      content: {
-        type: "string",
-        description: "需要进行压力测试的文案、文章、剧本或任何文字内容",
-      },
-      persona_ids: {
-        type: "array",
-        items: { type: "string" },
-        description: "用户选中的人设 ID。留空则使用全部角色。",
-      },
-      context: {
-        type: "string",
-        description:
-          "可选：提供内容的发布平台和目标受众背景，帮助人设更精准地模拟目标用户",
-      },
-      mode: {
-        type: "string",
-        enum: ["auto", "orchestration", "mcp_sampling", "direct_api"],
-        default: "auto",
-        description: "执行模式。auto 会自动选择最佳模式。",
-      },
-    },
-    required: ["content"],
-  },
-};
 
 export interface ReviewInput {
   content: string;
@@ -50,18 +16,6 @@ export interface ReviewInput {
   mode?: ResolveableMode;
   samplingFn?: SamplingFunction;
 }
-
-export const reviewModule: ToolModule = {
-  definition: reviewToolDefinition,
-  handler: (deps) => async (args) => {
-    if (!args) throw new Error("评测需要提供文案内容");
-    const input = args as any;
-    if (deps.updateClientSamplingSupport()) {
-      input.samplingFn = deps.createSamplingFn();
-    }
-    return await handleReviewContent(deps.skillsDir, input);
-  },
-};
 
 export async function handleReviewContent(
   skillsDir: string,
