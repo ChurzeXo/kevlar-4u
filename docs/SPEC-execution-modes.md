@@ -335,7 +335,7 @@ export function releaseReviewLock(): void {
 
 ```
 **执行模式**：MCP 采样模式
-**参与评论员**：急性子路人甲、键盘侠·杠精模式（共 2 位）
+**参与评审员**：急性子路人甲、键盘侠·杠精模式（共 2 位）
 **部分失败**：无
 ```
 
@@ -398,7 +398,7 @@ function checkBudget(personas: number, contentLength: number): void {
   if (estimated > budget) {
     throw new Error(
       `预估 Token 消耗 (${estimated}) 超出预算 (${budget})。` +
-      `请减少评论员数量或缩短内容长度。`
+      `请减少评审员数量或缩短内容长度。`
     );
   }
 }
@@ -496,7 +496,7 @@ skills/kevlar-config.json
 ```typescript
 export const reviewToolDefinition: Tool = {
   name: "review_content",
-  description: "将文案交给多个评论员进行压力测试。支持三种执行模式。",
+  description: "将文案交给多个评审员进行压力测试。支持三种执行模式。",
   inputSchema: {
     type: "object",
     properties: {

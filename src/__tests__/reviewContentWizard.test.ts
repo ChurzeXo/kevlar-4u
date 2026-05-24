@@ -71,7 +71,7 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(result);
-    assert.ok(text.includes("当前还没有可用评论员"));
+    assert.ok(text.includes("当前还没有可用评审员"));
     assert.ok(text.includes("currentStep: waitingForPersonaCreation"));
     assert.ok(text.includes("sessionId:"));
     assert.ok(!text.includes("=== SYSTEM_PROMPT 开始 ==="));

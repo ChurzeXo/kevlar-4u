@@ -2,7 +2,7 @@
 
 ## 背景说明
 
-`createPersonaTool.ts` 是一个 MCP Tool 模块，负责创建虚拟读者人设（Persona）并将其持久化为 `.md` 文件。
+`createPersonaTool.ts` 是一个 MCP Tool 模块，负责创建评审员人设（Persona）并将其持久化为 `.md` 文件。
 
 近期对该模块的 `system_prompt` 字段进行了重大更新：
 

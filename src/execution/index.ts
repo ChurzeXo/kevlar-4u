@@ -43,7 +43,7 @@ export async function executeReview(
   const personaCount = ctx.personas.length;
 
   if (personaCount > MAX_PERSONAS) {
-    throw new Error(`评论员数量超出限制（最多${MAX_PERSONAS}个，当前${personaCount}个）。`);
+    throw new Error(`评审员数量超出限制（最多${MAX_PERSONAS}个，当前${personaCount}个）。`);
   }
 
   const handler = handlers.find((h) => h.mode === resolved);

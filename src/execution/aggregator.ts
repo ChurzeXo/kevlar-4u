@@ -102,7 +102,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
 
 **执行模式**：${modeLabels[mode]}
 **测试内容摘要**：${contentSummary}
-**参与评论员**：${successful.map((p) => p.personaName).join("、")}（共 ${successful.length} 位）`;
+**参与评审员**：${successful.map((p) => p.personaName).join("、")}（共 ${successful.length} 位）`;
 
   if (failed.length > 0) {
     report += `\n**部分失败**：${failed.map((p) => `${p.personaName}（${p.error}）`).join("、")}`;
@@ -112,7 +112,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
 
   // Individual reviews
   if (successful.length > 0) {
-    report += "\n\n---\n\n## 各评论员观点\n";
+    report += "\n\n---\n\n## 各评审员观点\n";
     for (const p of successful) {
       report += `\n### ${p.personaName}\n\n${p.review}\n`;
     }
@@ -137,7 +137,7 @@ ${resultsSummary(successful)}`;
 }
 
 function resultsSummary(successful: PersonaResultWithMeta[]): string {
-  if (successful.length === 0) return "无评论员成功完成评测。";
+  if (successful.length === 0) return "无评审员成功完成评测。";
 
   const lines: string[] = [];
   for (const p of successful) {
@@ -190,7 +190,7 @@ export function checkBudget(personas: number, contentLength: number, personaSyst
   if (estimated > budget) {
     throw new Error(
       `预估 Token 消耗 (${estimated}) 超出预算 (${budget})。` +
-        `请减少评论员数量或缩短内容长度。`
+        `请减少评审员数量或缩短内容长度。`
     );
   }
 }

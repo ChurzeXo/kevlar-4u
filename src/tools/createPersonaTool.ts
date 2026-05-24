@@ -139,7 +139,7 @@ export async function handleCreatePersona(
 		const tonePart = Array.isArray(draft.fields.tone) && draft.fields.tone.length > 0
 			? `，讲话风格${draft.fields.tone.join("、")}`
 			: "";
-		description = `一个主要活跃在【${draft.fields.platform || ""}】平台，兴趣在于【${Array.isArray(draft.fields.interests) ? draft.fields.interests.join("、") : ""}】，性格特质为【${draft.fields.traits.join("，")}】${tonePart}的评论员角色。`;
+		description = `一个主要活跃在【${draft.fields.platform || ""}】平台，兴趣在于【${Array.isArray(draft.fields.interests) ? draft.fields.interests.join("、") : ""}】，性格特质为【${draft.fields.traits.join("，")}】${tonePart}的评审员角色。`;
 	}
 	if (!description) {
 		description = "由模型推断自动生成的角色";
@@ -242,7 +242,7 @@ export async function handleCreatePersona(
 					"",
 					`描述：${description}`,
 					"",
-					"现在即可在评测中选择使用这个评论员。",
+					"现在即可在评测中选择使用这个评审员。",
 				].join("\n"),
 			},
 		],

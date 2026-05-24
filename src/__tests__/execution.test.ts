@@ -560,7 +560,7 @@ describe("validatePersonaFields", () => {
 
   it("throws for custom persona missing blind spot", () => {
     const invalid = {
-      meta: { id: "custom", name: "Custom", name_en: "", version: "1.0", author: "user", tags: ["通用"], description: "性格温和的评论员" },
+      meta: { id: "custom", name: "Custom", name_en: "", version: "1.0", author: "user", tags: ["通用"], description: "性格温和的评审员" },
       systemPrompt: "性格特质：温和。",
       filePath: "",
     } as Persona;

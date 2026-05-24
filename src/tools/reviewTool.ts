@@ -60,7 +60,7 @@ export async function handleReviewContent(
         content: [
           {
             type: "text",
-            text: `❌ 选择的评论员数量超出限制（最多${MAX_PERSONAS}个）`,
+            text: `❌ 选择的评审员数量超出限制（最多${MAX_PERSONAS}个）`,
           },
         ],
         isError: true,
@@ -76,7 +76,7 @@ export async function handleReviewContent(
       content: [
         {
           type: "text",
-          text: `❌ 找不到以下评论员：${loadResult.missingIds.join(", ")}。请先查看可用评论员列表。`,
+          text: `❌ 找不到以下评审员：${loadResult.missingIds.join(", ")}。请先查看可用评审员列表。`,
         },
       ],
       isError: true,
@@ -88,7 +88,7 @@ export async function handleReviewContent(
       content: [
         {
           type: "text",
-          text: "⚠️ 当前没有可用评论员。请先创建自定义评论员。",
+          text: "⚠️ 当前没有可用评审员。请先创建自定义评审员。",
         },
       ],
       isError: true,
@@ -153,7 +153,7 @@ function buildContinuationNote(remainingPersonas: Persona[]): string {
 
 **完成汇总报告后：**
 1. 向用户展示报告
-2. 询问是否要用剩余评论员（${names}）继续评测
+2. 询问是否要用剩余评审员（${names}）继续评测
 3. 用户同意则启动新一轮评测（复用本次内容）
 4. 用户拒绝则结束`;
 }

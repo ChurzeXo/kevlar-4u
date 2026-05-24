@@ -24,7 +24,7 @@ const AGE_RANGE_OPTIONS = [
 export const createPersonaWizardToolDefinition: Tool = {
   name: "create_persona_wizard",
   description:
-    "当用户说「创建/新建/自定义评论员/人设/角色」时，调用此工具。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、讲话语气、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。",
+    "当用户说「创建/新建/自定义评审员/人设/角色」时，调用此工具（评论区模拟器）。首次调用不带 sessionId，将 userMessage 设为用户的原话；工具会引导用户逐步完成年龄段、兴趣方向、性格特质、讲话语气、常用平台、与作者关系等信息收集。完全独立，不涉及内容评测流程。",
   inputSchema: {
     type: "object",
     properties: {
@@ -36,7 +36,7 @@ export const createPersonaWizardToolDefinition: Tool = {
       userMessage: {
         type: "string",
         description:
-          "用户在当前步骤的回复内容。首次调用时直接传入用户原话（例如「帮我创建一个时尚类评论员」），工具开始分步引导。后续步骤传入用户对工具提问的回复。",
+          "用户在当前步骤的回复内容。首次调用时直接传入用户原话（例如「帮我创建一个时尚类评审员」），工具开始分步引导。后续步骤传入用户对工具提问的回复。",
       },
     },
     required: ["userMessage"],
@@ -228,7 +228,7 @@ async function advanceWizard(
           toneExtracted.assistantMessage,
           "",
           "第五步：内容主要投放平台",
-          "如果多平台投放，建议创建更多针对某一平台的虚拟评论员。",
+          "如果多平台投放，建议创建更多针对某一平台的评审员。",
         ].join("\n")
       );
     }
@@ -239,7 +239,7 @@ async function advanceWizard(
         const first = raw.split(/[和、/,]/)[0].trim();
         if (first) {
           state.fields.platform = first;
-          state.fields.platformNote = `⚠️ 你输入了多个平台，将围绕「${first}」创建此评论员。如需覆盖其他平台，请另行创建。`;
+          state.fields.platformNote = `⚠️ 你输入了多个平台，将围绕「${first}」创建此评审员。如需覆盖其他平台，请另行创建。`;
           state.step = "authorRelation";
           await saveState(tmpDir, state);
           await saveDraft(tmpDir, state);
@@ -535,7 +535,7 @@ async function inferFinalFields(
     const json = await runJsonExtraction(samplingFn, {
       systemPrompt: [
         "你是人设属性推断器。根据已确认字段推断以下字段，必须全部填写，不能为空：",
-        "- personaName：有创意、像真实互联网网名，不要带「评论员」后缀，也不要带平台名",
+        "- personaName：有创意、像真实互联网网名，不要带「评审员」后缀，也不要带平台名",
         "- gender：男 / 女 / 未指定",
         "- culturalContext",
         "- stance：该角色看问题的基本立场（参考同平台已有角色的风格，但不要照搬）",

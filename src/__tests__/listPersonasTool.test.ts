@@ -45,7 +45,7 @@ describe("handleListPersonas", () => {
   it("returns empty message when no personas exist", async () => {
     const result = await handleListPersonas(skillsDir);
     const text = textOf(result);
-    assert.ok(text.includes("没有任何评论员"));
+    assert.ok(text.includes("没有任何评审员"));
   });
 
   it("shows platform overview when no platform specified", async () => {
@@ -54,7 +54,7 @@ describe("handleListPersonas", () => {
 
     const result = await handleListPersonas(skillsDir);
     const text = textOf(result);
-    assert.ok(text.includes("2 位评论员"));
+    assert.ok(text.includes("2 位评审员"));
     assert.ok(text.includes("小红书"));
     assert.ok(text.includes("知乎"));
     assert.ok(!text.includes("视觉读者"));
@@ -87,7 +87,7 @@ describe("handleListPersonas", () => {
     const result = await handleListPersonas(skillsDir, "不存在的平台");
     const text = textOf(result);
     assert.ok(text.includes("不存在的平台"));
-    assert.ok(text.includes("没有评论员"));
+    assert.ok(text.includes("没有评审员"));
   });
 
   it("detects platform from persona id when no tags match", async () => {

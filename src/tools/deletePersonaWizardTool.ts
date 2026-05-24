@@ -13,7 +13,7 @@ import { logger, getErrorInfo } from "../utils/observability.js";
 export const deletePersonaWizardToolDefinition: Tool = {
   name: "delete_persona_wizard",
   description:
-    "当用户说「删除/移除评论员/人设」时，调用此工具。工具自动列出所有评论员供匹配，绑定目标后会要求用户回复完整人设名称以二次确认。用户未明确说出待删除角色名称时不会执行。",
+    "当用户说「删除/移除评审员/人设」时，调用此工具（评论区模拟器中的删除功能）。工具自动列出所有评审员供匹配，绑定目标后会要求用户回复完整人设名称以二次确认。用户未明确说出待删除角色名称时不会执行。",
   inputSchema: {
     type: "object",
     properties: {

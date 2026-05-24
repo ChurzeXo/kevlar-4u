@@ -13,7 +13,7 @@ import type { ToolModule } from "./types.js";
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
   description:
-    "当用户说「审稿/评测/评论这篇/帮我看看这篇文案/内容」时，调用此工具。首次调用时 userMessage 传入待评测内容；工具自动保存内容、检查角色库、推荐最匹配的评论员，用户确认后执行评测。用户也可以在确认阶段要求查看剩余评论员、新建评论员，或直接指定人选。不会在未经用户确认评论员名单的情况下直接执行评测。",
+    "当用户说「审稿/评测/评论这篇/帮我看看这篇文案/内容」时，调用此工具（评论区模拟器）。首次调用时 userMessage 传入待评测内容；工具自动保存内容、检查角色库、推荐最匹配的评审员，用户确认后执行评测。用户也可以在确认阶段要求查看剩余评审员、新建评审员，或直接指定人选。不会在未经用户确认评审员名单的情况下直接执行评测。",
   inputSchema: {
     type: "object",
     properties: {
@@ -139,7 +139,7 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        "当前还没有可用评论员。请先创建至少一个角色，再继续这次内容评测。",
+        "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
         "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
       ].join("\n")
@@ -177,11 +177,11 @@ async function handleCollectPlatforms(
     return toolResponse(
       state,
       [
-        "未识别到指定平台，将展示全部评论员。",
+        "未识别到指定平台，将展示全部评审员。",
         "",
         ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
         "",
-        "确认使用以上评论员，还是想指定平台重新筛选？",
+        "确认使用以上评审员，还是想指定平台重新筛选？",
       ].join("\n")
     );
   }
@@ -197,12 +197,12 @@ async function handleCollectPlatforms(
     return toolResponse(
       state,
       [
-        `目前还没有匹配「${platforms.join("、")}」的评论员，建议先创建针对这些平台的虚拟评论员。`,
-        "当前已为你展示全部评论员，可确认使用或稍后创建。",
+        `目前还没有匹配「${platforms.join("、")}」的评审员，建议先创建针对这些平台的评审员。`,
+        "当前已为你展示全部评审员，可确认使用或稍后创建。",
         "",
         ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
         "",
-        "确认使用以上评论员吗？",
+        "确认使用以上评审员吗？",
       ].join("\n")
     );
   }
@@ -216,14 +216,14 @@ async function handleCollectPlatforms(
     return toolResponse(
       state,
       [
-        `已为你筛选出匹配「${platforms.join("、")}」平台的评论员：`,
+        `已为你筛选出匹配「${platforms.join("、")}」平台的评审员：`,
         "",
         ...matched.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
         ...(unmatched.length > 0
-          ? ["", "其余评论员与目标平台不匹配，已自动剔除。如需使用全部，请说「使用全部」。"]
+          ? ["", "其余评审员与目标平台不匹配，已自动剔除。如需使用全部，请说「使用全部」。"]
           : []),
         "",
-        "确认使用以上评论员吗？",
+        "确认使用以上评审员吗？",
       ].join("\n")
     );
   }
@@ -253,7 +253,7 @@ async function handleSelectionConfirmation(
     const costEstimate = estimateTokenCost(personas.length, state.content.length);
     return toolResponse(
       state,
-      `已选择全部 ${personas.length} 位评论员。\n预估 Token 消耗：约 ${costEstimate.toLocaleString()} tokens\n确认开始评测吗？`
+      `已选择全部 ${personas.length} 位评审员。\n预估 Token 消耗：约 ${costEstimate.toLocaleString()} tokens\n确认开始评测吗？`
     );
   }
 
@@ -277,7 +277,7 @@ async function handleSelectionConfirmation(
     return toolResponse(
       state,
       [
-        "请告诉我你想使用哪些评论员。可以直接回复评论员 ID 或名称。",
+        "请告诉我你想使用哪些评审员。可以直接回复评审员 ID 或名称。",
         "",
         ...personas.map((p) => `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.description}`),
       ].join("\n")
@@ -285,7 +285,7 @@ async function handleSelectionConfirmation(
   }
 
   if (state.selectedPersonaIds.length === 0) {
-    throw new Error("当前没有已选择的评论员。");
+    throw new Error("当前没有已选择的评审员。");
   }
 
   const reviewResult = await handleReviewContent(skillsDir, {
@@ -326,7 +326,7 @@ async function recommendPersonas(
           ? `\n目标投放平台：${state.targetPlatforms.join("、")}`
           : "";
       const response = await samplingFn({
-        systemPrompt: `你是 Kevlar-4u 评论员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id${platformContext}，并严格输出 JSON：{"personaIds":["id"],"assistantMessage":"展示推荐名单和理由，并询问用户是否确认"}。不要输出 markdown。`,
+        systemPrompt: `你是 Kevlar-4u 评审员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id${platformContext}，并严格输出 JSON：{"personaIds":["id"],"assistantMessage":"展示推荐名单和理由，并询问用户是否确认"}。不要输出 markdown。`,
         messages: [
           {
             role: "user",
@@ -380,11 +380,11 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
   return {
     personaIds: selected.map((p) => p.meta.id),
     assistantMessage: [
-      "我为这篇内容推荐了以下评论员：",
+      "我为这篇内容推荐了以下评审员：",
       "",
       ...selected.map((p) => `- ${p.meta.name}（推荐理由：标签和描述与本次内容更接近；ID: ${p.meta.id}）`),
       "",
-      "确认使用以上评论员，还是需要从完整列表中自选？",
+      "确认使用以上评审员，还是需要从完整列表中自选？",
     ].join("\n"),
   };
 }
