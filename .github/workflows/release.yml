@@ -71,19 +71,25 @@ jobs:
             README.md \
             -x "node_modules/*"
 
-      # ── 9. Generate changelog from git log since last tag ────────────────
-      - name: Generate changelog
+      # ── 9. Extract changelog from CHANGELOG.md for current version ──────
+      - name: Extract changelog
         id: changelog
         run: |
-          PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
-          if [ -z "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD")
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract the section for current version from CHANGELOG.md
+          # Matches from "## [x.y.z]" to the next "## [" or end of file
+          SECTION=$(sed -n "/^## \\[${VERSION}\\]/,/^## \\[/p" CHANGELOG.md | head -n -1)
+          if [ -z "$SECTION" ]; then
+            echo "⚠️ No CHANGELOG.md entry for v${VERSION}, falling back to git log"
+            PREV_TAG=$(git tag --sort=-version:refname | sed -n '2p')
+            if [ -z "$PREV_TAG" ]; then
+              SECTION=$(git log --pretty=format:"- %s (%h)" HEAD)
+            else
+              SECTION=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD")
+            fi
           fi
-          # Write to file to safely pass multi-line string
-          echo "$CHANGELOG" > changelog.txt
-          echo "Generated changelog since ${PREV_TAG:-initial commit}"
+          echo "$SECTION" > changelog.txt
+          echo "📝 Changelog extracted for v${VERSION}"
 
       # ── 10. Publish GitHub Release ────────────────────────────────────────
       - name: Create GitHub Release
