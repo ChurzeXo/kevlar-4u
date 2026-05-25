@@ -94,6 +94,7 @@ interface WizardState {
     tone?: string[];
     platform?: string;
     platformNote?: string;
+    pendingPlatforms?: string[];
     culturalContext?: string | null;
     authorRelation?: string;
     stance?: string | null;
@@ -249,36 +250,72 @@ async function advanceWizard(
         [
           toneExtracted.assistantMessage,
           "",
-          "第五步：内容主要投放平台",
-          "如果多平台投放，建议创建更多针对某一平台的评审员。",
+          "第五步：这个评审员活跃在哪个平台？",
+          "一个评审员只负责一个平台，这样可以给出更地道的评论。",
         ].join("\n")
       );
     }
 
     case "platform": {
-      const raw = userMessage.trim();
-      if (/[和、/,]/.test(raw)) {
-        const first = raw.split(/[和、/,]/)[0].trim();
-        if (first) {
-          state.fields.platform = first;
-          state.fields.platformNote = `⚠️ 你输入了多个平台，将围绕「${first}」创建此评审员。如需覆盖其他平台，请另行创建。`;
-          state.step = "authorRelation";
-          await saveState(tmpDir, state);
-          await saveDraft(tmpDir, state);
-          return toolResponse(
-            state,
-            [
-              `已记录常用平台：${state.fields.platform}`,
-              state.fields.platformNote,
-              "",
-              "请选择这个角色与作者的关系（回复编号或文字）：",
-              "",
-              "1. 已关注（信任阈值较高，但期望值也更高）",
-              "2. 未关注（信任阈值较低，更容易因细节问题流失注意力）",
-            ].join("\n")
-          );
+      // If user has pending platform choices (from multi-platform input), handle selection
+      if (state.fields.pendingPlatforms && state.fields.pendingPlatforms.length > 0) {
+        const choice = userMessage.trim();
+        const idx = parseInt(choice, 10) - 1;
+        if (idx >= 0 && idx < state.fields.pendingPlatforms.length) {
+          state.fields.platform = state.fields.pendingPlatforms[idx];
+          state.fields.platformNote = `你输入了多个平台，已选择「${state.fields.platform}」。其他平台可另行创建评审员。`;
+          delete state.fields.pendingPlatforms;
+        } else {
+          // Try matching by text
+          const matched = state.fields.pendingPlatforms.find(p => p.toLowerCase() === choice.toLowerCase());
+          if (matched) {
+            state.fields.platform = matched;
+            state.fields.platformNote = `你输入了多个平台，已选择「${matched}」。其他平台可另行创建评审员。`;
+            delete state.fields.pendingPlatforms;
+          } else {
+            // Invalid selection, re-prompt
+            const opts = state.fields.pendingPlatforms.map((p, i) => `${i + 1}. ${p}`).join("\n");
+            return toolResponse(state, `请回复编号选择一个平台：\n${opts}`);
+          }
         }
+        state.step = "authorRelation";
+        await saveState(tmpDir, state);
+        await saveDraft(tmpDir, state);
+        return toolResponse(
+          state,
+          [
+            `已记录平台：${state.fields.platform}`,
+            "",
+            "请选择这个角色与作者的关系（回复编号或文字）：",
+            "",
+            "1. 已关注（信任阈值较高，但期望值也更高）",
+            "2. 未关注（信任阈值较低，更容易因细节问题流失注意力）",
+          ].join("\n")
+        );
       }
+
+      const raw = userMessage.trim();
+      const platforms = raw.split(/[和、/,，]+/).map(s => s.trim()).filter(Boolean);
+
+      if (platforms.length > 1) {
+        // Multi-platform: store as pending and ask user to choose one
+        state.fields.pendingPlatforms = platforms;
+        state.step = "platform"; // stay on platform step
+        await saveState(tmpDir, state);
+        await saveDraft(tmpDir, state);
+        const opts = platforms.map((p, i) => `${i + 1}. ${p}`).join("\n");
+        return toolResponse(
+          state,
+          [
+            "你提到了多个平台，但一个评审员只负责一个平台，请选择：",
+            "",
+            opts,
+            "",
+            "回复编号即可，其他平台可以之后再创建评审员。",
+          ].join("\n")
+        );
+      }
+
       state.fields.platform = raw;
       state.step = "authorRelation";
       await saveState(tmpDir, state);
@@ -286,7 +323,7 @@ async function advanceWizard(
       return toolResponse(
         state,
         [
-          `已记录常用平台：${state.fields.platform}`,
+          `已记录平台：${state.fields.platform}`,
           "",
           "请选择这个角色与作者的关系（回复编号或文字）：",
           "",
@@ -382,6 +419,8 @@ async function applyFinalModification(
     }
     case "platform":
       state.fields.platform = valueText;
+      delete state.fields.platformNote;
+      delete state.fields.pendingPlatforms;
       break;
     case "authorRelation":
       state.fields.authorRelation = valueText;
