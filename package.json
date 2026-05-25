@@ -25,7 +25,7 @@
   },
   "keywords": ["mcp", "multi-agent", "content-review", "ai"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "@inquirer/prompts": "^7.5.2",
