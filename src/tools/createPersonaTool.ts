@@ -85,7 +85,7 @@ export interface CreatePersonaInput {
 	sessionId?: string;
 	culturalContext?: string;
 	authorRelation?: string;
-	stance?: string;
+	stance?: string | string[];
 	blindSpot?: string;
 	gender?: string;
 }
@@ -204,7 +204,7 @@ export async function handleCreatePersona(
 		description: sanitizePersistentField(description),
 		culturalContext: sanitizePersistentField(input.culturalContext || "未提供"),
 		authorRelation: sanitizePersistentField(input.authorRelation || "未提供"),
-		...(input.stance ? { stance: sanitizePersistentField(input.stance) } : {}),
+		...(input.stance ? { stance: Array.isArray(input.stance) ? input.stance.map((s: string) => sanitizePersistentField(s)) : sanitizePersistentField(input.stance) } : {}),
 		...(input.blindSpot ? { blindSpot: sanitizePersistentField(input.blindSpot) } : {}),
 		...(input.gender ? { gender: sanitizePersistentField(input.gender) } : {}),
 	};
@@ -233,6 +233,9 @@ export async function handleCreatePersona(
 			"未提供"
 		);
 		const stanceVal = input.stance || (draft.fields && draft.fields.stance);
+		const stanceFormatted = Array.isArray(stanceVal) && stanceVal.length > 0
+			? stanceVal.map((s: string) => sanitizePersistentField(s)).join("；同时具备")
+			: (typeof stanceVal === "string" && stanceVal ? sanitizePersistentField(stanceVal) : "");
 		const blind = input.blindSpot || (draft.fields && draft.fields.blindSpot);
 		const gender = input.gender || (draft.fields && draft.fields.gender);
 
@@ -273,7 +276,7 @@ export async function handleCreatePersona(
 		personaDescription += `- 文化背景：${cultural}\n`;
 		personaDescription += `- 性别：${gender || "（未设定——你对该内容没有性别预设视角）"}\n`;
 		personaDescription += `- 与作者的关系：${relation}\n`;
-		personaDescription += `- 立场：${stanceVal || "（未设定——你对该类内容没有预设立场，按实际感受判断）"}\n`;
+		personaDescription += `- 立场：${stanceFormatted || "（未设定——你对该类内容没有预设立场，按实际感受判断）"}\n`;
 		personaDescription += `- 盲区：${blind || "（未设定——你没有已知的认知盲区，保持开放视角）"}\n\n`;
 
 		// ── P-4 / P-5 / P-6: Security declaration ──
@@ -299,6 +302,9 @@ export async function handleCreatePersona(
 		const cultural = sanitizePersistentField(input.culturalContext || "未提供");
 		const relation = sanitizePersistentField(input.authorRelation || "未提供");
 		const stanceVal = input.stance;
+		const stanceFormatted = Array.isArray(stanceVal) && stanceVal.length > 0
+			? stanceVal.map((s: string) => sanitizePersistentField(s)).join("；同时具备")
+			: (typeof stanceVal === "string" && stanceVal ? sanitizePersistentField(stanceVal) : "");
 		const blind = input.blindSpot;
 		const gender = input.gender;
 
@@ -323,7 +329,7 @@ export async function handleCreatePersona(
 		personaDescription += `${description}\n`;
 		personaDescription += `- 文化背景：${cultural}\n`;
 		personaDescription += `- 与作者的关系：${relation}\n`;
-		personaDescription += `- 立场：${stanceVal || "（未设定——你对该类内容没有预设立场，按实际感受判断）"}\n`;
+		personaDescription += `- 立场：${stanceFormatted || "（未设定——你对该类内容没有预设立场，按实际感受判断）"}\n`;
 		personaDescription += `- 盲区：${blind || "（未设定——你没有已知的认知盲区，保持开放视角）"}\n`;
 		personaDescription += `- 性别：${gender || "（未设定——你对该内容没有性别预设视角）"}\n\n`;
 

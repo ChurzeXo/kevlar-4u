@@ -13,7 +13,7 @@ export interface PersonaMeta {
   description: string;
   culturalContext?: string;
   authorRelation?: string;
-  stance?: string;
+  stance?: string | string[];
   blindSpot?: string;
   gender?: string;
 }

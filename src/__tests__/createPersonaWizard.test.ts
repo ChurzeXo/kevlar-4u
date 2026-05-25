@@ -117,7 +117,13 @@ describe("handleCreatePersonaWizard fallback state machine", () => {
       sessionId,
       userMessage: "已关注",
     });
-    assert.ok(textOf(relationRecorded).includes("currentStep: finalConfirm"));
+    assert.ok(textOf(relationRecorded).includes("currentStep: stance"));
+
+    const stanceRecorded = await handleCreatePersonaWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "4",
+    });
+    assert.ok(textOf(stanceRecorded).includes("currentStep: finalConfirm"));
 
     const modified = await handleCreatePersonaWizard(skillsDir, tmpDir, {
       sessionId,
