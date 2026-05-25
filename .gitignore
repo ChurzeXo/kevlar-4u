@@ -5,12 +5,15 @@ dist/
 .env.*.local
 *.log
 .DS_Store
+.deepseek
+.vscode
 
 # Kevlar user config (non-sensitive preferences)
 skills/kevlar-config.json
 
-# Kevlar pre-release audit report (local reference, not tracked)
-docs/AUDIT-report.md
+# Ignore all docs except multi-language README translations
+docs/*
+!docs/README.*.md
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
