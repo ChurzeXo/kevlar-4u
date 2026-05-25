@@ -740,10 +740,10 @@ async function inferFinalFields(
         `<task>`,
         `根据已确认字段推断以下字段：`,
         `- personaName：自由发挥一个像真人会取的互联网昵称（2-8字）。好网名的常见模式：食物+动物（奶茶仓鼠）、谐音梗（码上有钱）、情绪+名词（佛系铲屎官）、抽象拟人（赛博咸鱼）、随机组合（三号电池）。禁止输出：兴趣领域词（如「科技」「美食」「时尚」）、描述性标签（如「美妆爱好者」「数码达人」）、带「评审员」后缀、带平台名`,
-        `- gender：男 / 女 / 未指定`,
+        `- gender：男 / 女 / 未指定。如果信息不足以判断，输出 null（不要输出"未知""不详"等）`,
         `- culturalContext：该角色的文化语境`,
-        `- stance：该角色看问题的基本立场`,
-        `- blindSpot：该角色因自身局限可能忽略的视角`,
+        `- stance：该角色看问题的基本立场。禁止输出"默认质疑""中立""无特定立场"等泛化描述——要么给出具体立场，要么输出 null`,
+        `- blindSpot：该角色因自身局限可能忽略的视角。禁止输出"无特定盲区""无明显盲区""暂无"等空泛描述——要么给出具体盲区，要么输出 null`,
         ``,
         `重要去重规则：`,
         `- personaName 不能与同平台已有评审员重名或高度相似`,
@@ -773,6 +773,9 @@ async function inferFinalFields(
       userMessage: JSON.stringify(state.fields),
       inputSemantics: "strong",
     });
+    const VAGUE_STANCE = /^(默认质疑|中立|无特定立场|没有立场|暂无|无|不适用|n\/a)$/i;
+    const VAGUE_BLINDSPOT = /^(无特定盲区|无明显盲区|暂无|无|不适用|n\/a|没有盲区)$/i;
+
     return {
       personaName: typeof json.personaName === "string" && json.personaName.trim().length > 0
         ? sanitizePersistentField(json.personaName.trim())
@@ -784,10 +787,10 @@ async function inferFinalFields(
         ? sanitizePersistentField(json.culturalContext)
         : fallback.culturalContext,
       authorRelation: fallback.authorRelation,
-      stance: typeof json.stance === "string" && json.stance.trim().length > 0
+      stance: typeof json.stance === "string" && json.stance.trim().length > 0 && !VAGUE_STANCE.test(json.stance.trim())
         ? sanitizePersistentField(json.stance.trim())
         : null,
-      blindSpot: typeof json.blindSpot === "string" && json.blindSpot.trim().length > 0
+      blindSpot: typeof json.blindSpot === "string" && json.blindSpot.trim().length > 0 && !VAGUE_BLINDSPOT.test(json.blindSpot.trim())
         ? sanitizePersistentField(json.blindSpot.trim())
         : null,
     };
