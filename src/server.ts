@@ -12,7 +12,7 @@ import type { ToolDependencies } from "./tools/types.js";
 import { logger } from "./utils/logger.js";
 import { formatErrorResponse } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
-import { isSamplingSupported, setClientInfo } from "./execution/client.js";
+import { resolveSamplingFn } from "./execution/sampling.js";
 import { setConfigPath } from "./execution/config.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
 
@@ -84,15 +84,6 @@ export function createKevlarServer(): McpServer {
 
   const underlyingServer = mcpServer.server;
 
-  const updateClientSamplingSupport = (): boolean => {
-    const clientVersion = underlyingServer.getClientVersion();
-    if (clientVersion) {
-      setClientInfo(clientVersion.name, clientVersion.version);
-      return isSamplingSupported(clientVersion.name);
-    }
-    return false;
-  };
-
   const createMultiTurnSamplingFn = (serverInstance: any): MultiTurnSamplingFunction => {
     return async (params) => {
       try {
@@ -126,8 +117,10 @@ export function createKevlarServer(): McpServer {
   const deps: ToolDependencies = {
     skillsDir,
     tmpDir,
-    createMultiTurnSamplingFn: () => createMultiTurnSamplingFn(underlyingServer),
-    updateClientSamplingSupport,
+    resolveSamplingFn: () => resolveSamplingFn({
+      getClientVersion: () => underlyingServer.getClientVersion(),
+      createFn: () => createMultiTurnSamplingFn(underlyingServer),
+    }),
   };
 
   const { registry, toolDefinitions } = createToolRegistry(deps);

@@ -6,8 +6,8 @@ export type ToolHandler = (args: Record<string, unknown> | undefined) => Promise
 export interface ToolDependencies {
   skillsDir: string;
   tmpDir: string;
-  createMultiTurnSamplingFn: () => MultiTurnSamplingFunction;
-  updateClientSamplingSupport: () => boolean;
+  /** Resolve sampling capability. Returns undefined when unsupported. */
+  resolveSamplingFn: () => MultiTurnSamplingFunction | undefined;
 }
 
 export interface ToolModule {

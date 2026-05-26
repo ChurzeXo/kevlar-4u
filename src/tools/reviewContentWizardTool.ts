@@ -66,9 +66,7 @@ export const reviewContentWizardModule: ToolModule = {
   handler: (deps) => async (args) => {
     if (!args) throw new Error("向导需要提供参数");
     const input = args as any;
-    if (deps.updateClientSamplingSupport()) {
-      input.samplingFn = deps.createMultiTurnSamplingFn();
-    }
+    input.samplingFn = deps.resolveSamplingFn();
     return await handleReviewContentWizard(deps.skillsDir, deps.tmpDir, input);
   },
 };
