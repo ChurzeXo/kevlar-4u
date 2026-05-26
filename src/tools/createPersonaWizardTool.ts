@@ -855,17 +855,17 @@ async function inferFinalFields(
   skillsDir: string,
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "blindSpot" | "personaName" | "gender">> {
-  const fallback = {
-    culturalContext: inferCulturalContext(state),
-    authorRelation: state.fields.authorRelation || "未关注",
-    blindSpot: null as string | null,
-    personaName: null as string | null,
-    gender: null as string | null,
-  };
-
   const existingRefs = loadExistingPersonaRefs(state, skillsDir);
 
-  if (!samplingFn) return fallback;
+  if (!samplingFn) {
+    return {
+      culturalContext: inferCulturalContext(state),
+      authorRelation: state.fields.authorRelation || "未关注",
+      blindSpot: generateFallbackBlindSpot(state),
+      personaName: generateFallbackPersonaName(state, skillsDir),
+      gender: inferFallbackGender(state),
+    };
+  }
 
   try {
     const json = await runJsonExtraction(samplingFn, {
@@ -946,15 +946,341 @@ async function inferFinalFields(
         : null,
       culturalContext: typeof json.culturalContext === "string"
         ? sanitizePersistentField(json.culturalContext)
-        : fallback.culturalContext,
-      authorRelation: fallback.authorRelation,
+        : inferCulturalContext(state),
+      authorRelation: state.fields.authorRelation || "未关注",
       blindSpot: typeof json.blindSpot === "string" && json.blindSpot.trim().length > 0 && !VAGUE_BLINDSPOT.test(json.blindSpot.trim())
         ? sanitizePersistentField(json.blindSpot.trim())
         : null,
     };
   } catch {
-    return fallback;
+    return {
+      culturalContext: inferCulturalContext(state),
+      authorRelation: state.fields.authorRelation || "未关注",
+      blindSpot: generateFallbackBlindSpot(state),
+      personaName: generateFallbackPersonaName(state, skillsDir),
+      gender: inferFallbackGender(state),
+    };
   }
+}
+
+// ── Fallback inference helpers (used when MCP sampling is unavailable) ─────
+
+/**
+ * Rule-based persona name generation.
+ *
+ * Design goal: produce names that feel like real Chinese internet nicknames.
+ * Strategy:
+ *   1. Classify persona into a "vibe" from traits/tone (犀利型/软萌型/理性型/网感型)
+ *   2. Use vibe-weighted template families with internet-authentic vocabulary
+ *   3. Ensure two-word combos have semantic affinity (never random)
+ *   4. Dedup against existing names in the same platform directory
+ */
+function generateFallbackPersonaName(state: WizardState, skillsDir: string): string | null {
+  const fields = state.fields;
+
+  // Extract trait keywords (the part before → or —)
+  const traitKeys: string[] = [];
+  for (const t of fields.traits || []) {
+    const parts = t.split(/[→\-—]/);
+    const key = parts[0].trim();
+    if (key.length >= 1 && key.length <= 4) traitKeys.push(key);
+  }
+
+  const toneKeys = (fields.tone || []).map(t => t.replace(/[的得很]/g, ""));
+  const interestKeys = (fields.interests || []).map(i =>
+    i.replace(/[测评研究探讨分析推荐爱好者方向]$/g, "")
+  );
+
+  // ── Vibe classification ──────────────────────────────────────────────────
+  // Determine which "internet persona style" this character leans toward.
+  let vibe: "sharp" | "soft" | "cool" | "playful" = "playful";
+
+  const allTraits = [...traitKeys, ...toneKeys].join(" ");
+  const sharpWords = /暴躁|毒舌|挑剔|拒绝|质疑|追击|怼|杠/;
+  const softWords = /温柔|佛系|感性|走心|共情|治愈|暖心/;
+  const coolWords = /理性|冷静|硬核|逻辑|分析|实用|务实|极简/;
+
+  if (sharpWords.test(allTraits)) vibe = "sharp";
+  else if (softWords.test(allTraits)) vibe = "soft";
+  else if (coolWords.test(allTraits)) vibe = "cool";
+
+  // ── Word pools (internet-authentic vocabulary) ───────────────────────────
+
+  // Mood/atmosphere words that real netizens use as name prefixes
+  const moodWords = {
+    sharp:   ["暴躁", "毒舌", "不想", "拒绝", "野生", "过期", "躺平", "摆烂"],
+    soft:    ["佛系", "温柔", "三分", "半糖", "小", "草莓", "栗子", "奶盖"],
+    cool:    ["冷静", "硬核", "赛博", "深夜", "二手", "极简", "逻辑", "离线"],
+    playful: ["摸鱼", "熬夜", "追光", "快乐", "种草", "随波", "充电", "加载"],
+  };
+
+  // Animals — emotionally resonant, common in nicknames
+  const animals = {
+    sharp:   ["柴犬", "刺猬", "乌鸦", "鳄鱼", "二哈"],
+    soft:    ["仓鼠", "猫咪", "考拉", "兔兔", "熊猫", "布偶"],
+    cool:    ["咸鱼", "企鹅", "猫头鹰", "狐狸", "海獭"],
+    playful: ["柴犬", "仓鼠", "鹦鹉", "熊猫", "海獭", "柯基"],
+  };
+
+  // Role/identity words (not job titles — internet-native self-labels)
+  const roles = {
+    sharp:   ["网友", "路人", "吐槽", "刺客"],
+    soft:    ["铲屎官", "小可爱", "选手", "观察员"],
+    cool:    ["观察者", "路人", "记录员", "夜猫子"],
+    playful: ["打工人", "玩家", "夜猫子", "探险家"],
+  };
+
+  // State phrases — complete, self-contained nicknames (no combo needed)
+  const statePhrases = {
+    sharp:   ["不想上班", "拒绝画饼", "已读不回", "懒得解释", "看破也说破"],
+    soft:    ["今天也很困", "正在发呆", "电量不足", "只想躺平", "再说吧"],
+    cool:    ["正在加载", "数据不足", "请稍后再试", "信号弱"],
+    playful: ["只想摸鱼", "在线摸鱼", "又熬夜了", "先睡了", "改天再说"],
+  };
+
+  // Food/drink themed names (very popular on 小红书/微博)
+  const foodNames = {
+    sharp:   ["冰美式", "苦瓜汁", "黑咖啡"],
+    soft:    ["三分糖", "奶盖茶", "草莓奶昔", "芋泥波波", "栗子蛋糕"],
+    cool:    ["冰美式", "冷萃", "苏打水"],
+    playful: ["冰阔落", "奶茶控", "薯片杀手"],
+  };
+
+  // Small-role names (小/阿 + character) — extremely common in real internet
+  const xiaoNames = {
+    sharp:   ["小野", "小怼", "小杠"],
+    soft:    ["小橘", "小眠", "小呆", "小懒"],
+    cool:    ["小默", "小北", "小九"],
+    playful: ["小卷", "小闲", "阿宅", "阿摸"],
+  };
+
+  // Suffix-style names (XX酱/君) — ACG/community culture
+  const suffixNames = {
+    sharp:   ["吐槽君", "破防酱"],
+    soft:    ["发呆酱", "摸鱼酱", "种草君"],
+    cool:    ["观察君", "数据君"],
+    playful: ["熬夜君", "追番酱", "摸鱼君"],
+  };
+
+  // Object + 的 + role — personification, implies a micro-story
+  const objectNames = {
+    sharp:   ["过期可乐", "乱码人生", "断线风筝", "二手玫瑰"],
+    soft:    ["云朵收藏家", "落日观察员", "雨天漫步者"],
+    cool:    ["三号电池", "混沌变量", "未定义用户"],
+    playful: ["404玩家", "随机路人", "野生博主"],
+  };
+
+  const shuffle = <T>(arr: T[]): T[] => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const candidates: string[] = [];
+
+  const m = moodWords[vibe];
+  const a = animals[vibe];
+  const r = roles[vibe];
+  const s = statePhrases[vibe];
+  const f = foodNames[vibe];
+  const x = xiaoNames[vibe];
+  const su = suffixNames[vibe];
+  const ob = objectNames[vibe];
+
+  // ── Template families ────────────────────────────────────────────────────
+
+  // Family A: 情绪+动物 (e.g. 暴躁柴犬, 佛系考拉)
+  // The most common real nickname pattern. Both parts feel personal.
+  for (const mo of shuffle(m).slice(0, 3)) {
+    for (const an of shuffle(a).slice(0, 3)) {
+      candidates.push(mo + an);
+    }
+  }
+
+  // Family B: 情绪+角色 (e.g. 野生网友, 摸鱼打工人)
+  for (const mo of shuffle(m).slice(0, 3)) {
+    for (const ro of shuffle(r).slice(0, 2)) {
+      candidates.push(mo + ro);
+    }
+  }
+
+  // Family C: 状态短语 — full self-contained nicknames
+  for (const sp of s) candidates.push(sp);
+
+  // Family D: 食物系 — 小红书/微博风格
+  for (const fn of f) candidates.push(fn);
+
+  // Family E: 小/阿+字 — most common Chinese nickname format
+  for (const xn of x) candidates.push(xn);
+
+  // Family F: XX君/酱 — B站/社区风格
+  for (const sn of su) candidates.push(sn);
+
+  // Family G: 物品拟人 — implies a story/personality
+  for (const on of ob) candidates.push(on);
+
+  // Family H: 动物+角色 (e.g. 柴犬观察者, 猫咪铲屎官)
+  for (const an of shuffle(a).slice(0, 2)) {
+    for (const ro of shuffle(r).slice(0, 2)) {
+      candidates.push(an + ro);
+    }
+  }
+
+  // ── Dedup & return ───────────────────────────────────────────────────────
+  const existingNames = getExistingPersonaNames(state, skillsDir);
+
+  for (const c of shuffle(candidates)) {
+    if (c.length >= 2 && c.length <= 8 && !existingNames.has(c)) {
+      return sanitizePersistentField(c);
+    }
+  }
+
+  // Ultimate fallback: vibe-appropriate mood + animal
+  return sanitizePersistentField(m[0] + a[0]);
+}
+
+/** Extract existing persona names from the same platform directory for dedup. */
+function getExistingPersonaNames(state: WizardState, skillsDir: string): Set<string> {
+  const names = new Set<string>();
+  const subDir = getSubDirFromDraft({ fields: state.fields });
+  if (!subDir) return names;
+  const dir = path.join(skillsDir, subDir);
+  try {
+    if (!fs.statSync(dir).isDirectory()) return names;
+    const files = fs.readdirSync(dir).filter(f => f.endsWith(".md") && f !== "_template.md");
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(dir, file), "utf-8");
+      const nameMatch = content.match(/^name:\s*(.+)/m);
+      if (nameMatch) names.add(nameMatch[1].trim());
+    }
+  } catch {
+    // ignore read errors
+  }
+  return names;
+}
+
+/**
+ * Rule-based gender inference from stance, interests, and traits.
+ * Returns null when unable to determine with confidence (matching LLM fallback behavior).
+ */
+function inferFallbackGender(state: WizardState): string | null {
+  const fields = state.fields;
+  const allText = [
+    ...(fields.stance || []),
+    ...(fields.interests || []),
+    ...(fields.traits || []),
+    ...(fields.tone || []),
+  ].join(" ");
+
+  const femalePatterns = [
+    /女性视角/, /都市女性/, /她/, /姐妹/, /闺蜜/, /妈妈/,
+    "美妆", "穿搭", "护肤", "母婴", "烘焙",
+  ];
+  const malePatterns = [
+    /男性视角/, /理工男/, /直男/, /兄弟/, /哥们/, /硬汉/,
+  ];
+
+  let maleScore = 0;
+  let femaleScore = 0;
+
+  for (const p of femalePatterns) {
+    if (typeof p === "string" ? allText.includes(p) : p.test(allText)) femaleScore++;
+  }
+  for (const p of malePatterns) {
+    if (typeof p === "string" ? allText.includes(p) : p.test(allText)) maleScore++;
+  }
+
+  if (femaleScore > maleScore && femaleScore >= 2) return "女";
+  if (maleScore > femaleScore && maleScore >= 2) return "男";
+  return null;
+}
+
+/**
+ * Rule-based blind spot generation from traits, interests, and stance.
+ * Produces specific, persona-aware descriptions (never vague fallbacks).
+ */
+function generateFallbackBlindSpot(state: WizardState): string | null {
+  const fields = state.fields;
+  const interests = fields.interests || [];
+  const traits = fields.traits || [];
+  const stance = fields.stance || [];
+
+  // Extract trait keywords (before →)
+  const traitKeys: string[] = [];
+  for (const t of traits) {
+    const parts = t.split(/[→\-—]/);
+    traitKeys.push(parts[0].trim());
+  }
+
+  // Interest → blind spot mapping
+  const interestBlindSpot: Record<string, string> = {
+    科技: "可能忽略非技术用户的使用体验和情感诉求，对感性表达缺乏共鸣",
+    AI: "可能忽略人类直觉和情感因素，过度依赖数据和逻辑判断",
+    数码: "可能忽略非数码爱好者的使用习惯和直观感受",
+    美食: "可能忽略快捷饮食和性价比路线，对非精致餐饮缺乏包容",
+    时尚: "可能忽略小众品牌和实用主义穿搭，对功能性服饰缺乏关注",
+    穿搭: "可能忽略舒适度和实用性，过度关注视觉审美",
+    美妆: "可能忽略自然素颜和简化护肤理念，对非消费主义视角缺乏理解",
+    理财: "可能忽略精神消费和体验式生活的价值，对非理性消费缺乏理解",
+    游戏: "可能忽略游戏之外的生活方式，对非玩家群体缺乏共情",
+    健身: "可能忽略不同体质和健康观念的多样性，对非运动生活方式缺乏理解",
+    宠物: "可能忽略对动物无感人群的感受，过度以宠物为中心",
+    旅行: "可能忽略宅家文化和本地生活的丰富性，对非旅行者缺乏理解",
+    摄影: "可能忽略手机摄影和随手记录的乐趣，对器材过度关注",
+    音乐: "可能忽略不同音乐品味的合理性，对大众流行音乐缺乏包容",
+    电影: "可能忽略轻松娱乐型内容的价值，对商业片缺乏包容",
+    读书: "可能忽略视频和音频内容的传播价值，对非文字信息载体缺乏耐心",
+    二次元: "可能忽略现实世界的内容和文化，对非ACG用户缺乏沟通基础",
+  };
+
+  // Trait → cognitive bias mapping
+  const traitBlindSpot: Record<string, string> = {
+    跟风: "可能过于依赖热门趋势判断，忽略小众但有深度的内容",
+    理性: "可能忽略情感诉求和故事感染力，过度强调数据和逻辑",
+    暴躁: "容易因追求爽感而错过需要耐心消化的深度内容",
+    幽默: "可能忽略严肃议题的深度讨论，习惯用调侃消解话题",
+    温柔: "可能回避尖锐批评，对需要直接指出的问题过于委婉",
+    毒舌: "可能过度挑剔细节，忽略内容整体的价值",
+    佛系: "可能对争议性话题缺乏参与的积极性，忽略需要激辩才能澄清的问题",
+    热血: "可能忽略冷静分析的重要性，对保守观点缺乏耐心",
+    感性: "可能忽略数据和事实支撑，过度依赖主观感受",
+    实用: "可能忽略精神价值和审美体验，过度关注功利性",
+    挑剔: "可能不易被满足，对及格线以上的内容也缺乏认可",
+    好奇: "可能分散注意力，对单一主题的深度内容缺乏持久关注",
+    社恐: "可能对社会化内容和社群互动缺乏理解，偏好独处型内容",
+    焦虑: "可能过度关注负面和风险信息，对乐观积极的内容缺乏信任",
+    强迫: "可能过度纠结于格式和细节，忽略内容的核心信息",
+  };
+
+  // Try interest-based match first
+  for (const ik of interests) {
+    for (const [key, bs] of Object.entries(interestBlindSpot)) {
+      if (ik.includes(key)) return sanitizePersistentField(bs);
+    }
+  }
+
+  // Try trait-based match
+  for (const tk of traitKeys) {
+    const bs = traitBlindSpot[tk];
+    if (bs) return sanitizePersistentField(bs);
+  }
+
+  // Stance-based generic fallback
+  const stanceText = stance.join(" ");
+  if (/理性|逻辑/.test(stanceText))
+    return "可能忽略情感表达和主观体验，过度依赖逻辑分析";
+  if (/女性|情感|情绪/.test(stanceText))
+    return "可能过度关注情绪共鸣，对纯理性讨论内容缺乏耐心";
+  if (/商业|消费/.test(stanceText))
+    return "可能忽略非商业化内容的价值，对公益性和艺术性表达缺乏关注";
+  if (/传统|家庭/.test(stanceText))
+    return "可能忽略新潮和叛逆型内容的价值，对非传统生活方式缺乏理解";
+
+  // Last resort (still specific, never vague)
+  return "可能受限于个人经验，对不同背景和圈层的内容缺乏足够理解";
 }
 
 function loadExistingPersonaRefs(state: WizardState, skillsDir: string): string {

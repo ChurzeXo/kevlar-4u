@@ -20,3 +20,6 @@ skills/tmp/
 
 # Custom persona files (platform-specific reviewer personas)
 skills/*/*.md
+
+# Kevlar lab documents (audit reports, experiments, etc.)
+.kevlar_lab/
