@@ -163,6 +163,16 @@ function chineseNumber(n: number): string {
   return ["一", "二", "三", "四", "五", "六", "七"][n - 1];
 }
 
+/** 生成 go-back 提示：「重新设置XX」或「回到第X步」 */
+function goBackHint(step: WizardStep): string {
+  const label = SHORT_FIELD_LABEL[step] || step;
+  const stepIdx = STEP_ORDER.indexOf(step);
+  const backNum = stepIdx > 0 ? chineseNumber(stepIdx) : null;
+  return backNum
+    ? `（如需修改之前的选择，可说「重新设置${label}」或「回到第${backNum}步」）`
+    : `（如需修改之前的选择，可说「重新设置${label}」）`;
+}
+
 type DraftField = "ageRange" | "interests" | "traits" | "tone" | "platform" | "authorRelation" | "name" | "gender" | "stance" | "blindSpot" | "culturalContext";
 
 interface WizardState {
@@ -292,10 +302,10 @@ async function handleAgeRangeStep({
     state,
     "interests",
     [
-      `已记录年龄段：${state.fields.ageRange}`,
+      `已记录：${state.fields.ageRange}`,
       "",
       `第二步：${STEP_QUESTION.interests}`,
-      "（如需修改之前的选择，可说「重新设置年龄段」）",
+      goBackHint("ageRange"),
     ].join("\n")
   );
 }
@@ -368,11 +378,11 @@ async function handlePlatformSelection(
     state,
     "authorRelation",
     [
-      `已记录平台：${state.fields.platform}`,
+      `已记录：${state.fields.platform}`,
       "",
       AUTHOR_RELATION_PROMPT,
       "",
-      "（如需修改之前的选择，可说「重新设置平台」或「回到第四步」）",
+      goBackHint("platform"),
     ].join("\n")
   );
 }
@@ -393,12 +403,9 @@ async function handlePlatformInput(
     return toolResponse(
       state,
       [
-        "一个评审员只针对一个平台，这样评论风格才更地道。",
-        `你刚才提到了 ${platforms.length} 个平台，请从中选择一个：`,
+        `一个评审员只针对一个平台。请从以下 ${platforms.length} 个平台中选择一个（回复编号即可）：`,
         "",
         opts,
-        "",
-        "回复编号或平台名称即可。其他平台之后可以再创建对应的评审员。",
       ].join("\n")
     );
   }
@@ -409,11 +416,11 @@ async function handlePlatformInput(
     state,
     "authorRelation",
     [
-      `已记录平台：${state.fields.platform}`,
+      `已记录：${state.fields.platform}`,
       "",
       AUTHOR_RELATION_PROMPT,
       "",
-      "（如需修改之前的选择，可说「重新设置平台」或「回到第四步」）",
+      goBackHint("platform"),
     ].join("\n")
   );
 }
@@ -440,7 +447,7 @@ async function handleAuthorRelationStep({
       "",
       ...STANCE_OPTIONS.map((opt, i) => `${i + 1}. ${opt}`),
       "",
-      "（如需修改之前的选择，可说「重新设置关系」或「回到第六步」）",
+      goBackHint("authorRelation"),
     ].join("\n")
   );
 }
@@ -608,7 +615,7 @@ async function transitionTextStep(
     extracted.assistantMessage,
     "",
     `第${chineseNumber(nextStepNumber)}步：${STEP_QUESTION[nextStep]}`,
-    `（如需修改之前的选择，可说「重新设置${SHORT_FIELD_LABEL[currentField]}」或「回到第${chineseNumber(currentIdx)}步」）`,
+    goBackHint(currentField),
   ];
 
   return toolResponse(state, parts.join("\n"));
