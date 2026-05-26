@@ -168,73 +168,25 @@ async function handleCollectPlatforms(
 
   if (platforms.length === 0) {
     state.targetPlatforms = [];
-    state.step = "confirmSelection";
-    state.selectedPersonaIds = personas.map((p) => p.meta.id);
-    state.remainingPersonaIds = [];
-    await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      [
-        "未识别到指定平台，将展示全部评审员。",
-        "",
-        ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
-        "",
-        "确认使用以上评审员，还是想指定平台重新筛选？",
-      ].join("\n")
-    );
+    return showAllPersonas(tmpDir, state, personas, "未识别到指定平台，将展示全部评审员。");
   }
 
   state.targetPlatforms = platforms;
   const { matched, unmatched } = filterPersonasByPlatform(personas, platforms);
 
   if (matched.length === 0) {
-    state.step = "confirmSelection";
-    state.selectedPersonaIds = personas.map((p) => p.meta.id);
-    state.remainingPersonaIds = [];
-    await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      [
-        `目前还没有匹配「${platforms.join("、")}」的评审员，建议先创建针对这些平台的评审员。`,
-        "当前已为你展示全部评审员，可确认使用或稍后创建。",
-        "",
-        ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "所有平台"} · ${p.meta.description}`),
-        "",
-        "确认使用以上评审员吗？",
-      ].join("\n")
+    return showAllPersonas(
+      tmpDir, state, personas,
+      `目前还没有匹配「${platforms.join("、")}」的评审员，建议先创建针对这些平台的评审员。\n当前已为你展示全部评审员，可确认使用或稍后创建。`,
+      "确认使用以上评审员吗？"
     );
   }
-
-  state.selectedPersonaIds = matched.map((p) => p.meta.id);
-  state.remainingPersonaIds = unmatched.map((p) => p.meta.id);
 
   if (matched.length <= 2) {
-    state.step = "confirmSelection";
-    await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      [
-        `已为你筛选出匹配「${platforms.join("、")}」平台的评审员：`,
-        "",
-        ...matched.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
-        ...(unmatched.length > 0
-          ? ["", "其余评审员与目标平台不匹配，已自动剔除。如需使用全部，请说「使用全部」。"]
-          : []),
-        "",
-        "确认使用以上评审员吗？",
-      ].join("\n")
-    );
+    return autoSelectMatched(tmpDir, state, personas, matched, unmatched, platforms);
   }
 
-  const recommendation = await recommendPersonas(state, matched, samplingFn);
-  const recommendedIds = new Set(recommendation.personaIds);
-  state.selectedPersonaIds = matched.filter((p) => recommendedIds.has(p.meta.id)).map((p) => p.meta.id);
-  state.remainingPersonaIds = matched
-    .filter((p) => !recommendedIds.has(p.meta.id))
-    .map((p) => p.meta.id);
-  state.step = "confirmSelection";
-  await saveState(tmpDir, state);
-  return toolResponse(state, recommendation.assistantMessage);
+  return recommendAndSelect(tmpDir, state, matched, samplingFn);
 }
 
 async function handleSelectionConfirmation(
@@ -246,73 +198,28 @@ async function handleSelectionConfirmation(
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
   if (/使用全部|全部|全选|所有/.test(userMessage)) {
-    state.selectedPersonaIds = personas.map((p) => p.meta.id);
-    state.remainingPersonaIds = [];
-    await saveState(tmpDir, state);
-    const costEstimate = estimateTokenCost(personas.length, state.content.length);
-    return toolResponse(
-      state,
-      `已选择全部 ${personas.length} 位评审员。\n预估 Token 消耗：约 ${costEstimate.toLocaleString()} tokens\n确认开始评测吗？`
-    );
+    return selectAllAndConfirm(tmpDir, state, personas);
   }
 
   const explicitIds = extractPersonaIds(userMessage, personas);
   if (explicitIds.length > 0) {
-    state.selectedPersonaIds = explicitIds;
-    state.remainingPersonaIds = personas
-      .filter((p) => !explicitIds.includes(p.meta.id))
-      .map((p) => p.meta.id);
-    await saveState(tmpDir, state);
-    const selectedNames = personas
-      .filter((p) => explicitIds.includes(p.meta.id))
-      .map((p) => p.meta.name)
-      .join("、");
-    const costEstimate = estimateTokenCost(explicitIds.length, state.content.length);
-    return toolResponse(state, `已选择：${selectedNames}。\n预估 Token 消耗：约 ${costEstimate.toLocaleString()} tokens\n确认开始评测吗？`);
+    return selectExplicitAndConfirm(tmpDir, state, personas, explicitIds);
   }
 
   if (!isAffirmative(userMessage)) {
     await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      [
-        "请告诉我你想使用哪些评审员。可以直接回复评审员 ID 或名称。",
-        "",
-        ...personas.map((p) => `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.description}`),
-      ].join("\n")
-    );
+    return toolResponse(state, [
+      "请告诉我你想使用哪些评审员。可以直接回复评审员 ID 或名称。",
+      "",
+      ...personas.map(personaLineBrief),
+    ].join("\n"));
   }
 
   if (state.selectedPersonaIds.length === 0) {
     throw new Error("当前没有已选择的评审员。");
   }
 
-  const reviewResult = await handleReviewContent(skillsDir, {
-    content: state.content,
-    persona_ids: state.selectedPersonaIds,
-    context: state.context,
-    mode: "auto",
-    samplingFn: samplingFn
-      ? async (params) =>
-          samplingFn({
-            systemPrompt: params.systemPrompt,
-            messages: [{ role: "user", content: params.message }],
-            maxTokens: params.maxTokens,
-          })
-      : undefined,
-  });
-
-  if (reviewResult.isError) {
-    return {
-      content: [{ type: "text", text: reviewResult.content[0]?.text || "❌ 评测执行失败。" }],
-      isError: true,
-    };
-  }
-
-  state.step = "completed";
-  await saveState(tmpDir, state);
-  await cleanupState(tmpDir, state.sessionId);
-  return reviewResult;
+  return executeReview(skillsDir, tmpDir, state, samplingFn);
 }
 
 async function recommendPersonas(
@@ -394,6 +301,154 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
       "确认使用以上评审员，还是需要从完整列表中自选？",
     ].join("\n"),
   };
+}
+
+// ── State transition & formatting helpers ──
+
+async function transitionTo(
+  tmpDir: string,
+  state: ReviewWizardState,
+  step: ReviewWizardStep,
+  message: string
+): Promise<ToolResult> {
+  state.step = step;
+  await saveState(tmpDir, state);
+  return toolResponse(state, message);
+}
+
+function personaLineFull(p: Persona): string {
+  const tags = p.meta.tags.join("、") || "所有平台";
+  return `- ${p.meta.name} · ${tags} · ${p.meta.description}`;
+}
+
+function personaLineBrief(p: Persona): string {
+  return `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.description}`;
+}
+
+async function showAllPersonas(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  reason: string,
+  footer: string = "确认使用以上评审员，还是想指定平台重新筛选？"
+): Promise<ToolResult> {
+  state.selectedPersonaIds = personas.map((p) => p.meta.id);
+  state.remainingPersonaIds = [];
+  return transitionTo(tmpDir, state, "confirmSelection", [
+    reason,
+    "",
+    ...personas.map(personaLineFull),
+    "",
+    footer,
+  ].join("\n"));
+}
+
+async function autoSelectMatched(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  matched: Persona[],
+  unmatched: Persona[],
+  platforms: string[]
+): Promise<ToolResult> {
+  state.selectedPersonaIds = matched.map((p) => p.meta.id);
+  state.remainingPersonaIds = unmatched.map((p) => p.meta.id);
+  return transitionTo(tmpDir, state, "confirmSelection", [
+    `已为你筛选出匹配「${platforms.join("、")}」平台的评审员：`,
+    "",
+    ...matched.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
+    ...(unmatched.length > 0
+      ? ["", "其余评审员与目标平台不匹配，已自动剔除。如需使用全部，请说「使用全部」。"]
+      : []),
+    "",
+    "确认使用以上评审员吗？",
+  ].join("\n"));
+}
+
+async function recommendAndSelect(
+  tmpDir: string,
+  state: ReviewWizardState,
+  matched: Persona[],
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  const recommendation = await recommendPersonas(state, matched, samplingFn);
+  const recommendedIds = new Set(recommendation.personaIds);
+  state.selectedPersonaIds = matched
+    .filter((p) => recommendedIds.has(p.meta.id))
+    .map((p) => p.meta.id);
+  state.remainingPersonaIds = matched
+    .filter((p) => !recommendedIds.has(p.meta.id))
+    .map((p) => p.meta.id);
+  return transitionTo(tmpDir, state, "confirmSelection", recommendation.assistantMessage);
+}
+
+async function selectAllAndConfirm(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[]
+): Promise<ToolResult> {
+  state.selectedPersonaIds = personas.map((p) => p.meta.id);
+  state.remainingPersonaIds = [];
+  const cost = estimateTokenCost(personas.length, state.content.length);
+  return transitionTo(
+    tmpDir, state, "confirmSelection",
+    `已选择全部 ${personas.length} 位评审员。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n确认开始评测吗？`
+  );
+}
+
+async function selectExplicitAndConfirm(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  selectedIds: string[]
+): Promise<ToolResult> {
+  state.selectedPersonaIds = selectedIds;
+  state.remainingPersonaIds = personas
+    .filter((p) => !selectedIds.includes(p.meta.id))
+    .map((p) => p.meta.id);
+  const names = personas
+    .filter((p) => selectedIds.includes(p.meta.id))
+    .map((p) => p.meta.name)
+    .join("、");
+  const cost = estimateTokenCost(selectedIds.length, state.content.length);
+  return transitionTo(
+    tmpDir, state, "confirmSelection",
+    `已选择：${names}。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n确认开始评测吗？`
+  );
+}
+
+async function executeReview(
+  skillsDir: string,
+  tmpDir: string,
+  state: ReviewWizardState,
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  const reviewResult = await handleReviewContent(skillsDir, {
+    content: state.content,
+    persona_ids: state.selectedPersonaIds,
+    context: state.context,
+    mode: "auto",
+    samplingFn: samplingFn
+      ? async (params) =>
+          samplingFn({
+            systemPrompt: params.systemPrompt,
+            messages: [{ role: "user", content: params.message }],
+            maxTokens: params.maxTokens,
+          })
+      : undefined,
+  });
+
+  if (reviewResult.isError) {
+    return {
+      content: [{ type: "text", text: reviewResult.content[0]?.text || "❌ 评测执行失败。" }],
+      isError: true,
+    };
+  }
+
+  state.step = "completed";
+  await saveState(tmpDir, state);
+  await cleanupState(tmpDir, state.sessionId);
+  return reviewResult;
 }
 
 async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
