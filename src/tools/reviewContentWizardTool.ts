@@ -119,7 +119,7 @@ async function advanceWizard(
       return handleCollectPlatforms(tmpDir, state, personas, userMessage, samplingFn);
 
     case "confirmSelection":
-      return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage);
+      return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
 
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
@@ -244,7 +244,8 @@ async function handleSelectionConfirmation(
   tmpDir: string,
   state: ReviewWizardState,
   personas: Persona[],
-  userMessage: string
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
   if (/使用全部|全部|全选|所有/.test(userMessage)) {
     state.selectedPersonaIds = personas.map((p) => p.meta.id);
@@ -293,6 +294,14 @@ async function handleSelectionConfirmation(
     persona_ids: state.selectedPersonaIds,
     context: state.context,
     mode: "auto",
+    samplingFn: samplingFn
+      ? async (params) =>
+          samplingFn({
+            systemPrompt: params.systemPrompt,
+            messages: [{ role: "user", content: params.message }],
+            maxTokens: params.maxTokens,
+          })
+      : undefined,
   });
 
   if (reviewResult.isError) {
