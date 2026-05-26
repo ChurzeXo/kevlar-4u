@@ -21,16 +21,31 @@ export const listPersonasToolDefinition: Tool = {
   },
 };
 
-const KNOWN_PLATFORMS = Object.keys(PLATFORM_TO_EN);
+const KNOWN_PLATFORMS = new Set(Object.keys(PLATFORM_TO_EN));
 
 function getPersonaPlatform(persona: Persona): string {
-  for (const tag of persona.meta.tags) {
-    if (KNOWN_PLATFORMS.includes(tag)) return tag;
+  const { tags, id } = persona.meta;
+  for (const tag of tags) {
+    if (KNOWN_PLATFORMS.has(tag)) return tag;
   }
   for (const [name, key] of Object.entries(PLATFORM_TO_EN)) {
-    if (persona.meta.id.includes(key)) return name;
+    if (id.includes(key)) return name;
   }
   return "通用";
+}
+
+function formatPersonaLines(
+  name: string,
+  description: string,
+  tags: string[],
+  plat: string,
+): string[] {
+  return tags.length > 0
+    ? [
+        `- **${name}**（${plat}）— ${description}`,
+        `  标签：${tags.map((t) => `\`${t}\``).join(" · ")}`,
+      ]
+    : [`- **${name}**（${plat}）— ${description}`];
 }
 
 export const listPersonasModule: ToolModule = {
@@ -58,12 +73,11 @@ export async function handleListPersonas(
     };
   }
 
-  // Group personas by platform
+  // Compute platform once per persona, cache for all branches
   const byPlatform: Record<string, Persona[]> = {};
   for (const p of personas) {
     const plat = getPersonaPlatform(p);
-    if (!byPlatform[plat]) byPlatform[plat] = [];
-    byPlatform[plat].push(p);
+    (byPlatform[plat] ??= []).push(p);
   }
 
   // No platform specified → show overview
@@ -73,8 +87,8 @@ export async function handleListPersonas(
       "",
     ];
 
-    for (const [plat, list] of Object.entries(byPlatform).sort()) {
-      lines.push(`- **${plat}**（${list.length} 位）`);
+    for (const plat of Object.keys(byPlatform).sort()) {
+      lines.push(`- **${plat}**（${byPlatform[plat].length} 位）`);
     }
 
     lines.push(
@@ -83,35 +97,29 @@ export async function handleListPersonas(
       "例如：列出小红书的评审员 / 查看知乎的评审员",
     );
 
-    return {
-      content: [{ type: "text", text: lines.join("\n") }],
-    };
+    return { content: [{ type: "text", text: lines.join("\n") }] };
   }
 
-  // "全部" → show all
+  // "全部" → show all, grouped by platform
   if (platform === "全部") {
     const lines: string[] = [
       `🎭 **所有评审员**（共 ${personas.length} 位）\n`,
     ];
 
-    for (const p of personas) {
-      const plat = getPersonaPlatform(p);
-      lines.push(`- **${p.meta.name}**（${plat}）— ${p.meta.description}`);
-      if (p.meta.tags.length > 0) {
-        lines.push(`  标签：${p.meta.tags.map((t) => `\`${t}\``).join(" · ")}`);
+    for (const [plat, list] of Object.entries(byPlatform).sort()) {
+      for (const p of list) {
+        lines.push(...formatPersonaLines(
+          p.meta.name, p.meta.description, p.meta.tags, plat,
+        ), "");
       }
-      lines.push("");
     }
 
-    return {
-      content: [{ type: "text", text: lines.join("\n") }],
-    };
+    return { content: [{ type: "text", text: lines.join("\n") }] };
   }
 
   // Specific platform → filter
   const matched = byPlatform[platform];
-  if (!matched || matched.length === 0) {
-    const available = Object.keys(byPlatform).sort();
+  if (!matched) {
     return {
       content: [
         {
@@ -119,7 +127,7 @@ export async function handleListPersonas(
           text: [
             `❌ 平台「${platform}」没有评审员。`,
             "",
-            `现有平台：${available.join("、")}。`,
+            `现有平台：${Object.keys(byPlatform).sort().join("、")}。`,
           ].join("\n"),
         },
       ],
@@ -131,14 +139,10 @@ export async function handleListPersonas(
   ];
 
   for (const p of matched) {
-    lines.push(`- **${p.meta.name}** — ${p.meta.description}`);
-    if (p.meta.tags.length > 0) {
-      lines.push(`  标签：${p.meta.tags.map((t) => `\`${t}\``).join(" · ")}`);
-    }
-    lines.push("");
+    lines.push(...formatPersonaLines(
+      p.meta.name, p.meta.description, p.meta.tags, platform,
+    ), "");
   }
 
-  return {
-    content: [{ type: "text", text: lines.join("\n") }],
-  };
+  return { content: [{ type: "text", text: lines.join("\n") }] };
 }
