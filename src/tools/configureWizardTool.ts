@@ -45,6 +45,20 @@ interface ConfigureWizardState {
 
 const CONFIRM_PHRASE = "确认修改配置";
 
+/** 模式匹配规则（数组顺序 = 优先级，先匹配先生效） */
+const MODE_RULES: ReadonlyArray<{
+	pattern: RegExp;
+	mode: NonNullable<ConfigureInput["mode"]>;
+}> = [
+	{ pattern: /direct[\s_-]*api|直接\s*api|直连/i, mode: "direct_api" },
+	{ pattern: /mcp[\s_-]*sampling|sampling|采样/i, mode: "mcp_sampling" },
+	{ pattern: /orchestration|编排|兜底|宿主辅助/i, mode: "orchestration" },
+	{ pattern: /auto|自动/i, mode: "auto" },
+];
+
+/** 并发数匹配正则（预编译，避免每次调用重新创建） */
+const CONCURRENCY_RE = /(?:并发|concurrency|maxconcurrency)\D*(10|[1-9])/i;
+
 export const configureWizardModule: ToolModule = {
 	definition: configureWizardToolDefinition,
 	handler: (deps) => async (args) => {
@@ -109,25 +123,19 @@ export async function handleConfigureWizard(
 }
 
 function parseConfigRequest(message: string): ConfigureInput {
-	const normalized = message.toLowerCase();
 	const pending: ConfigureInput = {};
 
-	if (/direct[\s_-]*api|直接\s*api|直连/.test(normalized)) {
-		pending.mode = "direct_api";
-	} else if (/mcp[\s_-]*sampling|sampling|采样/.test(normalized)) {
-		pending.mode = "mcp_sampling";
-	} else if (/orchestration|编排|兜底|宿主辅助/.test(normalized)) {
-		pending.mode = "orchestration";
-	} else if (/auto|自动/.test(normalized)) {
-		pending.mode = "auto";
+	// 模式解析：第一条匹配的规则生效（等价原 else if 优先级语义）
+	for (const { pattern, mode } of MODE_RULES) {
+		if (pattern.test(message)) {
+			pending.mode = mode;
+			break;
+		}
 	}
 
-	const concurrencyMatch = normalized.match(
-		/(?:并发|concurrency|maxconcurrency)\D*(10|[1-9])/,
-	);
-	if (concurrencyMatch) {
-		pending.maxConcurrency = Number(concurrencyMatch[1]);
-	}
+	// 并发数解析
+	const m = message.match(CONCURRENCY_RE);
+	if (m) pending.maxConcurrency = Number(m[1]);
 
 	if (!pending.mode && pending.maxConcurrency === undefined) {
 		throw new Error("没有识别到要修改的配置。请说明执行模式或并发数。");
