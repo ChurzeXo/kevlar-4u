@@ -247,6 +247,318 @@ export async function handleCreatePersonaWizard(
   }
 }
 
+// ── Step handler types ───────────────────────────────────────────────
+
+interface StepHandlerParams {
+  skillsDir: string;
+  tmpDir: string;
+  state: WizardState;
+  userMessage: string;
+  samplingFn?: MultiTurnSamplingFunction;
+}
+
+type StepHandler = (params: StepHandlerParams) => Promise<ToolResult>;
+
+// ── Shared transition helper ─────────────────────────────────────────
+
+async function transitionStep(
+  tmpDir: string,
+  state: WizardState,
+  nextStep: WizardStep,
+  message: string,
+): Promise<ToolResult> {
+  state.step = nextStep;
+  await persistState(tmpDir, state);
+  return toolResponse(state, message);
+}
+
+// ── Step handlers ────────────────────────────────────────────────────
+
+async function handleAgeRangeStep({
+  tmpDir,
+  state,
+  userMessage,
+}: StepHandlerParams): Promise<ToolResult> {
+  const resolved = resolveAgeRange(userMessage);
+  if (!resolved) {
+    return toolResponse(
+      state,
+      `请从以下选项中选择（回复编号或文字）：\n\n${AGE_RANGE_CHOICES}`
+    );
+  }
+  state.fields.ageRange = resolved;
+  return transitionStep(
+    tmpDir,
+    state,
+    "interests",
+    [
+      `已记录年龄段：${state.fields.ageRange}`,
+      "",
+      `第二步：${STEP_QUESTION.interests}`,
+      "（如需修改之前的选择，可说「重新设置年龄段」）",
+    ].join("\n")
+  );
+}
+
+async function handleInterestsStep({
+  state,
+  tmpDir,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  return transitionTextStep(state, tmpDir, userMessage, samplingFn, "interests", "traits");
+}
+
+async function handleTraitsStep({
+  state,
+  tmpDir,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  return transitionTextStep(state, tmpDir, userMessage, samplingFn, "traits", "tone");
+}
+
+async function handleToneStep({
+  state,
+  tmpDir,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  return transitionTextStep(state, tmpDir, userMessage, samplingFn, "tone", "platform");
+}
+
+async function handlePlatformStep({
+  tmpDir,
+  state,
+  userMessage,
+}: StepHandlerParams): Promise<ToolResult> {
+  if (state.fields.pendingPlatforms && state.fields.pendingPlatforms.length > 0) {
+    return handlePlatformSelection(tmpDir, state, userMessage);
+  }
+  return handlePlatformInput(tmpDir, state, userMessage);
+}
+
+async function handlePlatformSelection(
+  tmpDir: string,
+  state: WizardState,
+  userMessage: string,
+): Promise<ToolResult> {
+  const pending = state.fields.pendingPlatforms!;
+  const choice = userMessage.trim();
+  const idx = parseInt(choice, 10) - 1;
+
+  if (idx >= 0 && idx < pending.length) {
+    state.fields.platform = pending[idx];
+    state.fields.platformNote = `你输入了多个平台，已选择「${state.fields.platform}」。其他平台可另行创建评审员。`;
+    delete state.fields.pendingPlatforms;
+  } else {
+    const matched = pending.find(p => p.toLowerCase() === choice.toLowerCase());
+    if (matched) {
+      state.fields.platform = matched;
+      state.fields.platformNote = `你输入了多个平台，已选择「${matched}」。其他平台可另行创建评审员。`;
+      delete state.fields.pendingPlatforms;
+    } else {
+      const opts = pending.map((p, i) => `${i + 1}. ${p}`).join("\n");
+      return toolResponse(state, [`无效选择，请从以下平台中选一个：`, "", opts, "", "回复编号或平台名称即可。"].join("\n"));
+    }
+  }
+
+  return transitionStep(
+    tmpDir,
+    state,
+    "authorRelation",
+    [
+      `已记录平台：${state.fields.platform}`,
+      "",
+      AUTHOR_RELATION_PROMPT,
+      "",
+      "（如需修改之前的选择，可说「重新设置平台」或「回到第四步」）",
+    ].join("\n")
+  );
+}
+
+async function handlePlatformInput(
+  tmpDir: string,
+  state: WizardState,
+  userMessage: string,
+): Promise<ToolResult> {
+  const raw = userMessage.trim();
+  const platforms = raw.split(/[和、/,，]+/).map(s => s.trim()).filter(Boolean);
+
+  if (platforms.length > 1) {
+    state.fields.pendingPlatforms = platforms;
+    state.step = "platform";
+    await persistState(tmpDir, state);
+    const opts = platforms.map((p, i) => `${i + 1}. ${p}`).join("\n");
+    return toolResponse(
+      state,
+      [
+        "一个评审员只针对一个平台，这样评论风格才更地道。",
+        `你刚才提到了 ${platforms.length} 个平台，请从中选择一个：`,
+        "",
+        opts,
+        "",
+        "回复编号或平台名称即可。其他平台之后可以再创建对应的评审员。",
+      ].join("\n")
+    );
+  }
+
+  state.fields.platform = raw;
+  return transitionStep(
+    tmpDir,
+    state,
+    "authorRelation",
+    [
+      `已记录平台：${state.fields.platform}`,
+      "",
+      AUTHOR_RELATION_PROMPT,
+      "",
+      "（如需修改之前的选择，可说「重新设置平台」或「回到第四步」）",
+    ].join("\n")
+  );
+}
+
+async function handleAuthorRelationStep({
+  tmpDir,
+  state,
+  userMessage,
+}: StepHandlerParams): Promise<ToolResult> {
+  const resolved = resolveAuthorRelation(userMessage);
+  if (!resolved) {
+    return toolResponse(
+      state,
+      ["请从以下选项中选择（回复编号或文字）：", "", "1. 已关注", "2. 未关注"].join("\n")
+    );
+  }
+  state.fields.authorRelation = resolved;
+  return transitionStep(
+    tmpDir,
+    state,
+    "stance",
+    [
+      "第七步：请选择这个评审员的立场视角（可多选，回复编号，多个用逗号分隔）：",
+      "",
+      ...STANCE_OPTIONS.map((opt, i) => `${i + 1}. ${opt}`),
+      "",
+      "（如需修改之前的选择，可说「重新设置关系」或「回到第六步」）",
+    ].join("\n")
+  );
+}
+
+async function handleStanceStep({
+  skillsDir,
+  tmpDir,
+  state,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  if (state.fields.pendingStanceCustom) {
+    return handleStanceCustomInput(skillsDir, tmpDir, state, userMessage, samplingFn);
+  }
+
+  const parsedStance = resolveStanceSelection(userMessage);
+  if (!parsedStance || parsedStance.length === 0) {
+    return toolResponse(
+      state,
+      [
+        "请从以下选项中选择（回复编号，多个用逗号分隔）：",
+        "",
+        ...STANCE_OPTIONS.map((opt, i) => `${i + 1}. ${opt}`),
+      ].join("\n")
+    );
+  }
+
+  const hasCustom = parsedStance.includes("自定义");
+  const selectedStances = parsedStance.filter(s => s !== "自定义");
+
+  if (hasCustom) {
+    state.fields.stance = selectedStances;
+    state.fields.pendingStanceCustom = true;
+    state.step = "stance";
+    await persistState(tmpDir, state);
+    return toolResponse(state, "请描述你评审员的立场视角：");
+  }
+
+  state.fields.stance = selectedStances;
+  const inferred = await inferFinalFields(state, skillsDir, samplingFn);
+  state.fields = { ...state.fields, ...inferred };
+  return transitionStep(
+    tmpDir,
+    state,
+    "finalConfirm",
+    buildFinalConfirmationMessage(state, skillsDir)
+  );
+}
+
+async function handleStanceCustomInput(
+  skillsDir: string,
+  tmpDir: string,
+  state: WizardState,
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  const customStance = userMessage.trim();
+  if (!customStance) {
+    return toolResponse(state, "请描述该角色的立场与表达倾向：");
+  }
+  const existing = state.fields.stance || [];
+  state.fields.stance = [...existing, customStance];
+  delete state.fields.pendingStanceCustom;
+
+  const inferred = await inferFinalFields(state, skillsDir, samplingFn);
+  state.fields = { ...state.fields, ...inferred };
+  return transitionStep(
+    tmpDir,
+    state,
+    "finalConfirm",
+    buildFinalConfirmationMessage(state, skillsDir)
+  );
+}
+
+async function handleFinalConfirmStep({
+  skillsDir,
+  tmpDir,
+  state,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  if (isAffirmative(userMessage)) {
+    return completeWizard(skillsDir, tmpDir, state, samplingFn);
+  }
+
+  const modified = await applyFinalModification(state, userMessage, samplingFn);
+  if (!modified) {
+    return toolResponse(
+      state,
+      "请说明要修改哪个字段：名字、性别、年龄段、兴趣方向、性格特质或常用平台。"
+    );
+  }
+  await persistState(tmpDir, state);
+  return toolResponse(
+    state,
+    [`已更新${fieldLabel(modified)}。`, "", buildFinalConfirmationMessage(state, skillsDir)].join("\n")
+  );
+}
+
+async function handleCompletedStep({
+  state,
+}: StepHandlerParams): Promise<ToolResult> {
+  return toolResponse(state, "这个人设创建流程已经完成。需要创建新角色时，请重新开始一个会话。");
+}
+
+// ── Step handler registry ────────────────────────────────────────────
+const STEP_HANDLERS: Record<string, StepHandler> = {
+  ageRange: handleAgeRangeStep,
+  interests: handleInterestsStep,
+  traits: handleTraitsStep,
+  tone: handleToneStep,
+  platform: handlePlatformStep,
+  authorRelation: handleAuthorRelationStep,
+  stance: handleStanceStep,
+  finalConfirm: handleFinalConfirmStep,
+  completed: handleCompletedStep,
+};
+
 async function advanceWizard(
   skillsDir: string,
   tmpDir: string,
@@ -255,10 +567,6 @@ async function advanceWizard(
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
   // ── Go-back interception ────────────────────────────────────────────────
-  // If the user expresses intent to go back to a previous step (e.g.
-  // "重新设置平台", "回到第一步"), handle it before the normal step switch.
-  // Not allowed from "completed" step; "finalConfirm" already supports
-  // field modification so go-back is unnecessary there.
   if (state.step !== "completed" && state.step !== "finalConfirm") {
     const goBackTarget = detectGoBackTarget(userMessage, state.step);
     if (goBackTarget) {
@@ -269,218 +577,10 @@ async function advanceWizard(
     }
   }
 
-  switch (state.step) {
-    case "ageRange": {
-      const resolved = resolveAgeRange(userMessage);
-      if (!resolved) {
-        return toolResponse(
-          state,
-          `请从以下选项中选择（回复编号或文字）：\n\n${AGE_RANGE_CHOICES}`
-        );
-      }
-      state.fields.ageRange = resolved;
-      state.step = "interests";
-      await persistState(tmpDir, state);
-      return toolResponse(
-        state,
-        [
-          `已记录年龄段：${state.fields.ageRange}`,
-          "",
-          `第二步：${STEP_QUESTION.interests}`,
-          "（如需修改之前的选择，可说「重新设置年龄段」）",
-        ].join("\n")
-      );
-    }
-
-    case "interests":
-      return transitionTextStep(state, tmpDir, userMessage, samplingFn, "interests", "traits");
-
-    case "traits":
-      return transitionTextStep(state, tmpDir, userMessage, samplingFn, "traits", "tone");
-
-    case "tone":
-      return transitionTextStep(state, tmpDir, userMessage, samplingFn, "tone", "platform");
-
-    case "platform": {
-      // If user has pending platform choices (from multi-platform input), handle selection
-      if (state.fields.pendingPlatforms && state.fields.pendingPlatforms.length > 0) {
-        const choice = userMessage.trim();
-        const idx = parseInt(choice, 10) - 1;
-        if (idx >= 0 && idx < state.fields.pendingPlatforms.length) {
-          state.fields.platform = state.fields.pendingPlatforms[idx];
-          state.fields.platformNote = `你输入了多个平台，已选择「${state.fields.platform}」。其他平台可另行创建评审员。`;
-          delete state.fields.pendingPlatforms;
-        } else {
-          // Try matching by text
-          const matched = state.fields.pendingPlatforms.find(p => p.toLowerCase() === choice.toLowerCase());
-          if (matched) {
-            state.fields.platform = matched;
-            state.fields.platformNote = `你输入了多个平台，已选择「${matched}」。其他平台可另行创建评审员。`;
-            delete state.fields.pendingPlatforms;
-          } else {
-            // Invalid selection, re-prompt
-            const opts = state.fields.pendingPlatforms.map((p, i) => `${i + 1}. ${p}`).join("\n");
-            return toolResponse(state, [`无效选择，请从以下平台中选一个：`, "", opts, "", "回复编号或平台名称即可。"].join("\n"));
-          }
-        }
-        state.step = "authorRelation";
-        await persistState(tmpDir, state);
-        return toolResponse(
-          state,
-          [
-            `已记录平台：${state.fields.platform}`,
-            "",
-            AUTHOR_RELATION_PROMPT,
-            "",
-            "（如需修改之前的选择，可说「重新设置平台」或「回到第四步」）",
-          ].join("\n")
-        );
-      }
-
-      const raw = userMessage.trim();
-      const platforms = raw.split(/[和、/,，]+/).map(s => s.trim()).filter(Boolean);
-
-      if (platforms.length > 1) {
-        // Multi-platform: store as pending and ask user to choose one
-        state.fields.pendingPlatforms = platforms;
-        state.step = "platform"; // stay on platform step
-        await persistState(tmpDir, state);
-        const opts = platforms.map((p, i) => `${i + 1}. ${p}`).join("\n");
-        return toolResponse(
-          state,
-          [
-            "一个评审员只针对一个平台，这样评论风格才更地道。",
-            `你刚才提到了 ${platforms.length} 个平台，请从中选择一个：`,
-            "",
-            opts,
-            "",
-            "回复编号或平台名称即可。其他平台之后可以再创建对应的评审员。",
-          ].join("\n")
-        );
-      }
-
-      state.fields.platform = raw;
-      state.step = "authorRelation";
-      await persistState(tmpDir, state);
-      return toolResponse(
-        state,
-        [
-          `已记录平台：${state.fields.platform}`,
-          "",
-          AUTHOR_RELATION_PROMPT,
-          "",
-          "（如需修改之前的选择，可说「重新设置平台」或「回到第四步」）",
-        ].join("\n")
-      );
-    }
-
-    case "authorRelation": {
-      const resolved = resolveAuthorRelation(userMessage);
-      if (!resolved) {
-        return toolResponse(
-          state,
-          [
-            "请从以下选项中选择（回复编号或文字）：",
-            "",
-            "1. 已关注",
-            "2. 未关注",
-          ].join("\n")
-        );
-      }
-      state.fields.authorRelation = resolved;
-
-      state.step = "stance";
-      await persistState(tmpDir, state);
-      return toolResponse(
-        state,
-        [
-          "第七步：请选择这个评审员的立场视角（可多选，回复编号，多个用逗号分隔）：",
-          "",
-          ...STANCE_OPTIONS.map((opt, i) => `${i + 1}. ${opt}`),
-          "",
-          "（如需修改之前的选择，可说「重新设置关系」或「回到第六步」）",
-        ].join("\n")
-      );
-    }
-
-    case "stance": {
-      // If user selected "自定义" (option 10) and we're waiting for their description
-      if (state.fields.pendingStanceCustom) {
-        const customStance = userMessage.trim();
-        if (!customStance) {
-          return toolResponse(state, "请描述该角色的立场与表达倾向：");
-        }
-        const existing = state.fields.stance || [];
-        state.fields.stance = [...existing, customStance];
-        delete state.fields.pendingStanceCustom;
-
-        // Proceed to infer and preview
-        const inferred = await inferFinalFields(state, skillsDir, samplingFn);
-        state.fields = { ...state.fields, ...inferred };
-        state.step = "finalConfirm";
-        await persistState(tmpDir, state);
-        return toolResponse(state, buildFinalConfirmationMessage(state, skillsDir));
-      }
-
-      const parsedStance = resolveStanceSelection(userMessage);
-      if (!parsedStance || parsedStance.length === 0) {
-        return toolResponse(
-          state,
-          [
-            "请从以下选项中选择（回复编号，多个用逗号分隔）：",
-            "",
-            ...STANCE_OPTIONS.map((opt, i) => `${i + 1}. ${opt}`),
-          ].join("\n")
-        );
-      }
-
-      // Check if "自定义" is among the selections
-      const hasCustom = parsedStance.includes("自定义");
-      const selectedStances = parsedStance.filter(s => s !== "自定义");
-
-      if (hasCustom) {
-        // Store selected preset stances first, then ask for custom description
-        state.fields.stance = selectedStances;
-        state.fields.pendingStanceCustom = true;
-        state.step = "stance"; // stay on stance step
-        await persistState(tmpDir, state);
-        return toolResponse(
-          state,
-          "请描述你评审员的立场视角："
-        );
-      }
-
-      state.fields.stance = selectedStances;
-
-      // Infer name, gender, culturalContext, blindSpot before showing preview
-      const inferred = await inferFinalFields(state, skillsDir, samplingFn);
-      state.fields = { ...state.fields, ...inferred };
-
-      state.step = "finalConfirm";
-      await persistState(tmpDir, state);
-      return toolResponse(state, buildFinalConfirmationMessage(state, skillsDir));
-    }
-
-    case "finalConfirm":
-      if (isAffirmative(userMessage)) {
-        return completeWizard(skillsDir, tmpDir, state, samplingFn);
-      }
-
-      {
-        const modified = await applyFinalModification(state, userMessage, samplingFn);
-        if (!modified) {
-          return toolResponse(state, "请说明要修改哪个字段：名字、性别、年龄段、兴趣方向、性格特质或常用平台。");
-        }
-        await persistState(tmpDir, state);
-        return toolResponse(
-          state,
-          [`已更新${fieldLabel(modified)}。`, "", buildFinalConfirmationMessage(state, skillsDir)].join("\n")
-        );
-      }
-
-    case "completed":
-      return toolResponse(state, "这个人设创建流程已经完成。需要创建新角色时，请重新开始一个会话。");
-  }
+  // ── Dispatch to step handler ────────────────────────────────────────────
+  const handler = STEP_HANDLERS[state.step];
+  if (!handler) throw new Error(`Unknown step: ${state.step}`);
+  return handler({ skillsDir, tmpDir, state, userMessage, samplingFn });
 }
 
 /**
