@@ -7,14 +7,14 @@ import type { ToolModule } from "./types.js";
 export const listPersonasToolDefinition: Tool = {
   name: "list_personas",
   description:
-    "当用户说「有哪些评审员」「列出角色」「显示评审员」时，调用此工具（评论区模拟器中的列出功能）。查询可用评审员。不传 platform 参数时返回各平台评审员数量概览，AI 应据此询问用户想查看哪个平台的评审员。传入 platform 参数则返回该平台下的评审员列表。platform 值为中文平台名（如「小红书」「知乎」「通用」），或「全部」表示列出所有平台。独立查询，不触发评测流程。",
+    "当用户想查看已有评审员列表时调用（如「有哪些评审员」「列出角色」）。\n\n行为：\n- 不传 platform → 返回各平台评审员数量概览 → 你应据此询问用户想看哪个平台\n- 传入中文平台名（如「小红书」「知乎」）→ 列出该平台下的评审员\n- 传入「全部」 → 列出所有平台的全部评审员\n\n纯查询工具，不触发评审流程。",
   inputSchema: {
     type: "object" as const,
     properties: {
       platform: {
         type: "string",
         description:
-          "目标平台名称（中文，如「小红书」「知乎」「通用」）。不传时返回平台概览；传入「全部」列出所有评审员。",
+          "中文平台名（如「小红书」「知乎」）。不传 → 各平台数量概览；传平台名 → 该平台列表；传「全部」 → 全部列出。",
       },
     },
     required: [],

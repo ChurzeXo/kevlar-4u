@@ -55,7 +55,7 @@ const STEP_QUESTION: Partial<Record<WizardStep, string>> = {
   platform: "这个评审员活跃在哪个平台？\n一个评审员只负责一个平台，这样可以给出更地道的评论。",
 };
 
-const AUTHOR_RELATION_PROMPT = `请选择这个角色与作者的关系（回复编号或文字）：
+const AUTHOR_RELATION_PROMPT = `请选择这个角色与作者的关系（回复编号）：
 
 1. 已关注（信任阈值较高，但期望值也更高）
 2. 未关注（信任阈值较低，更容易因细节问题流失注意力）`;
@@ -84,7 +84,7 @@ export const createPersonaWizardToolDefinition: Tool = {
       userMessage: {
         type: "string",
         description:
-          "用户在当前步骤的回复内容。首次调用时直接传入用户原话（例如「帮我创建一个时尚类评审员」），工具开始分步引导。后续步骤传入用户对工具提问的回复。",
+          "用户回复内容。首次调用时传入用户原话（例如「帮我创建一个时尚类评审员」），后续调用传入用户对上一步提问的答复。",
       },
     },
     required: ["userMessage"],
@@ -234,7 +234,7 @@ export async function handleCreatePersonaWizard(
       return toolResponse(
         state,
         [
-          "请选择这个角色的年龄段（回复编号或文字）：",
+          "请选择这个角色的年龄段（回复编号）：",
           "",
           "1. 18岁以下",
           "2. 18-24岁",
@@ -293,7 +293,7 @@ async function handleAgeRangeStep({
   if (!resolved) {
     return toolResponse(
       state,
-      `请从以下选项中选择（回复编号或文字）：\n\n${AGE_RANGE_CHOICES}`
+      `请从以下选项中选择（回复编号）：\n\n${AGE_RANGE_CHOICES}`
     );
   }
   state.fields.ageRange = resolved;
@@ -434,7 +434,7 @@ async function handleAuthorRelationStep({
   if (!resolved) {
     return toolResponse(
       state,
-      ["请从以下选项中选择（回复编号或文字）：", "", "1. 已关注", "2. 未关注"].join("\n")
+      ["请从以下选项中选择（回复编号）：", "", "1. 已关注", "2. 未关注"].join("\n")
     );
   }
   state.fields.authorRelation = resolved;
@@ -1839,7 +1839,7 @@ function clearFieldsFromStep(state: WizardState, targetStep: WizardStep): void {
 function buildStepPrompt(state: WizardState): string {
   switch (state.step) {
     case "ageRange":
-      return `已回退到第一步。请选择这个角色的年龄段（回复编号或文字）：\n\n${AGE_RANGE_CHOICES}`;
+      return `已回退到第一步。请选择这个角色的年龄段（回复编号）：\n\n${AGE_RANGE_CHOICES}`;
 
     case "interests":
       return `已回退到第二步。${STEP_QUESTION.interests}`;

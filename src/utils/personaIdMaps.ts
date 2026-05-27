@@ -28,7 +28,6 @@ export const PLATFORM_TO_EN: Record<string, string> = {
   "X": "x",
   "微信": "wechat",
   "微信公众号": "wechat_official",
-  "通用": "general",
   "Instagram": "instagram",
   "Reddit": "reddit",
   "YouTube": "youtube",

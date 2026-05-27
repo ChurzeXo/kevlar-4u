@@ -43,6 +43,7 @@ type ReviewWizardStep =
   | "waitingForPersonaCreation"
   | "collectPlatforms"
   | "confirmSelection"
+  | "postReview"
   | "completed";
 
 interface ReviewWizardState {
@@ -119,6 +120,9 @@ async function advanceWizard(
     case "confirmSelection":
       return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
 
+    case "postReview":
+      return handlePostReview(tmpDir, state, personas, userMessage);
+
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
   }
@@ -151,7 +155,7 @@ async function handleInventoryCheck(
     [
       "这份内容准备投放在哪些平台？",
       "",
-      "例如：小红书、抖音、B站、微博、通用……",
+      "例如：小红书、抖音、B站、微博……",
       "可同时指定多个，用空格或逗号分隔。",
     ].join("\n")
   );
@@ -177,7 +181,7 @@ async function handleCollectPlatforms(
   if (matched.length === 0) {
     return showAllPersonas(
       tmpDir, state, personas,
-      `目前还没有匹配「${platforms.join("、")}」的评审员，建议先创建针对这些平台的评审员。\n当前已为你展示全部评审员，可确认使用或稍后创建。`,
+      `「${platforms.join("、")}」平台暂无评审员，建议先创建。\n以下为全部已有评审员：\n- 回复编号 → 查看详情\n- 回复编号+文案 → 直接评审`,
       "确认使用以上评审员吗？"
     );
   }
@@ -209,9 +213,9 @@ async function handleSelectionConfirmation(
   if (!isAffirmative(userMessage)) {
     await saveState(tmpDir, state);
     return toolResponse(state, [
-      "请告诉我你想使用哪些评审员。可以直接回复评审员 ID 或名称。",
+      "请回复对应编号选择评审员：",
       "",
-      ...personas.map(personaLineBrief),
+      ...personas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
     ].join("\n"));
   }
 
@@ -240,7 +244,7 @@ async function recommendPersonas(
           ? `\n目标投放平台：${state.targetPlatforms.join("、")}`
           : "";
       const response = await samplingFn({
-        systemPrompt: `你是 Kevlar-4u 评审员推荐器。根据待评测内容和角色列表推荐 1-3 个最合适的 persona id${platformContext}，并严格输出 JSON：{"personaIds":["id"],"assistantMessage":"展示推荐名单和理由，并询问用户是否确认"}。不要输出 markdown。`,
+        systemPrompt: `你是评审员推荐助手。根据待评测内容推荐 1-3 个评审员，输出 JSON：{"personaIds":["id"],"assistantMessage":"推荐理由+询问确认"}。不要输出 markdown。`,
         messages: [
           {
             role: "user",
@@ -445,10 +449,32 @@ async function executeReview(
     };
   }
 
-  state.step = "completed";
+  state.step = "postReview";
   await saveState(tmpDir, state);
+  const resultText = reviewResult.content[0]?.text || "";
+  return toolResponse(state, resultText + "\n\n---\n\n评测完成。是否需要更换评审员再次评审？");
+}
+
+async function handlePostReview(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string
+): Promise<ToolResult> {
+  if (isAffirmative(userMessage)) {
+    state.selectedPersonaIds = [];
+    state.remainingPersonaIds = [];
+    return transitionTo(tmpDir, state, "confirmSelection", [
+      "请选择要使用的评审员：",
+      "",
+      ...personas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+    ].join("\n"));
+  }
+
   await cleanupState(tmpDir, state.sessionId);
-  return reviewResult;
+  return {
+    content: [{ type: "text", text: "评测流程已结束。需要评测新内容时，请重新调用 review_content_wizard。" }],
+  };
 }
 
 async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
@@ -461,7 +487,21 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
 
   if (input.sessionId && fs.existsSync(statePath)) {
     const raw = await fs.promises.readFile(statePath, "utf-8");
-    return JSON.parse(raw) as ReviewWizardState;
+    const state = JSON.parse(raw) as ReviewWizardState;
+    // 会话超过 10 分钟未活动，清理旧文件并用原始文案重建新会话
+    if (Date.now() - state.createdAt > 10 * 60 * 1000) {
+      await cleanupState(tmpDir, sessionId);
+      return {
+        sessionId,
+        createdAt: Date.now(),
+        step: "checkPersonaInventory",
+        content: state.content,
+        targetPlatforms: [],
+        selectedPersonaIds: [],
+        remainingPersonaIds: [],
+      };
+    }
+    return state;
   }
 
   return {
