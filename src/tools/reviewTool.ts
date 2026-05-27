@@ -2,6 +2,8 @@ import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 import { executeReview, loadPersonasForReview, MAX_PERSONAS } from "../execution/index.js";
 import type { ExecutionContext, ResolveableMode, SamplingFunction } from "../execution/base.js";
+import type { DimensionsConfig } from "../execution/dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG } from "../execution/dimensions.js";
 import { getErrorInfo } from "../utils/observability.js";
 
 const MAX_CONTENT_LENGTH = 100_000;
@@ -151,6 +153,7 @@ export async function handleReviewContent(
     context?: string;
     mode?: ResolveableMode;
     samplingFn?: SamplingFunction;
+    dimensions?: DimensionsConfig;
   }
 ): Promise<ToolResult> {
   const validationError = validateInput(input);
@@ -171,6 +174,7 @@ export async function handleReviewContent(
       content: input.content,
       context: input.context,
       samplingFn: input.samplingFn,
+      dimensions: input.dimensions ?? DEFAULT_DIMENSIONS_CONFIG,
     };
 
     const result = await executeReview(mode, ctx);

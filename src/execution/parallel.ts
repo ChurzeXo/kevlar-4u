@@ -6,7 +6,9 @@
  */
 
 import type { Persona } from "../utils/parser.js";
-import type { ExecutionMode, ExecutionResult } from "./base.js";
+import type { ExecutionMode, ExecutionResult, ExecutionContext } from "./base.js";
+import type { DimensionsConfig } from "./dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective } from "./dimensions.js";
 import { readConfig } from "./config.js";
 import { getRateLimiter, withRetry } from "./limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "./aggregator.js";
@@ -17,6 +19,7 @@ import { wrapContent } from "../utils/sanitize.js";
 interface ParallelExecutionOptions {
   mode: ExecutionMode;
   retryEventName: string;
+  dimensions?: DimensionsConfig;
 }
 
 export async function executePersonasInParallel(
@@ -89,6 +92,7 @@ export async function executePersonasInParallel(
     mode: options.mode,
     contentSummary: summarizeContent(content),
     personas: results,
+    dimensions: options.dimensions ?? DEFAULT_DIMENSIONS_CONFIG,
   });
 
   return {
@@ -100,6 +104,53 @@ export async function executePersonasInParallel(
       error: f.error || "Unknown error",
     })),
   };
+}
+
+/**
+ * Build the complete augmented system prompt for a reviewer.
+ * Order: persona identity → persona context → dimensions (defensive + offensive) → tone constraint
+ */
+export function augmentSystemPrompt(
+  persona: Persona,
+  dimensions?: DimensionsConfig,
+): string {
+  const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
+  const parts: string[] = [];
+
+  // ① Persona identity (original system prompt)
+  parts.push(persona.systemPrompt);
+
+  // ② Persona context (structured metadata: age, gender, interests, etc.)
+  const contextDirective = buildPersonaContextDirective(persona.meta);
+  if (contextDirective.trim().length > "## 👤 评审员画像\n\n以下是你作为评审员的身份属性，请严格以此身份进行评审：\n".length) {
+    parts.push(contextDirective);
+  }
+
+  // ③ Dimensions (defensive + offensive)
+  parts.push(buildDefensiveSystemDirective());
+  const offensiveDirective = buildOffensiveSystemDirective(dimsConfig);
+  if (offensiveDirective) {
+    parts.push(offensiveDirective);
+  }
+
+  // ④ Tone constraint (last — constrains output style)
+  if (persona.meta.tone) {
+    const toneList = Array.isArray(persona.meta.tone) ? persona.meta.tone.join("、") : persona.meta.tone;
+    if (toneList) {
+      parts.push(`## 🎙️ 讲话语气\n\n请以「${toneList}」的语气进行评审输出。`);
+    }
+  }
+
+  return parts.join("\n\n---\n\n");
+}
+
+/**
+ * @deprecated Use augmentSystemPrompt() instead. This function only injects
+ * the defensive directive and ignores persona context + offensive dimensions + tone.
+ */
+export function augmentSystemPromptWithDefensive(systemPrompt: string): string {
+	const defensiveDirective = buildDefensiveSystemDirective();
+	return `${systemPrompt}\n\n---\n\n${defensiveDirective}`;
 }
 
 export function buildUserMessage(content: string, contextNote?: string): string {

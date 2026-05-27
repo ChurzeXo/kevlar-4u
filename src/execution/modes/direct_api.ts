@@ -7,7 +7,8 @@
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
-import { executePersonasInParallel, buildUserMessage } from "../parallel.js";
+import { DEFAULT_DIMENSIONS_CONFIG } from "../dimensions.js";
+import { executePersonasInParallel, buildUserMessage, augmentSystemPrompt } from "../parallel.js";
 import { logger } from "../../utils/logger.js";
 import { scanForCredentials } from "../../utils/sanitize.js";
 
@@ -236,6 +237,7 @@ export const directApiHandler: ExecutionHandler = {
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { personas, content, context: contextNote } = ctx;
+    const dimsConfig = ctx.dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
 
     const keyInfo = getApiKey();
     if (!keyInfo) {
@@ -251,9 +253,9 @@ export const directApiHandler: ExecutionHandler = {
     const result = await executePersonasInParallel(
       personas,
       content,
-      { mode: MODE, retryEventName: "api" },
+      { mode: MODE, retryEventName: "api", dimensions: dimsConfig },
       async (persona: Persona) => {
-        const review = await executePersonaReview(keyInfo, persona, content, contextNote);
+        const review = await executePersonaReview(keyInfo, persona, content, contextNote, dimsConfig);
         return review;
       }
     );
@@ -274,13 +276,14 @@ async function executePersonaReview(
   keyInfo: ApiKeyInfo,
   persona: Persona,
   content: string,
-  contextNote?: string
+  contextNote: string | undefined,
+  dimensions?: import("../dimensions.js").DimensionsConfig,
 ): Promise<string> {
   const userMessage = buildUserMessage(content, contextNote);
 
   const response = await callApi(keyInfo, {
     model: process.env.KEVLAR_MODEL || "",
-    system: persona.systemPrompt,
+    system: augmentSystemPrompt(persona, dimensions),
     messages: [{ role: "user", content: userMessage }],
     maxTokens: 4096,
     temperature: 0.7,

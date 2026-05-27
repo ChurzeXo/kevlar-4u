@@ -16,7 +16,7 @@ import { getErrorInfo } from "../utils/observability.js";
 
 // ── Persistent Prompt Injection Defense ──────────────────────────────────────
 // These patterns represent common prompt-injection / jailbreak tokens that
-// must NEVER be persisted into persona fields (name, stance, blindSpot, etc.).
+// must NEVER be persisted into persona fields (name, dimensionBias, blindSpot, etc.).
 // If a user input contains any of these, the tokens are stripped before storage.
 // ────────────────────────────────────────────────────────────────────────────
 const DANGEROUS_PATTERNS = [
@@ -120,6 +120,21 @@ function buildOutputFormatSection(sanitizedName: string): string {
 		"**深度阅读后的感受**",
 		"（继续阅读后的反应，可以是正面或负面）",
 		"",
+		"**🛡️ 防御性维度评估**",
+		"- 社会风险与群体伦理：🟢/🟡/🔴 （简要说明）",
+		"- 合规与法律红线：🟢/🟡/🔴 （简要说明）",
+		"- 语境脱嵌与恶意曲解风险：🟢/🟡/🔴 （简要说明）",
+		"- 事实硬伤与常识背离：🟢/🟡/🔴 （简要说明）",
+		"",
+		"**🚀 进攻性维度评估**",
+		"- 开篇钩子与首屏留存率：🟢/🟡/🔴 （简要说明）",
+		"- 传播力与裂变潜能：🟢/🟡/🔴 （简要说明）",
+		"- 叙事结构与信息密度：🟢/🟡/🔴 （简要说明）",
+		"- 情感共鸣与情绪张力：🟢/🟡/🔴 （简要说明）",
+		"- 用户行动转化率：🟢/🟡/🔴 （简要说明）",
+		"- 差异化与记忆点：🟢/🟡/🔴 （简要说明）",
+		"- 信息差价值：🟢/🟡/🔴 （简要说明）",
+		"",
 		"**具体槽点 / 赞点**",
 		"- 🔴 槽点：（如果有）",
 		"- 🟢 亮点：（如果有）",
@@ -143,7 +158,7 @@ interface PersonaContext {
 	traits: string[]; // raw, sanitized inline where needed
 	cultural: string;
 	relation: string;
-	stanceFormatted: string;
+	perspectiveFormatted: string;
 	blind: string;
 	gender: string;
 }
@@ -155,12 +170,12 @@ function normalizeContext(
 	const fallback = (key: string) =>
 		(input as any)[key] ?? draft?.fields?.[key] ?? "未提供";
 
-	const stanceVal = input.stance ?? draft?.fields?.stance;
-	const stanceFormatted =
-		Array.isArray(stanceVal) && stanceVal.length > 0
-			? stanceVal.map((s: string) => sanitizePersistentField(s)).join("；同时具备")
-			: typeof stanceVal === "string" && stanceVal
-				? sanitizePersistentField(stanceVal)
+	const biasVal = input.dimensionBias ?? draft?.fields?.dimensionBias;
+	const perspectiveFormatted =
+		biasVal && typeof biasVal === "object" && biasVal.perspective
+			? sanitizePersistentField(biasVal.perspective)
+			: typeof biasVal === "string" && biasVal
+				? sanitizePersistentField(biasVal)
 				: "";
 
 	return {
@@ -176,7 +191,7 @@ function normalizeContext(
 		traits: Array.isArray(draft?.fields?.traits) ? draft.fields.traits : [],
 		cultural: sanitizePersistentField(fallback("culturalContext")),
 		relation: sanitizePersistentField(fallback("authorRelation")),
-		stanceFormatted,
+		perspectiveFormatted,
 		blind: fallback("blindSpot"),
 		gender: fallback("gender"),
 	};
@@ -240,7 +255,7 @@ function buildContextSection(
 			`- 文化背景：${ctx.cultural}`,
 			`- 性别：${ctx.gender || "（未设定——你对该内容没有性别预设视角）"}`,
 			`- 与作者的关系：${ctx.relation}`,
-			`- 立场：${ctx.stanceFormatted || "（未设定——你对该类内容没有预设立场，按实际感受判断）"}`,
+			`- 审视视角：${ctx.perspectiveFormatted || "（未设定——你对该类内容没有预设视角，按实际感受判断）"}`,
 			`- 盲区：${ctx.blind || "（未设定——你没有已知的认知盲区，保持开放视角）"}`,
 		);
 	} else {
@@ -248,7 +263,7 @@ function buildContextSection(
 		lines.push(
 			`- 文化背景：${ctx.cultural}`,
 			`- 与作者的关系：${ctx.relation}`,
-			`- 立场：${ctx.stanceFormatted || "（未设定——你对该类内容没有预设立场，按实际感受判断）"}`,
+			`- 审视视角：${ctx.perspectiveFormatted || "（未设定——你对该类内容没有预设视角，按实际感受判断）"}`,
 			`- 盲区：${ctx.blind || "（未设定——你没有已知的认知盲区，保持开放视角）"}`,
 			`- 性别：${ctx.gender || "（未设定——你对该内容没有性别预设视角）"}`,
 		);
@@ -276,6 +291,7 @@ function buildPersonaMeta(
 	input: CreatePersonaInput,
 	description: string,
 	tags: string[],
+	draft?: any,
 ): PersonaMeta {
 	return {
 		id,
@@ -287,12 +303,8 @@ function buildPersonaMeta(
 		description: sanitizePersistentField(description),
 		culturalContext: sanitizePersistentField(input.culturalContext || "未提供"),
 		authorRelation: sanitizePersistentField(input.authorRelation || "未提供"),
-		...(input.stance
-			? {
-					stance: Array.isArray(input.stance)
-						? input.stance.map((s: string) => sanitizePersistentField(s))
-						: sanitizePersistentField(input.stance),
-				}
+		...(input.dimensionBias
+			? { dimensionBias: input.dimensionBias }
 			: {}),
 		...(input.blindSpot
 			? { blindSpot: sanitizePersistentField(input.blindSpot) }
@@ -300,6 +312,14 @@ function buildPersonaMeta(
 		...(input.gender
 			? { gender: sanitizePersistentField(input.gender) }
 			: {}),
+		...(draft?.fields?.ageRange
+			? { ageRange: sanitizePersistentField(draft.fields.ageRange) }
+			: {}),
+		...(Array.isArray(draft?.fields?.tone) && draft.fields.tone.length > 0
+			? { tone: draft.fields.tone.map((t: string) => sanitizePersistentField(t)) }
+			: typeof draft?.fields?.tone === "string" && draft.fields.tone
+				? { tone: [sanitizePersistentField(draft.fields.tone)] }
+				: {}),
 	};
 }
 
@@ -313,7 +333,7 @@ export interface CreatePersonaInput {
 	sessionId?: string;
 	culturalContext?: string;
 	authorRelation?: string;
-	stance?: string | string[];
+	dimensionBias?: import("../execution/dimensions.js").DimensionBias;
 	blindSpot?: string;
 	gender?: string;
 }
@@ -405,7 +425,7 @@ export async function handleCreatePersona(
 	const tags = input.tags ?? buildTagsFromDraft(draft);
 
 	// 5. 构建 meta + persona content
-	const meta = buildPersonaMeta(id, input, description, tags);
+	const meta = buildPersonaMeta(id, input, description, tags, draft);
 	const personaContent = buildPersonaContent(ctx, hasDraft, description);
 
 	// 6. 落盘

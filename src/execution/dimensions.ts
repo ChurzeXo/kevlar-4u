@@ -1,0 +1,719 @@
+/**
+ * Review Dimensions Configuration
+ *
+ * Defines the two-layer dimension system:
+ *   - Defensive (mandatory, always active)
+ *   - Offensive (user-selectable, defaults to all)
+ */
+
+// ── Dimension Types ──────────────────────────────────────────────────────────
+
+export type DimensionLayer = "defensive" | "offensive";
+
+export type DefensiveDimensionId =
+	| "social_risk_ethics"
+	| "legal_compliance"
+	| "context_distortion"
+	| "factual_integrity";
+
+export type OffensiveDimensionId =
+	| "hook_retention"
+	| "virality_potential"
+	| "narrative_structure"
+	| "emotional_resonance"
+	| "action_conversion"
+	| "differentiation"
+	| "information_gap";
+
+export type DimensionId = DefensiveDimensionId | OffensiveDimensionId;
+
+export interface DimensionDefinition {
+	id: DimensionId;
+	layer: DimensionLayer;
+	label: string;
+	description: string;
+	sentinelPoints: string[];
+	/** Conditional sentinels that activate only when content matches certain topics */
+	conditionalSentinels?: { trigger: string; description: string }[];
+	criteria: {
+		green: string;
+		yellow: string;
+		red: string;
+	};
+}
+
+export interface DimensionsConfig {
+	/** @deprecated Defensive dimensions are now mandatory system directives, not configurable. Kept for backward compat. */
+	defensive?: DefensiveDimensionId[];
+	offensive: OffensiveDimensionId[];
+}
+
+// ── All Dimension Definitions ────────────────────────────────────────────────
+
+export const DIMENSIONS: Record<DimensionId, DimensionDefinition> = {
+	// ── Defensive (mandatory) ──────────────────────────────────────────────
+
+	social_risk_ethics: {
+		id: "social_risk_ethics",
+		layer: "defensive",
+		label: "社会风险与群体伦理",
+		description: "审查内容是否触及群体对立、公序良俗或无意低俗联想",
+		sentinelPoints: [
+			"性别/地域/阶层/职业歧视",
+			"物化与低俗擦边",
+			"隐性特权凝视",
+			"词汇多义/谐音/联想导致的低俗化风险（含身体器官联想、性暗示联想、方言俗语联想）",
+		],
+		conditionalSentinels: [
+			{
+				trigger: "跨文化/亚文化/民族/宗教元素",
+				description: "文化挪用与次生文化误读——文化元素是否被简化为装饰符号、脱离原生语境使用或被歪曲猎奇化",
+			},
+			{
+				trigger: "食品/身体/感官类描述（尤其是颜色+形态+质地的组合）",
+				description: "词汇身体联想风险——描述是否在字形、读音或语义上与性器官/身体敏感部位产生联想；粉+耳/朵/花/洞、白+嫩/滑/软、肥+厚/满/润等高敏感组合需逐词审查是否构成无意低俗化",
+			},
+		],
+		criteria: {
+			green: "内容未涉及任何群体敏感性话题，或涉及但处理方式尊重、平衡、无刻板印象；用词无低俗联想风险",
+			yellow: "存在隐性风险——可能被部分群体解读为冒犯但无明确恶意；使用了有争议的比喻/类比但语境中可解释；隐性特权凝视存在但非主导叙事；用词存在可被联想为低俗的可能但需要刻意解读",
+			red: "存在显性冒犯——包含物化、刻板印象、群体标签化、低俗擦边、阶层对立暗示；或隐性特权凝视构成内容核心逻辑；用词组合直接触发身体器官/性暗示联想，即使无主观恶意也构成低俗化风险",
+		},
+	},
+
+	legal_compliance: {
+		id: "legal_compliance",
+		layer: "defensive",
+		label: "合规与法律红线",
+		description: "审查内容是否违反广告法、平台规则或意识形态红线",
+		sentinelPoints: [
+			"广告法违规（绝对化用语、虚假宣传）",
+			"平台规则与限流关键词",
+			"政治/历史红线",
+			"伪科学伪功效描述",
+		],
+		criteria: {
+			green: "内容符合广告法、平台规则，无绝对化用语，无敏感词触发风险",
+			yellow: "存在模糊地带——使用了接近绝对化的表述但语境中可能不构成违法；功效描述有夸大倾向但未达伪科学程度；存在平台限流关键词但非故意规避",
+			red: "违反广告法（绝对化用语、虚假宣传）；触碰政治/历史红线；涉嫌诱导/欺诈；伪科学伪功效描述明确；包含平台封禁级敏感词",
+		},
+	},
+
+	context_distortion: {
+		id: "context_distortion",
+		layer: "defensive",
+		label: "语境脱嵌与恶意曲解风险",
+		description: "审查内容脱离语境后是否容易被恶意曲解",
+		sentinelPoints: [
+			"截图脱语境化风险",
+			"标题党截断风险",
+			"短视频二创曲解风险",
+			"表情包化传播风险",
+		],
+		criteria: {
+			green: "内容语境完整、自洽，即使被截图/截断也难以脱离原意；关键判断有充分的前置条件限定",
+			yellow: "存在可被脱离语境的关键句——某句话脱离上下文后语义会发生偏移但完整阅读可还原意图；存在容易被标题党化截取的片段",
+			red: "存在极易被恶意曲解的表达——某句话脱离语境后含义发生根本性反转；关键结论缺乏前置条件保护；内容天然适合被截图传播并引发误读",
+		},
+	},
+
+	factual_integrity: {
+		id: "factual_integrity",
+		layer: "defensive",
+		label: "事实硬伤与常识背离",
+		description: "审查内容是否存在常识性错误、断章取义或逻辑硬伤",
+		sentinelPoints: [
+			"数据造假或严重失实",
+			"常识性错误（违反物理/生理/法律常识）",
+			"伪科普伪功效",
+			"过时信息",
+			"因果谬误",
+		],
+		criteria: {
+			green: "事实论据可验证、数据有出处、因果推理逻辑成立；无非专业领域常识错误",
+			yellow: "存在可修正的事实问题——数据未更新但非核心论点；个别用词不精确但可推断真实意图；因果推理存在跳跃但不构成逻辑硬伤",
+			red: "存在根本性事实错误——数据造假或严重失实；常识性错误；伪科普伪功效；因果谬误构成内容核心论点的基础",
+		},
+	},
+
+	// ── Offensive (user-selectable) ─────────────────────────────────────────
+
+	hook_retention: {
+		id: "hook_retention",
+		layer: "offensive",
+		label: "开篇钩子与首屏留存率",
+		description: "审查内容开篇的吸睛程度和首屏信息密度",
+		sentinelPoints: [
+			"标题/首段的钩子锋利度",
+			"首屏信息密度与冗余铺垫",
+			"信息流中的视觉/语义区隔度",
+		],
+		criteria: {
+			green: "开篇精准命中目标读者的痛点/好奇心/身份认同；首屏信息密度高且无冗余铺垫；在信息流中有明确的区隔度",
+			yellow: "开篇有吸引力但不够锋利——需要1-2句铺垫才能进入核心；首屏有信息但缺乏让手指停下的钩子；在信息流中容易被划过",
+			red: "开篇为泛化寒暄/自我介绍/背景铺垫；首屏无有效信息；在信息流中与同类内容无差异，缺乏停留理由",
+		},
+	},
+
+	virality_potential: {
+		id: "virality_potential",
+		layer: "offensive",
+		label: "传播力与裂变潜能",
+		description: "审查内容是否具备让人产生转发/收藏/评论的社交驱动力",
+		sentinelPoints: [
+			"社交货币价值（转发后是否让人显得有品位/有远见/有信息优势）",
+			"情绪驱动力（愤怒/感动/共鸣）",
+			"自传播机制（金句/可截图段落/争议性观点）",
+		],
+		criteria: {
+			green: "内容提供了高价值社交货币或触发了强烈情绪驱动力；有明确的自传播机制（金句/可截图段落/争议性观点）",
+			yellow: "内容有价值但缺乏传播驱动力——有用但不足以让人主动分享；有情绪但不够强烈；缺少可被截取传播的金句锚点",
+			red: "内容为纯自嗨/品牌独白；既无社交货币价值也无情绪驱动力；读者看完没有转发的心理动机",
+		},
+	},
+
+	narrative_structure: {
+		id: "narrative_structure",
+		layer: "offensive",
+		label: "叙事结构与信息密度",
+		description: "审查内容的结构流畅度、逻辑连贯性与信息冗余度",
+		sentinelPoints: [
+			"逻辑链完整性与断裂检测",
+			"段落衔接自然度",
+			"信息冗余度（重复表述/填充内容）",
+			"节奏控制（松紧交替）",
+		],
+		criteria: {
+			green: "结构清晰，逻辑链完整无断裂；段落衔接自然，节奏有松有紧；信息密度高且无冗余填充；论证有层次递进",
+			yellow: "整体结构可辨认但局部松散；存在冗余段落或重复表述；逻辑链有跳跃但可自行补全；节奏偏平，缺少起伏",
+			red: "结构散乱，逻辑链断裂；大量填充性内容拉低信息密度；段落间无衔接或逻辑冲突；读者难以提取核心论点",
+		},
+	},
+
+	emotional_resonance: {
+		id: "emotional_resonance",
+		layer: "offensive",
+		label: "情感共鸣与情绪张力",
+		description: "审查内容的情绪调动能力和代入感",
+		sentinelPoints: [
+			"情绪起伏曲线（铺垫→蓄力→释放）",
+			"语言画面感与代入感",
+			"情感推进节奏",
+		],
+		criteria: {
+			green: "内容成功调动目标读者的情绪起伏；语言有画面感和代入感；情感推进有节奏；读者能产生「说的就是我」的认同",
+			yellow: "内容有情绪但偏平——全程同一情绪基调无起伏；有画面感但缺乏代入感；情感表达偏直白，缺少留白和暗示的力量",
+			red: "内容为纯信息堆砌，无情感层；语言干瘪无画面感；情绪推进为零——开头和结尾的情感温度相同；目标读者无法产生代入感",
+		},
+	},
+
+	action_conversion: {
+		id: "action_conversion",
+		layer: "offensive",
+		label: "用户行动转化率",
+		description: "审查内容的CTA是否清晰有效，能否引导读者做出目标行为",
+		sentinelPoints: [
+			"CTA清晰度与紧迫感",
+			"前置内容的动机铺垫充分度",
+			"行动门槛与路径明确度",
+		],
+		criteria: {
+			green: "CTA清晰、具体、有紧迫感；前置内容已完成充分的动机铺垫（痛点→方案→行动）；行动门槛低且路径明确；种草力/说服力足够",
+			yellow: "CTA存在但模糊或缺乏驱动力；前置铺垫不充分，读者还没有行动的冲动；行动路径不清晰",
+			red: "缺少CTA或CTA与内容脱节；全文未建立行动理由；读者看完不知道该做什么或不想做任何事",
+		},
+	},
+
+	differentiation: {
+		id: "differentiation",
+		layer: "offensive",
+		label: "差异化与记忆点",
+		description: "审查内容在同品类中的辨识度和可记忆性",
+		sentinelPoints: [
+			"独特视角/表达方式/信息来源",
+			"可被二次引用的概念锚点",
+			"同品类内容替代性",
+		],
+		criteria: {
+			green: "内容在同品类中有明确的辨识度——独特的视角/表达方式/信息来源；读者看完能记住至少一个「只有这篇才有的」观点或表达；有可被二次引用的概念锚点",
+			yellow: "内容质量合格但与同类内容高度同质化；缺乏独特的记忆锚点——看完后难以回忆起具体说了什么；可被任意一篇同品类内容替代",
+			red: "内容为行业通稿/模板化输出；与竞品内容高度相似；无任何独特视角、独家信息或差异化表达；读者看完会感觉「这篇我好像在哪里看过」",
+		},
+	},
+
+	information_gap: {
+		id: "information_gap",
+		layer: "offensive",
+		label: "信息差价值",
+		description: "审查内容是否提供了目标读者通过常规渠道不易获取的信息",
+		sentinelPoints: [
+			"信息独占性（独家数据/一手经验/反常识洞察/内部视角）",
+			"信息时效性与深度是否优于公开资料",
+			"信息增量vs信息搬运",
+		],
+		criteria: {
+			green: "内容提供了目标读者通过常规渠道不易获取的信息——独家数据/一手经验/反常识洞察/内部视角；信息的时效性或深度显著优于公开资料",
+			yellow: "内容有信息量但未超出目标读者的常规认知边界——整合了公开信息但缺乏增量；观点正确但属于「正确的废话」；目标受众中已有一定比例知道这些信息",
+			red: "内容未提供任何增量信息——全为百度可查的常识；或信息已过时，目标读者已从其他渠道获知；内容本质是信息搬运而非信息增值",
+		},
+	},
+};
+
+// ── Defensive dimension IDs (all, always active) ────────────────────────────
+
+export const DEFENSIVE_DIMENSION_IDS: DefensiveDimensionId[] = [
+	"social_risk_ethics",
+	"legal_compliance",
+	"context_distortion",
+	"factual_integrity",
+];
+
+// ── Offensive dimension IDs (all, user-selectable) ──────────────────────────
+
+export const OFFENSIVE_DIMENSION_IDS: OffensiveDimensionId[] = [
+	"hook_retention",
+	"virality_potential",
+	"narrative_structure",
+	"emotional_resonance",
+	"action_conversion",
+	"differentiation",
+	"information_gap",
+];
+
+// ── Default config (all offensive dimensions enabled) ───────────────────────
+
+export const DEFAULT_DIMENSIONS_CONFIG: DimensionsConfig = {
+	offensive: [...OFFENSIVE_DIMENSION_IDS],
+};
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Get all active dimension IDs (always includes defensive + configured offensive) */
+export function getActiveDimensionIds(config: DimensionsConfig): DimensionId[] {
+	return [...DEFENSIVE_DIMENSION_IDS, ...config.offensive] as DimensionId[];
+}
+
+/** Get dimension definitions for active dimensions (always includes defensive) */
+export function getActiveDimensions(config: DimensionsConfig): DimensionDefinition[] {
+	return getActiveDimensionIds(config).map((id) => DIMENSIONS[id]);
+}
+
+/** Validate that a set of offensive dimension IDs is valid */
+export function isValidOffensiveSelection(ids: string[]): ids is OffensiveDimensionId[] {
+	const valid = new Set<string>(OFFENSIVE_DIMENSION_IDS);
+	return ids.every((id) => valid.has(id));
+}
+
+/** Build the dimension assessment table for prompts (defensive always included) */
+export function buildDimensionTable(config: DimensionsConfig): string {
+	const defensiveDefs = DEFENSIVE_DIMENSION_IDS.map(id => DIMENSIONS[id]);
+	const offensiveDefs = config.offensive.map(id => DIMENSIONS[id]);
+
+	const defensiveRows = defensiveDefs
+		.map((d) => `| ${d.label} | 🟢/🟡/🔴 | （说明） |`)
+		.join("\n");
+
+	const offensiveRows = offensiveDefs
+		.map((d) => `| ${d.label} | 🟢/🟡/🔴 | （说明） |`)
+		.join("\n");
+
+	let table = "#### 🛡️ 防御性风险评估（系统强制）\n\n";
+	table += "| 维度 | 风险等级 | 说明 |\n";
+	table += "|------|---------|------|\n";
+	table += defensiveRows;
+
+	if (offensiveRows) {
+		table += "\n\n#### 🚀 进攻性价值评估\n\n";
+		table += "| 维度 | 价值等级 | 说明 |\n";
+		table += "|------|---------|------|\n";
+		table += offensiveRows;
+	}
+
+	return table;
+}
+
+/** Build detailed criteria instructions for prompts (defensive always included) */
+export function buildDimensionCriteriaInstructions(config: DimensionsConfig): string {
+	const allDefs = [...DEFENSIVE_DIMENSION_IDS, ...config.offensive].map(id => DIMENSIONS[id]);
+	const sections: string[] = [];
+
+	for (const dim of allDefs) {
+		let section = `### ${dim.label}（${dim.id}）\n\n`;
+		section += `**审计目标**：${dim.description}\n\n`;
+		section += `**审计哨点**：\n`;
+		for (const sp of dim.sentinelPoints) {
+			section += `- ${sp}\n`;
+		}
+		if (dim.conditionalSentinels && dim.conditionalSentinels.length > 0) {
+			section += `\n**条件触发哨点**（内容涉及相关元素时激活）：\n`;
+			for (const cs of dim.conditionalSentinels) {
+				section += `- 触发条件：${cs.trigger} → ${cs.description}\n`;
+			}
+		}
+		section += `\n**评分标准**：\n`;
+		section += `- 🟢 ${dim.criteria.green}\n`;
+		section += `- 🟡 ${dim.criteria.yellow}\n`;
+		section += `- 🔴 ${dim.criteria.red}\n`;
+		sections.push(section);
+	}
+
+	return sections.join("\n");
+}
+
+/** Format dimension list for user selection UI (defensive always shown as mandatory) */
+export function formatDimensionSelectionList(): string {
+	const lines: string[] = [];
+
+	lines.push("**🛡️ 防御性维度（系统强制，所有评审员必须执行）：**\n");
+	for (const id of DEFENSIVE_DIMENSION_IDS) {
+		const dim = DIMENSIONS[id];
+		lines.push(`- ${dim.label}：${dim.description}`);
+	}
+
+	lines.push("\n**🚀 进攻性维度（可选，回复编号取消选择）：**\n");
+	OFFENSIVE_DIMENSION_IDS.forEach((id, i) => {
+		const dim = DIMENSIONS[id];
+		lines.push(`${i + 1}. ${dim.label}：${dim.description}`);
+	});
+
+	return lines.join("\n");
+}
+
+/** Parse user's dimension selection from wizard input */
+export function parseDimensionSelection(
+	input: string,
+	currentConfig: DimensionsConfig
+): DimensionsConfig {
+	// If user says "all" or "全部", enable everything
+	if (/全部|全选|所有|all/i.test(input)) {
+		return { offensive: [...OFFENSIVE_DIMENSION_IDS] };
+	}
+
+	// Parse number indices to exclude (user picks numbers to DISABLE)
+	const excludeIndices = new Set<number>();
+	const numPattern = /\b([1-7])\b/g;
+	let match;
+	while ((match = numPattern.exec(input)) !== null) {
+		excludeIndices.add(parseInt(match[1], 10));
+	}
+
+	const offensive = OFFENSIVE_DIMENSION_IDS.filter(
+		(_, i) => !excludeIndices.has(i + 1)
+	);
+
+	return {
+		offensive,
+	};
+}
+
+// ── Defensive System Directive ──────────────────────────────────────────────
+// Defensive dimensions are mandatory for ALL reviewers regardless of config.
+// They are injected as a system-level directive appended to each reviewer's
+// system prompt, ensuring compliance/safety checks are never skipped.
+
+/** Build the mandatory defensive system directive to inject into every reviewer's system prompt */
+export function buildDefensiveSystemDirective(): string {
+	const defensiveDefs = DEFENSIVE_DIMENSION_IDS.map(id => DIMENSIONS[id]);
+
+	let directive = "## 🛡️ 防御性风险评估（系统强制指令——必须执行）\n\n";
+	directive += "以下四项防御性维度是系统强制要求的审查项，不论你的角色定位如何，都必须对内容进行这四项评估，不可跳过：\n\n";
+
+	for (const dim of defensiveDefs) {
+		directive += `### ${dim.label}\n\n`;
+		directive += `**审计目标**：${dim.description}\n\n`;
+		directive += `**审计哨点**：\n`;
+		for (const sp of dim.sentinelPoints) {
+			directive += `- ${sp}\n`;
+		}
+		if (dim.conditionalSentinels && dim.conditionalSentinels.length > 0) {
+			directive += `\n**条件触发哨点**（内容涉及相关元素时激活）：\n`;
+			for (const cs of dim.conditionalSentinels) {
+				directive += `- 触发条件：${cs.trigger} → ${cs.description}\n`;
+			}
+		}
+		directive += `\n**评分标准**：\n`;
+		directive += `- 🟢 ${dim.criteria.green}\n`;
+		directive += `- 🟡 ${dim.criteria.yellow}\n`;
+		directive += `- 🔴 ${dim.criteria.red}\n\n`;
+	}
+
+	directive += "请在你的评审结果中明确包含上述四项防御性评估的结论。\n";
+
+	return directive;
+}
+
+/** Build the offensive dimension system directive for the given config */
+export function buildOffensiveSystemDirective(config: DimensionsConfig): string {
+	const offensiveDefs = config.offensive.map(id => DIMENSIONS[id]);
+	if (offensiveDefs.length === 0) return "";
+
+	let directive = "## 🚀 进攻性价值评估（必须执行）\n\n";
+	directive += `以下 ${offensiveDefs.length} 项进攻性维度需要你进行评估，从这些维度审视内容的价值与效果：\n\n`;
+
+	for (const dim of offensiveDefs) {
+		directive += `### ${dim.label}\n\n`;
+		directive += `**审计目标**：${dim.description}\n\n`;
+		directive += `**审计哨点**：\n`;
+		for (const sp of dim.sentinelPoints) {
+			directive += `- ${sp}\n`;
+		}
+		directive += `\n**评分标准**：\n`;
+		directive += `- 🟢 ${dim.criteria.green}\n`;
+		directive += `- 🟡 ${dim.criteria.yellow}\n`;
+		directive += `- 🔴 ${dim.criteria.red}\n\n`;
+	}
+
+	directive += "请在你的评审结果中明确包含上述进攻性维度的评估结论。\n";
+
+	return directive;
+}
+
+/** Build the persona context directive from PersonaMeta fields */
+export function buildPersonaContextDirective(meta: import("../utils/parser.js").PersonaMeta): string {
+	const lines: string[] = ["## 👤 评审员画像\n\n以下是你作为评审员的身份属性，请严格以此身份进行评审：\n"];
+
+	if (meta.ageRange) lines.push(`- 年龄段：${meta.ageRange}`);
+	if (meta.gender) lines.push(`- 性别：${meta.gender}`);
+	if (meta.tags && meta.tags.length > 0) lines.push(`- 兴趣方向：${meta.tags.join("、")}`);
+	if (meta.culturalContext) lines.push(`- 文化背景：${meta.culturalContext}`);
+	if (meta.dimensionBias?.perspective) lines.push(`- 立场视角：${meta.dimensionBias.perspective}`);
+	if (meta.blindSpot) lines.push(`- 盲区：${meta.blindSpot}`);
+	if (meta.authorRelation) lines.push(`- 与作者关系：${meta.authorRelation}`);
+
+	lines.push("");
+	return lines.join("\n");
+}
+
+// ── Dimension Bias (replaces Persona stance) ────────────────────────────────
+// Formerly, personas had a "stance" field (e.g. "都市女性视角") which was a
+// free-text label that implicitly influenced which dimensions the persona
+// would weigh more heavily. This created a gap: the persona "believed" in
+// certain dimensions but the review system had no way to act on that.
+//
+// DimensionBias closes this gap by making the mapping explicit:
+//   - focusDimensions: which offensive dimensions this persona cares about most
+//   - perspective:      natural-language description of the review perspective
+//                        (replaces the old stance text for prompt generation)
+
+export type DimensionBiasWeight = "focus" | "default";
+
+export interface DimensionBiasEntry {
+	dimension: OffensiveDimensionId;
+	weight: DimensionBiasWeight;
+}
+
+export interface DimensionBias {
+	/** Which offensive dimensions this persona focuses on / weighs more */
+	entries: DimensionBiasEntry[];
+	/** Natural-language description of the persona's review perspective */
+	perspective: string;
+}
+
+// ── Stance-to-DimensionBias mapping ──────────────────────────────────────────
+// Maps the old 10 stance presets to explicit dimension bias + perspective.
+// This is used both for backward-compatible migration and for the wizard UI.
+
+interface StanceMapping {
+	/** Human-readable label shown in the wizard */
+	label: string;
+	/** Offensive dimensions this perspective focuses on */
+	focusDimensions: OffensiveDimensionId[];
+	/** Natural-language perspective description (replaces old stance text) */
+	perspective: string;
+}
+
+export const STANCE_TO_DIMENSION_BIAS: Record<string, StanceMapping> = {
+	traditional_culture: {
+		label: "关注传统文化表达、本土品牌与文化认同感",
+		focusDimensions: ["differentiation", "emotional_resonance"],
+		perspective: "关注传统文化表达、本土品牌与文化认同感的用户视角",
+	},
+	workplace_comm: {
+		label: "关注职场沟通体验、表达方式与实际使用场景",
+		focusDimensions: ["narrative_structure", "information_gap"],
+		perspective: "关注职场沟通体验、表达方式与实际使用场景的职场用户视角",
+	},
+	urban_female: {
+		label: "关注措辞细节、情绪表达与社会议题感受",
+		focusDimensions: ["emotional_resonance", "virality_potential"],
+		perspective: "关注措辞细节、情绪表达与社会议题感受的都市女性视角",
+	},
+	rational_analyst: {
+		label: "关注逻辑结构、信息准确度与技术细节",
+		focusDimensions: ["information_gap", "narrative_structure"],
+		perspective: "关注逻辑结构、信息准确度与技术细节的理性分析视角",
+	},
+	public_opinion: {
+		label: "容易受到公共讨论氛围与评论区情绪影响",
+		focusDimensions: ["virality_potential", "emotional_resonance"],
+		perspective: "容易受到公共讨论氛围与评论区情绪影响的大众用户视角",
+	},
+	independent_thinker: {
+		label: "强调个体表达、价值一致性与真实感受",
+		focusDimensions: ["differentiation", "information_gap"],
+		perspective: "强调个体表达、价值一致性与真实感受的独立思考视角",
+	},
+	commercial_observer: {
+		label: "关注商业表达、营销语言与消费真实性",
+		focusDimensions: ["action_conversion", "information_gap"],
+		perspective: "关注商业表达、营销语言与消费真实性的商业观察视角",
+	},
+	family_tradition: {
+		label: "关注家庭观念、代际关系与传统价值表达",
+		focusDimensions: ["emotional_resonance", "differentiation"],
+		perspective: "关注家庭观念、代际关系与传统价值表达的传统文化视角",
+	},
+	community_core: {
+		label: "关注圈层表达习惯与社区氛围",
+		focusDimensions: ["virality_potential", "differentiation"],
+		perspective: "熟悉垂直社区文化、关注圈层表达习惯与社区氛围的核心玩家视角",
+	},
+};
+
+/** All available perspective presets for the wizard UI (ordered list) */
+export const PERSPECTIVE_PRESETS: Array<{ id: string; label: string }> = [
+	{ id: "traditional_culture", label: STANCE_TO_DIMENSION_BIAS.traditional_culture.label },
+	{ id: "workplace_comm",     label: STANCE_TO_DIMENSION_BIAS.workplace_comm.label },
+	{ id: "urban_female",      label: STANCE_TO_DIMENSION_BIAS.urban_female.label },
+	{ id: "rational_analyst",  label: STANCE_TO_DIMENSION_BIAS.rational_analyst.label },
+	{ id: "public_opinion",    label: STANCE_TO_DIMENSION_BIAS.public_opinion.label },
+	{ id: "independent_thinker", label: STANCE_TO_DIMENSION_BIAS.independent_thinker.label },
+	{ id: "commercial_observer", label: STANCE_TO_DIMENSION_BIAS.commercial_observer.label },
+	{ id: "family_tradition",  label: STANCE_TO_DIMENSION_BIAS.family_tradition.label },
+	{ id: "community_core",    label: STANCE_TO_DIMENSION_BIAS.community_core.label },
+];
+
+/** Build a DimensionBias from a preset ID (or IDs, for multi-select) */
+export function buildDimensionBiasFromPresets(presetIds: string[], customPerspective?: string): DimensionBias {
+	const entries: DimensionBiasEntry[] = [];
+	const focusSet = new Set<OffensiveDimensionId>();
+
+	for (const id of presetIds) {
+		const mapping = STANCE_TO_DIMENSION_BIAS[id];
+		if (mapping) {
+			for (const dim of mapping.focusDimensions) {
+				focusSet.add(dim);
+			}
+		}
+	}
+
+	// All focus dimensions → "focus" weight; the rest → "default"
+	for (const dim of OFFENSIVE_DIMENSION_IDS) {
+		entries.push({
+			dimension: dim,
+			weight: focusSet.has(dim) ? "focus" : "default",
+		});
+	}
+
+	// Build perspective from selected presets
+	const perspectives: string[] = [];
+	for (const id of presetIds) {
+		const mapping = STANCE_TO_DIMENSION_BIAS[id];
+		if (mapping) perspectives.push(mapping.perspective);
+	}
+
+	return {
+		entries,
+		perspective: customPerspective || perspectives.join("；同时具备"),
+	};
+}
+
+/** Build a DimensionBias from raw perspective text (backward compat for old stance values) */
+export function buildDimensionBiasFromPerspective(perspectiveText: string): DimensionBias {
+	// Try to match against known stance patterns to infer focus dimensions
+	const focusDimensions = new Set<OffensiveDimensionId>();
+
+	if (/女性|情绪|感受|措辞/.test(perspectiveText)) {
+		focusDimensions.add("emotional_resonance");
+		focusDimensions.add("virality_potential");
+	}
+	if (/逻辑|信息|准确|技术|理性/.test(perspectiveText)) {
+		focusDimensions.add("information_gap");
+		focusDimensions.add("narrative_structure");
+	}
+	if (/商业|营销|消费|转化/.test(perspectiveText)) {
+		focusDimensions.add("action_conversion");
+		focusDimensions.add("information_gap");
+	}
+	if (/传统|家庭|代际|文化认同/.test(perspectiveText)) {
+		focusDimensions.add("emotional_resonance");
+		focusDimensions.add("differentiation");
+	}
+	if (/社区|圈层|氛围|玩家/.test(perspectiveText)) {
+		focusDimensions.add("virality_potential");
+		focusDimensions.add("differentiation");
+	}
+	if (/职场|沟通|场景/.test(perspectiveText)) {
+		focusDimensions.add("narrative_structure");
+		focusDimensions.add("information_gap");
+	}
+	if (/独立|个体|价值|真实/.test(perspectiveText)) {
+		focusDimensions.add("differentiation");
+		focusDimensions.add("information_gap");
+	}
+	if (/大众|公共|舆论|评论区/.test(perspectiveText)) {
+		focusDimensions.add("virality_potential");
+		focusDimensions.add("emotional_resonance");
+	}
+
+	const entries: DimensionBiasEntry[] = OFFENSIVE_DIMENSION_IDS.map(dim => ({
+		dimension: dim,
+		weight: focusDimensions.has(dim) ? "focus" : "default" as DimensionBiasWeight,
+	}));
+
+	return {
+		entries,
+		perspective: perspectiveText,
+	};
+}
+
+/** Get the list of focus dimension IDs from a DimensionBias */
+export function getFocusDimensions(bias: DimensionBias): OffensiveDimensionId[] {
+	return bias.entries
+		.filter(e => e.weight === "focus")
+		.map(e => e.dimension);
+}
+
+/** Build a human-readable bias summary for the persona preview */
+export function formatDimensionBiasSummary(bias: DimensionBias): string {
+	const focusDims = getFocusDimensions(bias);
+	if (focusDims.length === 0) {
+		return `视角：${bias.perspective}（无特别偏重维度）`;
+	}
+	const labels = focusDims.map(id => DIMENSIONS[id]?.label || id);
+	return `视角：${bias.perspective}（重点关注：${labels.join("、")}）`;
+}
+
+/** Migrate a legacy stance value (string or string[]) to DimensionBias */
+export function migrateStanceToBias(stance: string | string[] | undefined): DimensionBias | undefined {
+	if (!stance) return undefined;
+
+	const stances = Array.isArray(stance) ? stance : [stance];
+	const presetIds: string[] = [];
+	const customParts: string[] = [];
+
+	for (const s of stances) {
+		const trimmed = s.trim();
+		// Check if it matches a known preset
+		let matched = false;
+		for (const [id, mapping] of Object.entries(STANCE_TO_DIMENSION_BIAS)) {
+			if (trimmed === mapping.perspective || trimmed === mapping.label) {
+				presetIds.push(id);
+				matched = true;
+				break;
+			}
+		}
+		if (!matched) {
+			customParts.push(trimmed);
+		}
+	}
+
+	if (presetIds.length > 0 && customParts.length === 0) {
+		return buildDimensionBiasFromPresets(presetIds);
+	}
+
+	// Fallback: build from perspective text
+	return buildDimensionBiasFromPerspective(
+		customParts.length > 0 ? customParts.join("；同时具备") : stances.join("；同时具备")
+	);
+}

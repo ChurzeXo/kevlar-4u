@@ -8,7 +8,8 @@
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode, SamplingFunction } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
 import { isSamplingSupported } from "../client.js";
-import { executePersonasInParallel, buildUserMessage } from "../parallel.js";
+import { DEFAULT_DIMENSIONS_CONFIG } from "../dimensions.js";
+import { executePersonasInParallel, buildUserMessage, augmentSystemPrompt } from "../parallel.js";
 import { logger, getErrorInfo } from "../../utils/observability.js";
 
 const MODE: ExecutionMode = "mcp_sampling";
@@ -64,6 +65,7 @@ export const samplingHandler: ExecutionHandler = {
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     const { personas, content, context: contextNote } = ctx;
+    const dimsConfig = ctx.dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
 
     if (!ctx.samplingFn) {
       throw new Error(
@@ -76,9 +78,9 @@ export const samplingHandler: ExecutionHandler = {
     return executePersonasInParallel(
       personas,
       content,
-      { mode: MODE, retryEventName: "sampling" },
+      { mode: MODE, retryEventName: "sampling", dimensions: dimsConfig },
       async (persona: Persona) => {
-        const response = await executePersonaReview(samplingFn, persona, content, contextNote);
+        const response = await executePersonaReview(samplingFn, persona, content, contextNote, dimsConfig);
         return response;
       }
     );
@@ -91,13 +93,14 @@ async function executePersonaReview(
   samplingFn: SamplingFunction,
   persona: Persona,
   content: string,
-  contextNote?: string
+  contextNote: string | undefined,
+  dimensions?: import("../dimensions.js").DimensionsConfig,
 ): Promise<string> {
   const userMessage = buildUserMessage(content, contextNote);
 
   const response = await callSamplingApi(
     samplingFn,
-    persona.systemPrompt,
+    augmentSystemPrompt(persona, dimensions),
     userMessage
   );
 

@@ -3,6 +3,7 @@
  */
 
 import type { Persona } from "../utils/parser.js";
+import type { DimensionsConfig } from "./dimensions.js";
 
 // ── Execution Mode Types ───────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface ExecutionContext {
   content: string;
   context?: string;
   samplingFn?: SamplingFunction;
+  dimensions?: DimensionsConfig;
 }
 
 // ── Execution Result ─────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@
  */
 
 import type { ExecutionMode } from "./base.js";
+import type { DimensionsConfig } from "./dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions } from "./dimensions.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
@@ -84,11 +86,12 @@ interface AggregatedReportOptions {
   mode: ExecutionMode;
   contentSummary: string;
   personas: PersonaResultWithMeta[];
+  dimensions?: DimensionsConfig;
 }
 
 export function generateAggregatedReport(options: AggregatedReportOptions): string {
-  const { mode, contentSummary, personas } = options;
-  
+  const { mode, contentSummary, personas, dimensions } = options;
+  const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
   const successful = personas.filter((p) => !p.error);
   const failed = personas.filter((p) => p.error);
 
@@ -120,6 +123,12 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
 
   // Aggregated review summary
   report += `
+
+---
+
+## 综合维度评估
+
+${buildDimensionTable(dimsConfig)}
 
 ---
 

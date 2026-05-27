@@ -13,9 +13,14 @@ export interface PersonaMeta {
   description: string;
   culturalContext?: string;
   authorRelation?: string;
+  /** @deprecated Use dimensionBias instead. Kept for backward-compatible YAML parsing. */
   stance?: string | string[];
+  /** Dimension focus preferences — which offensive dimensions this persona weighs more heavily */
+  dimensionBias?: import("../execution/dimensions.js").DimensionBias;
   blindSpot?: string;
   gender?: string;
+  ageRange?: string;
+  tone?: string | string[];
 }
 
 export interface Persona {
@@ -91,7 +96,15 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
     authorRelation: data.authorRelation ? String(data.authorRelation) : undefined,
     stance: data.stance ? String(data.stance) : undefined,
     blindSpot: data.blindSpot ? String(data.blindSpot) : undefined,
+    gender: data.gender ? String(data.gender) : undefined,
+    ageRange: data.ageRange ? String(data.ageRange) : undefined,
+    tone: Array.isArray(data.tone) ? data.tone.map(String) : (data.tone ? [String(data.tone)] : undefined),
   };
+
+  // New format: dimensionBias stored directly in YAML
+  if (data.dimensionBias) {
+    meta.dimensionBias = data.dimensionBias as import("../execution/dimensions.js").DimensionBias;
+  }
 
   return {
     meta,
@@ -164,6 +177,11 @@ export async function loadAllPersonas(skillsDir: string): Promise<Persona[]> {
     const fullPath = path.join(skillsDir, file);
     const persona = await parsePersonaFile(fullPath);
     if (persona) {
+      // Auto-migrate legacy stance → dimensionBias if needed
+      if (!persona.meta.dimensionBias && persona.meta.stance) {
+        const { migrateStanceToBias } = await import("../execution/dimensions.js");
+        persona.meta.dimensionBias = migrateStanceToBias(persona.meta.stance);
+      }
       personas.push(persona);
     }
   }

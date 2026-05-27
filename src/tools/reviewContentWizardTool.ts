@@ -6,6 +6,7 @@ import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
 import { estimateTokenCost } from "../execution/aggregator.js";
+import { DEFAULT_DIMENSIONS_CONFIG, OFFENSIVE_DIMENSION_IDS, formatDimensionSelectionList, parseDimensionSelection, type DimensionsConfig, type OffensiveDimensionId } from "../execution/dimensions.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
 
@@ -41,6 +42,7 @@ type ReviewWizardStep =
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
   | "collectPlatforms"
+  | "selectDimensions"
   | "confirmSelection"
   | "postReview"
   | "completed";
@@ -54,6 +56,7 @@ interface ReviewWizardState {
   targetPlatforms: string[];
   selectedPersonaIds: string[];
   remainingPersonaIds: string[];
+  dimensions: DimensionsConfig;
 }
 
 interface Recommendation {
@@ -113,6 +116,9 @@ async function advanceWizard(
     case "waitingForPersonaCreation":
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
 
+    case "selectDimensions":
+      return handleDimensionSelection(tmpDir, state, personas, userMessage, samplingFn);
+
     case "confirmSelection":
       return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
 
@@ -121,6 +127,9 @@ async function advanceWizard(
 
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
+
+    default:
+      return toolResponse(state, "未知步骤，请重新开始评测流程。");
   }
 }
 
@@ -145,11 +154,11 @@ async function handleInventoryCheck(
     );
   }
 
-  // 仅 1-2 位评审员：直接全选，让用户确认
+  // 仅 1-2 位评审员：直接全选，进入维度选择
   if (personas.length <= 2) {
     state.selectedPersonaIds = personas.map((p) => p.meta.id);
     state.remainingPersonaIds = [];
-    state.step = "confirmSelection";
+    state.step = "selectDimensions";
     await saveState(tmpDir, state);
     return toolResponse(
       state,
@@ -158,7 +167,11 @@ async function handleInventoryCheck(
         "",
         ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
         "",
-        "回复「开始审稿」确认开始评测。",
+        "接下来请选择评审维度。",
+        "",
+        formatDimensionSelectionList(),
+        "",
+        "默认全部启用。回复编号（如「3,5」）取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
       ].join("\n")
     );
   }
@@ -171,7 +184,7 @@ async function handleInventoryCheck(
   state.remainingPersonaIds = personas
     .filter((p) => !recommendedIds.has(p.meta.id))
     .map((p) => p.meta.id);
-  state.step = "confirmSelection";
+  state.step = "selectDimensions";
   await saveState(tmpDir, state);
 
   const remainingPersonas = personas.filter((p) => !recommendedIds.has(p.meta.id));
@@ -184,10 +197,114 @@ async function handleInventoryCheck(
         ? [
             "**备选评审员**（回复对应编号可增加）：",
             ...remainingPersonas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
-            "",
-            "回复编号（如「1」「1,3」）增加评审员，确认后回复「开始审稿」开始评测。",
           ]
-        : ["回复「开始审稿」开始评测。"]),
+        : []),
+      "",
+      "接下来请选择评审维度：",
+      "",
+      formatDimensionSelectionList(),
+      "",
+      "默认全部启用。回复编号（如「3,5」）取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+    ].join("\n")
+  );
+}
+
+async function handleDimensionSelection(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  // If user wants to add more reviewers first, handle that
+  if (/使用全部|全部评审|全选评审|所有评审/.test(userMessage)) {
+    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.remainingPersonaIds = [];
+  } else {
+    const numIndices = parseNumberIndices(userMessage);
+    // Check if numbers match reviewer indices (from remaining list)
+    const isReviewerSelection = numIndices.length > 0 && state.remainingPersonaIds.length > 0 &&
+      numIndices.every(n => n > 0 && n <= state.remainingPersonaIds.length);
+
+    if (isReviewerSelection) {
+      const toAdd: string[] = [];
+      for (const num of numIndices) {
+        if (num > 0 && num <= state.remainingPersonaIds.length) {
+          toAdd.push(state.remainingPersonaIds[num - 1]);
+        }
+      }
+      state.selectedPersonaIds = [...state.selectedPersonaIds, ...toAdd];
+      state.remainingPersonaIds = state.remainingPersonaIds.filter((id) => !toAdd.includes(id));
+      const addedNames = personas.filter((p) => toAdd.includes(p.meta.id)).map((p) => p.meta.name);
+      await saveState(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          `✅ 已增加评审员：${addedNames.join("、")}`,
+          "",
+          formatDimensionSelectionList(),
+          "",
+          "回复编号取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+        ].join("\n")
+      );
+    }
+  }
+
+  // Parse dimension selection
+  if (/开始|审稿|评测|确认|默认|全部维度|ok|yes/i.test(userMessage)) {
+    // Use default or already-set dimensions, proceed to confirm
+    state.step = "confirmSelection";
+    await saveState(tmpDir, state);
+    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+    const cost = estimateTokenCost(selected.length, state.content.length);
+    return toolResponse(
+      state,
+      [
+        "✅ 评审维度已确认。",
+        "",
+        `已选评审员：${selected.map((p) => p.meta.name).join("、")}`,
+        `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
+        `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
+        "",
+        "回复「开始审稿」确认开始评测。",
+      ].join("\n")
+    );
+  }
+
+  // Parse dimension exclusion (numbers refer to offensive dimension indices)
+  const newDimensions = parseDimensionSelection(userMessage, state.dimensions);
+  state.dimensions = newDimensions;
+
+  // Check if this looks like a "start" intent
+  if (state.dimensions.offensive.length === 0) {
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        "⚠️ 至少需要保留一个进攻性维度。请重新选择。",
+        "",
+        formatDimensionSelectionList(),
+        "",
+        "回复编号取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+      ].join("\n")
+    );
+  }
+
+  state.step = "confirmSelection";
+  await saveState(tmpDir, state);
+  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+  const cost = estimateTokenCost(selected.length, state.content.length);
+  const excludedCount = OFFENSIVE_DIMENSION_IDS.length - state.dimensions.offensive.length;
+  return toolResponse(
+    state,
+    [
+      `✅ 已排除 ${excludedCount} 个进攻性维度，保留 ${state.dimensions.offensive.length} 个。`,
+      "",
+      `已选评审员：${selected.map((p) => p.meta.name).join("、")}`,
+      `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
+      `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
+      "",
+      "回复「开始审稿」确认开始评测。",
     ].join("\n")
   );
 }
@@ -482,6 +599,7 @@ async function executeReview(
     persona_ids: state.selectedPersonaIds,
     context: state.context,
     mode: "auto",
+    dimensions: state.dimensions,
     samplingFn: samplingFn
       ? async (params) =>
           samplingFn({
@@ -538,6 +656,10 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
   if (input.sessionId && fs.existsSync(statePath)) {
     const raw = await fs.promises.readFile(statePath, "utf-8");
     const state = JSON.parse(raw) as ReviewWizardState;
+    // Backward compatibility: ensure dimensions field exists
+    if (!state.dimensions) {
+      state.dimensions = { ...DEFAULT_DIMENSIONS_CONFIG };
+    }
     // 会话超过 10 分钟未活动，清理旧文件并用原始文案重建新会话
     if (Date.now() - state.createdAt > 10 * 60 * 1000) {
       await cleanupState(tmpDir, sessionId);
@@ -549,6 +671,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         targetPlatforms: [],
         selectedPersonaIds: [],
         remainingPersonaIds: [],
+        dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
       };
     }
     return state;
@@ -562,6 +685,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     targetPlatforms: [],
     selectedPersonaIds: [],
     remainingPersonaIds: [],
+    dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
   };
 }
 
@@ -607,6 +731,7 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
           `targetPlatforms: ${state.targetPlatforms.join(", ") || "none"}`,
           `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
           `remainingPersonaIds: ${state.remainingPersonaIds.join(", ") || "none"}`,
+          `dimensions: defensive=4(system), offensive=${state.dimensions.offensive.length}`,
           "```",
         ].join("\n"),
       },

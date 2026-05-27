@@ -103,6 +103,7 @@ describe("parsePersonaFile", () => {
     assert.equal(persona.meta.id, "inferred_persona");
     assert.equal(persona.meta.culturalContext, "Chinese culture");
     assert.equal(persona.meta.authorRelation, "Subscribed");
+    // stance is deprecated but still read from legacy YAML
     assert.equal(persona.meta.stance, "Supportive");
     assert.equal(persona.meta.blindSpot, "Math");
     assert.equal(persona.systemPrompt, "You are an inferred persona.");
@@ -182,6 +183,7 @@ describe("writePersonaFile", () => {
     assert.ok(persona);
     assert.equal(persona.meta.culturalContext, "Chinese context");
     assert.equal(persona.meta.authorRelation, "Stranger");
+    // stance is deprecated but still read from legacy YAML
     assert.equal(persona.meta.stance, "Skeptical");
     assert.equal(persona.meta.blindSpot, "Visuals");
   });
