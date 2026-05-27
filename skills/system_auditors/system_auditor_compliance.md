@@ -1,5 +1,5 @@
 ---
-id: system_auditor_compliance
+id: legal_compliance
 name: "内容审查员-合规"
 name_en: "System Auditor - Compliance"
 version: 1.0.0

@@ -1,5 +1,5 @@
 ---
-id: system_auditor_social
+id: social_risk
 name: "内容审查员-社会风险"
 name_en: "System Auditor - Social Risk"
 version: 1.0.0

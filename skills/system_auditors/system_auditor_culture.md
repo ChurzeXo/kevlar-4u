@@ -1,5 +1,5 @@
 ---
-id: system_auditor_culture
+id: network_culture_risk
 name: "内容审查员-网络文化"
 name_en: "System Auditor - Network Culture"
 version: 1.0.0

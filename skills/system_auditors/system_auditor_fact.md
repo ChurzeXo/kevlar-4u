@@ -1,5 +1,5 @@
 ---
-id: system_auditor_fact
+id: factual_integrity
 name: "内容审查员-事实硬伤"
 name_en: "System Auditor - Fact & Logic"
 version: 1.0.0

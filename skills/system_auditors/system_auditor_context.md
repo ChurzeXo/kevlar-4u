@@ -1,5 +1,5 @@
 ---
-id: system_auditor_context
+id: context_distortion
 name: "内容审查员-语境脱嵌"
 name_en: "System Auditor - Context Risk"
 version: 1.0.0

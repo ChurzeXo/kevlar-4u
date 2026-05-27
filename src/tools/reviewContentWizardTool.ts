@@ -184,10 +184,14 @@ async function handleSystemAudit(
   let highRisk = 0;
   let medRisk = 0;
   for (const r of results) {
+    let dimLevel: string = "🟢";
     for (const f of r.findings) {
+      if (f.suggestedLevel === "🔴") { dimLevel = "🔴"; break; }
+      if (f.suggestedLevel === "🟡") dimLevel = "🟡";
       if (f.suggestedLevel === "🔴") highRisk++;
       else if (f.suggestedLevel === "🟡") medRisk++;
     }
+    (r as any).level = dimLevel;
   }
 
   state.preAuditReport = {
