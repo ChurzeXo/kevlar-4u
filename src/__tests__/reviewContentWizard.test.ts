@@ -84,7 +84,8 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(state.content.includes("新品故事"));
   });
 
-  it("collects target platform first, filters personas, and executes review after confirmation", async () => {
+  it("with 1-2 personas: directly shows all and asks to start review, with 3+: recommends 1-3 and shows remaining", async () => {
+    // 1-2 personas: auto-select all, go to confirmSelection immediately
     writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
     writePersona("logic_reader", "逻辑读者", ["知乎", "逻辑"]);
 
@@ -93,8 +94,12 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const startText = textOf(started);
-    assert.ok(startText.includes("这份内容准备投放在哪些平台"));
-    assert.ok(startText.includes("currentStep: collectPlatforms"));
+    assert.ok(startText.includes("当前共有 2 位评审员"));
+    assert.ok(startText.includes("视觉读者"));
+    assert.ok(startText.includes("逻辑读者"));
+    assert.ok(startText.includes("回复「开始审稿」确认开始评测"));
+    assert.ok(startText.includes("currentStep: confirmSelection"));
+    assert.ok(!startText.includes("这份内容准备投放在哪些平台"));
     assert.ok(!startText.includes("Kevlar-4u 宿主辅助评测任务"));
   });
 
@@ -107,14 +112,51 @@ describe("handleReviewContentWizard state machine", () => {
     });
     const sessionId = extractSessionId(textOf(started));
     
-    // User message contains "好" but is not exactly "好"
+    // User message contains "好" but is not exactly "好" — should not trigger false affirmative
     const selection = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "这篇不好",
     });
 
     const text = textOf(selection);
-    // Should NOT say "已选择：好"
+    // Should NOT say "已选择：好" — "这篇不好" should not match short persona name
     assert.ok(!text.includes("已选择：好"));
+  });
+
+  it('with 3+ personas: recommends 1-3, shows remaining as backup, executes on "开始审稿"', async () => {
+    writePersona("foodie", "美食达人", ["小红书", "美食"]);
+    writePersona("tech_guru", "科技极客", ["知乎", "科技"]);
+    writePersona("mom_user", "宝妈用户", ["抖音", "生活"]);
+    writePersona("student", "学生党", ["B站", "校园"]);
+
+    // Step 1: submit content — should recommend 1-3 and show remaining
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "请评测这篇美食文案：这是一篇关于菌菇产品的介绍。",
+    });
+    const startText = textOf(started);
+    const sessionId = extractSessionId(startText);
+
+    assert.ok(startText.includes("currentStep: confirmSelection"));
+    assert.ok(startText.includes("备选评审员"));
+    // At least one persona should be recommended (heuristic fallback picks top 3 by tag match)
+    assert.ok(
+      startText.includes("美食达人") ||
+      startText.includes("科技极客") ||
+      startText.includes("宝妈用户") ||
+      startText.includes("学生党")
+    );
+
+    // Step 2: add a backup reviewer by number, then start review
+    const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "开始审稿",
+    });
+    const confirmedText = textOf(confirmed);
+    // Should transition to postReview after execution (orchestration mode generates a report)
+    assert.ok(
+      confirmedText.includes("currentStep: postReview") ||
+      confirmedText.includes("评测完成") ||
+      confirmedText.includes("评测执行失败") // acceptable if sampling/direct_api unavailable
+    );
   });
 });

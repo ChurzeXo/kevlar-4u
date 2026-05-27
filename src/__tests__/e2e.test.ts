@@ -68,14 +68,15 @@ describe("End-to-End integration test", () => {
       assert.equal(step1.content[0].type, "text");
 
       const step1Text = step1.content[0].text;
-      assert.ok(step1Text.includes("这份内容准备投放在哪些平台"), "Should ask about target platform");
+      assert.ok(step1Text.includes("当前共有 1 位评审员"), "Should show all personas and ask for confirmation");
+      assert.ok(step1Text.includes("currentStep: confirmSelection"), "Should be in confirmation step directly");
 
       // Extract sessionId
       const sessionIdMatch = step1Text.match(/sessionId:\s*([a-z0-9-]+)/);
       assert.ok(sessionIdMatch, "Should include sessionId");
       const sessionId = sessionIdMatch[1];
 
-      // Step 2: Specify no platform → show all personas
+      // Step 2: Non-affirmative reply → re-shows current selection
       const step2 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
