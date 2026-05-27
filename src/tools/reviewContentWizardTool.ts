@@ -553,20 +553,24 @@ async function recommendPersonas(
         tags: p.meta.tags,
         description: p.meta.description,
       }));
+      const include = {
+        content: state.content,
+        context: state.context || "",
+        personas: personaSummary,
+      } as Record<string, unknown>;
+      if (state.preAuditReport) {
+        include.preAuditReport = state.preAuditReport;
+      }
       const response = await samplingFn({
         systemPrompt:
-          "你是评审员推荐助手。根据待评测内容推荐 1-3 个最匹配的评审员，输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"推荐理由+询问确认\"}。assistantMessage 应包含「根据内容特色，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。",
+          "你是评审员推荐助手。根据待评测内容和系统初审报告推荐 1-3 个最匹配的评审员，输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"推荐理由+询问确认\"}。assistantMessage 应包含「根据内容特色和初审发现的风险点，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。",
         messages: [
           {
             role: "user",
-            content: JSON.stringify({
-              content: state.content,
-              context: state.context || "",
-              personas: personaSummary,
-            }),
+            content: JSON.stringify(include),
           },
         ],
-        maxTokens: 2048,
+        maxTokens: 3072,
       });
       const parsed = JSON.parse(stripCodeFence(response.content.trim())) as Record<string, unknown>;
       const validIds = new Set(personas.map((p) => p.meta.id));

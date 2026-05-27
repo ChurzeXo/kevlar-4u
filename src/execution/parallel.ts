@@ -133,8 +133,7 @@ export function augmentSystemPrompt(
     parts.push(contextDirective);
   }
 
-  // ③ Dimensions (defensive + offensive)
-  parts.push(buildDefensiveSystemDirective());
+  // ③ Offensive dimensions only (defensive dimensions are handled by system auditors in pre-audit)
   const offensiveDirective = buildOffensiveSystemDirective(dimsConfig);
   if (offensiveDirective) {
     parts.push(offensiveDirective);

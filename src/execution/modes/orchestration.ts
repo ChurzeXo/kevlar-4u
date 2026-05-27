@@ -9,7 +9,7 @@
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
-import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, DEFENSIVE_DIMENSION_IDS } from "../dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, DEFENSIVE_DIMENSION_IDS } from "../dimensions.js";
 import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
 
 const MODE: ExecutionMode = "orchestration";
@@ -159,7 +159,6 @@ ${safeContent}${contextSection}
 请严格按照该审查员要求的输出格式作答。`;
   }
 
-  const defensiveDirective = buildDefensiveSystemDirective();
   const offensiveDirective = buildOffensiveSystemDirective(dimensionsConfig);
   const personaContextDirective = buildPersonaContextDirective(persona.meta);
 
@@ -200,9 +199,6 @@ ${safeSystemPrompt}
 
 ${personaContextDirective}
 
----
-
-${defensiveDirective}
 ${offensiveDirective ? `\n---\n\n${offensiveDirective}` : ""}
 
 **待评审内容**：
