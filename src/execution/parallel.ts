@@ -116,6 +116,11 @@ export function augmentSystemPrompt(
   persona: Persona,
   dimensions?: DimensionsConfig,
 ): string {
+  // System auditors use their original specialized prompt as-is
+  if (persona.meta.tags.includes("system_auditor")) {
+    return persona.systemPrompt;
+  }
+
   const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
   const parts: string[] = [];
 

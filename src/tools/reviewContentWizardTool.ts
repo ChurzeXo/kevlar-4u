@@ -58,6 +58,7 @@ interface ReviewWizardState {
   targetPlatforms: string[];
   selectedPersonaIds: string[];
   remainingPersonaIds: string[];
+  systemAuditorIds: string[];
   dimensions: DimensionsConfig;
   preAuditReport?: any;
 }
@@ -200,6 +201,8 @@ async function handleSystemAudit(
       ? `🔴 高风险项 ${highRisk} 个 · 🟡 中风险项 ${medRisk} 个`
       : "🟢 未发现明显风险项",
   };
+  state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
+  state.selectedPersonaIds = [...state.systemAuditorIds];
   state.step = "checkPersonaInventory";
   await saveState(tmpDir, state);
 
@@ -229,9 +232,16 @@ async function handleInventoryCheck(
     );
   }
 
+  // 自动选入系统审查员（必选）
+  const systemAuditorNames = state.preAuditReport?.dimensions
+    ?.map((d: any) => d.name)
+    .filter(Boolean)
+    .join("、") || "合规、语境脱嵌、网络文化、事实硬伤、社会风险";
+  const auditorLine = `✅ 系统审查员（${systemAuditorNames}）已自动选入`;
+
   // 仅 1-2 位评审员：直接全选，进入评审员确认
   if (personas.length <= 2) {
-    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.selectedPersonaIds = [...personas.map((p) => p.meta.id), ...state.systemAuditorIds];
     state.remainingPersonaIds = [];
     state.step = "waitingForReviewerConfirmation";
     await saveState(tmpDir, state);
@@ -239,6 +249,8 @@ async function handleInventoryCheck(
       state,
       [
         state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}\n` : "",
+        auditorLine,
+        "",
         `当前共有 ${personas.length} 位评审员：`,
         "",
         ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
@@ -254,7 +266,7 @@ async function handleInventoryCheck(
   const recommendation = await recommendPersonas(state, personas, samplingFn);
   const recommendedIds = new Set(recommendation.personaIds);
 
-  state.selectedPersonaIds = recommendation.personaIds;
+  state.selectedPersonaIds = [...recommendation.personaIds, ...state.systemAuditorIds];
   state.remainingPersonaIds = personas
     .filter((p) => !recommendedIds.has(p.meta.id))
     .map((p) => p.meta.id);
@@ -266,6 +278,8 @@ async function handleInventoryCheck(
     state,
     [
       state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}\n` : "",
+      auditorLine,
+      "",
       recommendation.assistantMessage,
       "",
       ...(remainingPersonas.length > 0
@@ -291,7 +305,7 @@ async function handleReviewerConfirmation(
 ): Promise<ToolResult> {
   // 使用全部 / 全选评审员
   if (/使用全部|全部评审|全选评审|所有评审/.test(userMessage)) {
-    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.selectedPersonaIds = [...personas.map((p) => p.meta.id), ...state.systemAuditorIds];
     state.remainingPersonaIds = [];
     await saveState(tmpDir, state);
     const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
@@ -713,7 +727,7 @@ async function selectAllAndConfirm(
   state: ReviewWizardState,
   personas: Persona[]
 ): Promise<ToolResult> {
-  state.selectedPersonaIds = personas.map((p) => p.meta.id);
+  state.selectedPersonaIds = [...personas.map((p) => p.meta.id), ...state.systemAuditorIds];
   state.remainingPersonaIds = [];
   const cost = estimateTokenCost(personas.length, state.content.length);
   return transitionTo(
@@ -730,7 +744,7 @@ async function selectExplicitAndConfirm(
   personas: Persona[],
   selectedIds: string[]
 ): Promise<ToolResult> {
-  state.selectedPersonaIds = selectedIds;
+  state.selectedPersonaIds = [...selectedIds, ...state.systemAuditorIds];
   state.remainingPersonaIds = personas
     .filter((p) => !selectedIds.includes(p.meta.id))
     .map((p) => p.meta.id);
@@ -833,8 +847,13 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         targetPlatforms: [],
         selectedPersonaIds: [],
         remainingPersonaIds: [],
+        systemAuditorIds: [],
         dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
       };
+    }
+    // Backward compatibility: ensure systemAuditorIds exists
+    if (!state.systemAuditorIds) {
+      state.systemAuditorIds = [];
     }
     return state;
   }
@@ -847,6 +866,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     targetPlatforms: [],
     selectedPersonaIds: [],
     remainingPersonaIds: [],
+    systemAuditorIds: [],
     dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
   };
 }

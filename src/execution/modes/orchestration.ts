@@ -140,7 +140,25 @@ function buildPersonaBlock(
     : "";
 
   const safeContent = wrapContent(content);
+  const isSystemAuditor = persona.meta.tags.includes("system_auditor");
   const safeSystemPrompt = wrapContent(stripPromptBoundaries(persona.systemPrompt), "sp");
+
+  // System auditors use their original specialized prompt as-is
+  if (isSystemAuditor) {
+    return `## 第 ${index} 号子代理：${persona.meta.name}
+
+**角色描述**：${persona.meta.description}
+
+**指令**：请你以系统审查员身份，独立对下方内容进行专项审查并输出结构化风险清单。
+
+${safeSystemPrompt}
+
+**待评审内容**：
+${safeContent}${contextSection}
+
+请严格按照该审查员要求的输出格式作答。`;
+  }
+
   const defensiveDirective = buildDefensiveSystemDirective();
   const offensiveDirective = buildOffensiveSystemDirective(dimensionsConfig);
   const personaContextDirective = buildPersonaContextDirective(persona.meta);

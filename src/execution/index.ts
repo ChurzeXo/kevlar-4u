@@ -167,6 +167,9 @@ export interface PersonaLoadingResult {
 }
 
 export function validatePersonaFields(persona: Persona): void {
+  // System auditors use a different schema - skip user-persona field validation
+  if (persona.meta.tags.includes("system_auditor")) return;
+
   const prompt = persona.systemPrompt || "";
   const tags = persona.meta.tags ?? [];
 
