@@ -560,6 +560,7 @@ export function buildReviewUserMessage(
 	content: string,
 	contextNote: string | undefined,
 	dimensions: DimensionsConfig,
+	preAuditReport?: any
 ): string {
 	const defensiveLabels = DEFENSIVE_DIMENSION_IDS.map(id => DIMENSIONS[id].label);
 	const offensiveLabels = dimensions.offensive.map(id => DIMENSIONS[id].label);
@@ -607,6 +608,25 @@ export function buildReviewUserMessage(
 
 	if (contextNote) {
 		message += `**发布平台 & 目标受众背景**：${contextNote}\n\n`;
+	}
+
+	if (preAuditReport && Array.isArray(preAuditReport.dimensions)) {
+		const hasFindings = preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
+		if (hasFindings) {
+			message += `**🚨 系统初审预警**：\n\n以下是系统在初步审查中发现的潜在风险点。请结合你的角色身份，判断这些风险在你的圈层中是否真的会引爆，以及影响有多大：\n\n`;
+			for (const audit of preAuditReport.dimensions) {
+				if (audit.findings && audit.findings.length > 0) {
+					message += `【${audit.name}】发现 ${audit.findings.length} 个潜在风险：\n`;
+					for (const f of audit.findings) {
+						message += `- 风险等级：${f.suggestedLevel || "未知"}\n`;
+						message += `  - 风险内容：${f.keyword}\n`;
+						message += `  - 触发原因：${f.trigger}\n`;
+						message += `  - 风险描述：${f.riskDescription}\n`;
+					}
+					message += `\n`;
+				}
+			}
+		}
 	}
 
 	message += content;

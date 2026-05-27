@@ -154,6 +154,7 @@ export async function handleReviewContent(
     mode?: ResolveableMode;
     samplingFn?: SamplingFunction;
     dimensions?: DimensionsConfig;
+    preAuditReport?: any;
   }
 ): Promise<ToolResult> {
   const validationError = validateInput(input);
@@ -175,6 +176,7 @@ export async function handleReviewContent(
       context: input.context,
       samplingFn: input.samplingFn,
       dimensions: input.dimensions ?? DEFAULT_DIMENSIONS_CONFIG,
+      preAuditReport: input.preAuditReport,
     };
 
     const result = await executeReview(mode, ctx);

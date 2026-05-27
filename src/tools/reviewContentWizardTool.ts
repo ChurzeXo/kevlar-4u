@@ -39,6 +39,7 @@ export interface ReviewWizardInput {
 }
 
 type ReviewWizardStep =
+  | "systemAudit"
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
   | "waitingForReviewerConfirmation"
@@ -58,6 +59,7 @@ interface ReviewWizardState {
   selectedPersonaIds: string[];
   remainingPersonaIds: string[];
   dimensions: DimensionsConfig;
+  preAuditReport?: any;
 }
 
 interface Recommendation {
@@ -90,8 +92,10 @@ export async function handleReviewContentWizard(
   try {
     await fs.promises.mkdir(tmpDir, { recursive: true });
     const state = await loadOrCreateState(tmpDir, input);
-    const personas = await loadAllPersonas(skillsDir);
-    return await advanceWizard(skillsDir, tmpDir, state, personas, input.userMessage, input.samplingFn);
+    const allPersonas = await loadAllPersonas(skillsDir);
+    const userPersonas = allPersonas.filter(p => !p.meta.tags.includes("system_auditor"));
+    const systemAuditors = allPersonas.filter(p => p.meta.tags.includes("system_auditor"));
+    return await advanceWizard(skillsDir, tmpDir, state, userPersonas, systemAuditors, input.userMessage, input.samplingFn);
   } catch (err) {
     const info = getErrorInfo(err);
     logger.error("Review content wizard failed", { event: "review_wizard_error", error: info.code, message: info.message });
@@ -106,11 +110,15 @@ async function advanceWizard(
   skillsDir: string,
   tmpDir: string,
   state: ReviewWizardState,
-  personas: Persona[],
+  personas: Persona[], // user personas
+  systemAuditors: Persona[],
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
   switch (state.step) {
+    case "systemAudit":
+      return handleSystemAudit(skillsDir, tmpDir, state, personas, systemAuditors, samplingFn);
+
     case "checkPersonaInventory":
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
 
@@ -137,6 +145,63 @@ async function advanceWizard(
   }
 }
 
+async function handleSystemAudit(
+  skillsDir: string,
+  tmpDir: string,
+  state: ReviewWizardState,
+  userPersonas: Persona[],
+  systemAuditors: Persona[],
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  if (!samplingFn || systemAuditors.length === 0) {
+    state.preAuditReport = { dimensions: [], summary: "未配置大模型或未找到系统审查员，跳过初审" };
+    state.step = "checkPersonaInventory";
+    await saveState(tmpDir, state);
+    return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
+  }
+
+  const results = await Promise.all(
+    systemAuditors.map(async (auditor) => {
+      try {
+        const response = await samplingFn({
+          systemPrompt: auditor.systemPrompt,
+          messages: [{ role: "user", content: `请审查以下内容：\n\n${state.content}` }],
+          maxTokens: 2048,
+        });
+        const parsed = JSON.parse(stripCodeFence(response.content.trim()));
+        return {
+          id: auditor.meta.id,
+          name: auditor.meta.name,
+          findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+        };
+      } catch (err) {
+        logger.warn("System auditor failed", { auditorId: auditor.meta.id, error: getErrorInfo(err).message });
+        return { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
+      }
+    })
+  );
+
+  let highRisk = 0;
+  let medRisk = 0;
+  for (const r of results) {
+    for (const f of r.findings) {
+      if (f.suggestedLevel === "🔴") highRisk++;
+      else if (f.suggestedLevel === "🟡") medRisk++;
+    }
+  }
+
+  state.preAuditReport = {
+    dimensions: results,
+    summary: highRisk > 0 || medRisk > 0
+      ? `🔴 高风险项 ${highRisk} 个 · 🟡 中风险项 ${medRisk} 个`
+      : "🟢 未发现明显风险项",
+  };
+  state.step = "checkPersonaInventory";
+  await saveState(tmpDir, state);
+
+  return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
+}
+
 async function handleInventoryCheck(
   tmpDir: string,
   state: ReviewWizardState,
@@ -151,10 +216,12 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
+        state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}` : "",
+        "",
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
         "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
-      ].join("\n")
+      ].filter(Boolean).join("\n")
     );
   }
 
@@ -167,14 +234,15 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
+        state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}\n` : "",
         `当前共有 ${personas.length} 位评审员：`,
         "",
         ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
         "",
-        "以上评审员已全部选中。请向用户展示，等待用户确认后回复「开始审稿」进入维度选择。",
+        "以上评审员已全部选中。请向用户展示初审结果和评审员，等待用户确认后回复「开始审稿」进入维度选择。",
         "",
         "等待用户输入后，再调用此工具以继续。",
-      ].join("\n")
+      ].filter(Boolean).join("\n")
     );
   }
 
@@ -193,6 +261,7 @@ async function handleInventoryCheck(
   return toolResponse(
     state,
     [
+      state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}\n` : "",
       recommendation.assistantMessage,
       "",
       ...(remainingPersonas.length > 0
@@ -202,10 +271,10 @@ async function handleInventoryCheck(
           ]
         : []),
       "",
-      "请向用户展示以上推荐结果。用户可回复编号增加评审员，或回复「开始审稿」确认进入维度选择。",
+      "请向用户展示初审结果和以上推荐结果。用户可回复编号增加评审员，或回复「开始审稿」确认进入维度选择。",
       "",
       "等待用户输入后，再调用此工具以继续。",
-    ].join("\n")
+    ].filter(Boolean).join("\n")
   );
 }
 
@@ -686,6 +755,7 @@ async function executeReview(
     context: state.context,
     mode: "auto",
     dimensions: state.dimensions,
+    preAuditReport: state.preAuditReport,
     samplingFn: samplingFn
       ? async (params) =>
           samplingFn({
@@ -754,7 +824,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
       return {
         sessionId,
         createdAt: Date.now(),
-        step: "checkPersonaInventory",
+        step: "systemAudit",
         content: state.content,
         targetPlatforms: [],
         selectedPersonaIds: [],
@@ -768,7 +838,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
   return {
     sessionId,
     createdAt: Date.now(),
-    step: "checkPersonaInventory",
+    step: "systemAudit",
     content: input.userMessage.trim(),
     targetPlatforms: [],
     selectedPersonaIds: [],

@@ -34,6 +34,7 @@ export interface ExecutionContext {
   context?: string;
   samplingFn?: SamplingFunction;
   dimensions?: DimensionsConfig;
+  preAuditReport?: any;
 }
 
 // ── Execution Result ─────────────────────────────────────────────────────────

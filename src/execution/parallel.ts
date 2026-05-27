@@ -20,6 +20,7 @@ interface ParallelExecutionOptions {
   mode: ExecutionMode;
   retryEventName: string;
   dimensions?: DimensionsConfig;
+  preAuditReport?: any;
 }
 
 export async function executePersonasInParallel(
@@ -93,6 +94,7 @@ export async function executePersonasInParallel(
     contentSummary: summarizeContent(content),
     personas: results,
     dimensions: options.dimensions ?? DEFAULT_DIMENSIONS_CONFIG,
+    preAuditReport: options.preAuditReport,
   });
 
   return {
@@ -153,10 +155,10 @@ export function augmentSystemPromptWithDefensive(systemPrompt: string): string {
 	return `${systemPrompt}\n\n---\n\n${defensiveDirective}`;
 }
 
-export function buildUserMessage(content: string, contextNote: string | undefined, dimensions?: DimensionsConfig): string {
+export function buildUserMessage(content: string, contextNote: string | undefined, dimensions?: DimensionsConfig, preAuditReport?: any): string {
   const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
   const wrapped = wrapContent(content);
-  return buildReviewUserMessage(wrapped, contextNote, dimsConfig);
+  return buildReviewUserMessage(wrapped, contextNote, dimsConfig, preAuditReport);
 }
 
 function summarizeContent(content: string, maxLength = 50): string {

@@ -87,6 +87,7 @@ interface AggregatedReportOptions {
   contentSummary: string;
   personas: PersonaResultWithMeta[];
   dimensions?: DimensionsConfig;
+  preAuditReport?: any;
 }
 
 export function generateAggregatedReport(options: AggregatedReportOptions): string {
@@ -112,6 +113,24 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
   }
 
   report += `\n**测试完成时间**：${new Date().toLocaleString("zh-CN")}`;
+
+  if (options.preAuditReport && options.preAuditReport.dimensions && options.preAuditReport.dimensions.length > 0) {
+    const hasFindings = options.preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
+    if (hasFindings) {
+      report += `\n\n---\n\n## 🚨 系统初审发现\n\n`;
+      report += `系统初审扫描出潜在风险点如下：\n`;
+      for (const audit of options.preAuditReport.dimensions) {
+        if (audit.findings && audit.findings.length > 0) {
+          report += `\n### 【${audit.name}】发现 ${audit.findings.length} 个风险项\n`;
+          for (const f of audit.findings) {
+            report += `- **${f.suggestedLevel || "未知"} ${f.keyword}**\n`;
+            report += `  - 触发原因：${f.trigger}\n`;
+            report += `  - 风险描述：${f.riskDescription}\n`;
+          }
+        }
+      }
+    }
+  }
 
   // Individual reviews
   if (successful.length > 0) {

@@ -78,9 +78,9 @@ export const samplingHandler: ExecutionHandler = {
     return executePersonasInParallel(
       personas,
       content,
-      { mode: MODE, retryEventName: "sampling", dimensions: dimsConfig },
-      async (persona: Persona) => {
-        const response = await executePersonaReview(samplingFn, persona, content, contextNote, dimsConfig);
+      { mode: MODE, retryEventName: "sampling", dimensions: dimsConfig, preAuditReport: ctx.preAuditReport },
+      (persona: Persona) => {
+        const response = executePersonaReview(samplingFn, persona, content, contextNote, dimsConfig, ctx.preAuditReport);
         return response;
       }
     );
@@ -95,8 +95,9 @@ async function executePersonaReview(
   content: string,
   contextNote: string | undefined,
   dimensions?: import("../dimensions.js").DimensionsConfig,
+  preAuditReport?: any
 ): Promise<string> {
-  const userMessage = buildUserMessage(content, contextNote, dimensions);
+  const userMessage = buildUserMessage(content, contextNote, dimensions, preAuditReport);
 
   const response = await callSamplingApi(
     samplingFn,

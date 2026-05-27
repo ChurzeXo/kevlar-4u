@@ -21,6 +21,9 @@ skills/tmp/
 # Custom persona files (platform-specific reviewer personas)
 skills/*/*.md
 
+# System auditors (compliance, context, culture, fact, social)
+!skills/system_auditors/*.md
+
 # Kevlar lab documents (audit reports, experiments, etc.)
 .kevlar_lab/
 

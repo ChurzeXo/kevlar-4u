@@ -253,9 +253,9 @@ export const directApiHandler: ExecutionHandler = {
     const result = await executePersonasInParallel(
       personas,
       content,
-      { mode: MODE, retryEventName: "api", dimensions: dimsConfig },
+      { mode: MODE, retryEventName: "api", dimensions: dimsConfig, preAuditReport: ctx.preAuditReport },
       async (persona: Persona) => {
-        const review = await executePersonaReview(keyInfo, persona, content, contextNote, dimsConfig);
+        const review = await executePersonaReview(keyInfo, persona, content, contextNote, dimsConfig, ctx.preAuditReport);
         return review;
       }
     );
@@ -278,8 +278,9 @@ async function executePersonaReview(
   content: string,
   contextNote: string | undefined,
   dimensions?: import("../dimensions.js").DimensionsConfig,
+  preAuditReport?: any
 ): Promise<string> {
-  const userMessage = buildUserMessage(content, contextNote, dimensions);
+  const userMessage = buildUserMessage(content, contextNote, dimensions, preAuditReport);
 
   const response = await callApi(keyInfo, {
     model: process.env.KEVLAR_MODEL || "",
