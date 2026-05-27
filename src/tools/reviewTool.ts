@@ -122,7 +122,7 @@ async function computeRemainingPersonas(
 ): Promise<Persona[]> {
   const allPersonas = await loadAllPersonas(skillsDir);
   const activeIds = new Set(activePersonas.map((p) => p.meta.id));
-  return allPersonas.filter((p) => !activeIds.has(p.meta.id));
+  return allPersonas.filter((p) => !activeIds.has(p.meta.id) && !p.meta.tags.includes("system_auditor"));
 }
 
 function buildContinuationNote(remainingPersonas: Persona[]): string {

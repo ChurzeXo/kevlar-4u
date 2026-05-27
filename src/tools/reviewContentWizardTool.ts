@@ -175,7 +175,7 @@ async function handleSystemAudit(
           findings: Array.isArray(parsed.findings) ? parsed.findings : [],
         };
       } catch (err) {
-        logger.warn("System auditor failed", { auditorId: auditor.meta.id, error: getErrorInfo(err).message });
+        logger.warn("System auditor failed", { event: "system_auditor_failed", auditorId: auditor.meta.id, error: getErrorInfo(err).message });
         return { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
       }
     })
