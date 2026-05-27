@@ -23,3 +23,6 @@ skills/*/*.md
 
 # Kevlar lab documents (audit reports, experiments, etc.)
 .kevlar_lab/
+
+# Release guide (local only)
+RELEASE.md

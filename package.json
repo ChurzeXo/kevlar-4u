@@ -13,7 +13,8 @@
     "setup": "tsx scripts/setup.ts",
     "kevlar-4u": "tsx scripts/cli.ts",
     "test": "tsx --test src/__tests__/**/*.test.ts",
-    "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts"
+    "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts",
+    "prepublishOnly": "if [ -z \"$CI\" ]; then echo '⚠️  请通过 CI 发布：git tag vX.X.X && git push origin vX.X.X'; exit 1; fi"
   },
   "files": [
     "dist/",
@@ -24,8 +25,16 @@
     "node": ">=20"
   },
   "keywords": ["mcp", "multi-agent", "content-review", "ai"],
-  "author": "",
+  "author": "9Churze",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/9Churze/kevlar-4u.git"
+  },
+  "homepage": "https://github.com/9Churze/kevlar-4u#readme",
+  "bugs": {
+    "url": "https://github.com/9Churze/kevlar-4u/issues"
+  },
   "type": "module",
   "dependencies": {
     "@inquirer/prompts": "^7.5.2",
