@@ -41,6 +41,7 @@ export interface ReviewWizardInput {
 type ReviewWizardStep =
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
+  | "waitingForReviewerConfirmation"
   | "collectPlatforms"
   | "selectDimensions"
   | "confirmSelection"
@@ -116,6 +117,9 @@ async function advanceWizard(
     case "waitingForPersonaCreation":
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
 
+    case "waitingForReviewerConfirmation":
+      return handleReviewerConfirmation(tmpDir, state, personas, userMessage, samplingFn);
+
     case "selectDimensions":
       return handleDimensionSelection(tmpDir, state, personas, userMessage, samplingFn);
 
@@ -154,11 +158,11 @@ async function handleInventoryCheck(
     );
   }
 
-  // 仅 1-2 位评审员：直接全选，进入维度选择
+  // 仅 1-2 位评审员：直接全选，进入评审员确认
   if (personas.length <= 2) {
     state.selectedPersonaIds = personas.map((p) => p.meta.id);
     state.remainingPersonaIds = [];
-    state.step = "selectDimensions";
+    state.step = "waitingForReviewerConfirmation";
     await saveState(tmpDir, state);
     return toolResponse(
       state,
@@ -167,11 +171,9 @@ async function handleInventoryCheck(
         "",
         ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
         "",
-        "接下来请选择评审维度。",
+        "以上评审员已全部选中。请向用户展示，等待用户确认后回复「开始审稿」进入维度选择。",
         "",
-        formatDimensionSelectionList(),
-        "",
-        "默认全部启用。回复编号（如「3,5」）取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+        "等待用户输入后，再调用此工具以继续。",
       ].join("\n")
     );
   }
@@ -184,7 +186,7 @@ async function handleInventoryCheck(
   state.remainingPersonaIds = personas
     .filter((p) => !recommendedIds.has(p.meta.id))
     .map((p) => p.meta.id);
-  state.step = "selectDimensions";
+  state.step = "waitingForReviewerConfirmation";
   await saveState(tmpDir, state);
 
   const remainingPersonas = personas.filter((p) => !recommendedIds.has(p.meta.id));
@@ -200,11 +202,129 @@ async function handleInventoryCheck(
           ]
         : []),
       "",
-      "接下来请选择评审维度：",
+      "请向用户展示以上推荐结果。用户可回复编号增加评审员，或回复「开始审稿」确认进入维度选择。",
       "",
-      formatDimensionSelectionList(),
+      "等待用户输入后，再调用此工具以继续。",
+    ].join("\n")
+  );
+}
+
+async function handleReviewerConfirmation(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  // 使用全部 / 全选评审员
+  if (/使用全部|全部评审|全选评审|所有评审/.test(userMessage)) {
+    state.selectedPersonaIds = personas.map((p) => p.meta.id);
+    state.remainingPersonaIds = [];
+    await saveState(tmpDir, state);
+    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+    return toolResponse(
+      state,
+      [
+        `✅ 已选择全部 ${personas.length} 位评审员。`,
+        "",
+        "当前已选评审员：",
+        ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
+        "",
+        "请向用户展示，回复「开始审稿」确认进入维度选择。",
+      ].join("\n")
+    );
+  }
+
+  // 通过编号从备选列表增加评审员
+  const numIndices = parseNumberIndices(userMessage);
+  if (numIndices.length > 0 && state.remainingPersonaIds.length > 0) {
+    return addByNumbersWithMessage(tmpDir, state, personas, numIndices);
+  }
+
+  // "开始审稿" 或确认类回复 → 进入维度选择
+  if (isAffirmative(userMessage)) {
+    if (state.selectedPersonaIds.length === 0) {
+      return toolResponse(state, "❌ 当前没有已选择的评审员。请回复编号选择评审员后再试。");
+    }
+    state.step = "selectDimensions";
+    await saveState(tmpDir, state);
+    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+    return toolResponse(
+      state,
+      [
+        `✅ 评审员已确认，共 ${selected.length} 位：${selected.map((p) => p.meta.name).join("、")}`,
+        "",
+        "接下来请选择评审维度：",
+        "",
+        formatDimensionSelectionList(),
+        "",
+        "默认全部启用。用户可回复编号取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+        "",
+        "等待用户输入后，再调用此工具以继续。",
+      ].join("\n")
+    );
+  }
+
+  // 未识别到有效指令 → 重新展示当前评审员状态
+  await saveState(tmpDir, state);
+  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
+  return toolResponse(
+    state,
+    [
+      "当前已选评审员：",
+      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
       "",
-      "默认全部启用。回复编号（如「3,5」）取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+      ...(remaining.length > 0
+        ? [
+            "备选评审员（回复对应编号可增加）：",
+            ...remaining.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+            "",
+            "请向用户展示，等待用户回复编号增加评审员，或回复「开始审稿」确认进入维度选择。",
+          ]
+        : ["请向用户展示，等待用户回复「开始审稿」确认进入维度选择。"]),
+    ].join("\n")
+  );
+}
+
+/** 在评审员确认步骤中，根据编号增加评审员并展示结果 */
+async function addByNumbersWithMessage(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  numIndices: number[]
+): Promise<ToolResult> {
+  const toAdd: string[] = [];
+  for (const num of numIndices) {
+    if (num > 0 && num <= state.remainingPersonaIds.length) {
+      toAdd.push(state.remainingPersonaIds[num - 1]);
+    }
+  }
+
+  if (toAdd.length === 0) {
+    await saveState(tmpDir, state);
+    return toolResponse(state, "未找到对应编号的评审员，请重新输入。");
+  }
+
+  state.selectedPersonaIds = [...state.selectedPersonaIds, ...toAdd];
+  state.remainingPersonaIds = state.remainingPersonaIds.filter((id) => !toAdd.includes(id));
+
+  const addedNames = personas.filter((p) => toAdd.includes(p.meta.id)).map((p) => p.meta.name);
+  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
+
+  await saveState(tmpDir, state);
+  return toolResponse(
+    state,
+    [
+      `✅ 已增加评审员：${addedNames.join("、")}`,
+      "",
+      "当前已选评审员：",
+      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
+      "",
+      ...(remaining.length > 0
+        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "回复编号继续增加评审员，或回复「开始审稿」确认进入维度选择。"]
+        : ["回复「开始审稿」确认进入维度选择。"]),
     ].join("\n")
   );
 }
@@ -216,40 +336,6 @@ async function handleDimensionSelection(
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
-  // If user wants to add more reviewers first, handle that
-  if (/使用全部|全部评审|全选评审|所有评审/.test(userMessage)) {
-    state.selectedPersonaIds = personas.map((p) => p.meta.id);
-    state.remainingPersonaIds = [];
-  } else {
-    const numIndices = parseNumberIndices(userMessage);
-    // Check if numbers match reviewer indices (from remaining list)
-    const isReviewerSelection = numIndices.length > 0 && state.remainingPersonaIds.length > 0 &&
-      numIndices.every(n => n > 0 && n <= state.remainingPersonaIds.length);
-
-    if (isReviewerSelection) {
-      const toAdd: string[] = [];
-      for (const num of numIndices) {
-        if (num > 0 && num <= state.remainingPersonaIds.length) {
-          toAdd.push(state.remainingPersonaIds[num - 1]);
-        }
-      }
-      state.selectedPersonaIds = [...state.selectedPersonaIds, ...toAdd];
-      state.remainingPersonaIds = state.remainingPersonaIds.filter((id) => !toAdd.includes(id));
-      const addedNames = personas.filter((p) => toAdd.includes(p.meta.id)).map((p) => p.meta.name);
-      await saveState(tmpDir, state);
-      return toolResponse(
-        state,
-        [
-          `✅ 已增加评审员：${addedNames.join("、")}`,
-          "",
-          formatDimensionSelectionList(),
-          "",
-          "回复编号取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
-        ].join("\n")
-      );
-    }
-  }
-
   // Parse dimension selection
   if (/开始|审稿|评测|确认|默认|全部维度|ok|yes/i.test(userMessage)) {
     // Use default or already-set dimensions, proceed to confirm
@@ -266,7 +352,7 @@ async function handleDimensionSelection(
         `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
         `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
         "",
-        "回复「开始审稿」确认开始评测。",
+        "请向用户展示以上信息，等待用户确认后回复「开始审稿」以执行评测。",
       ].join("\n")
     );
   }
@@ -285,7 +371,7 @@ async function handleDimensionSelection(
         "",
         formatDimensionSelectionList(),
         "",
-        "回复编号取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
+        "请向用户展示维度列表，等待用户回复编号取消对应维度，或回复「开始审稿」使用全部维度。",
       ].join("\n")
     );
   }
@@ -299,12 +385,12 @@ async function handleDimensionSelection(
     state,
     [
       `✅ 已排除 ${excludedCount} 个进攻性维度，保留 ${state.dimensions.offensive.length} 个。`,
-      "",
-      `已选评审员：${selected.map((p) => p.meta.name).join("、")}`,
-      `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
-      `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
-      "",
-      "回复「开始审稿」确认开始评测。",
+        "",
+        `已选评审员：${selected.map((p) => p.meta.name).join("、")}`,
+        `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
+        `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
+        "",
+        "请向用户展示以上信息，等待用户确认后回复「开始审稿」以执行评测。",
     ].join("\n")
   );
 }
@@ -360,9 +446,9 @@ async function handleSelectionConfirmation(
             "备选评审员（回复编号可增加）：",
             ...remaining.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
             "",
-            "回复编号增加评审员，确认名单后回复「开始审稿」开始评测。",
+            "请向用户展示当前评审员，等待用户回复编号增加或回复「开始审稿」确认。",
           ]
-        : ["回复「开始审稿」开始评测。"]),
+        : ["请向用户展示当前评审员，等待用户回复「开始审稿」确认执行。"]),
     ].join("\n")
   );
 }
@@ -438,7 +524,7 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
       "",
       ...selected.map((p) => `- ${p.meta.name}（推荐理由：标签与描述和本次内容更接近）`),
       "",
-      "如需增加评审员，请回复备选列表中对应编号；确认后回复「开始审稿」开始评测。",
+      "请向用户展示以上推荐结果，等待用户选择。用户可回复编号增加评审员，或回复「开始审稿」确认。",
     ].join("\n"),
   };
 }
@@ -507,8 +593,8 @@ async function addByNumbers(
       ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
       "",
       ...(remaining.length > 0
-        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "确认名单后回复「开始审稿」开始评测。"]
-        : ["回复「开始审稿」开始评测。"]),
+        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]
+        : ["请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]),
     ].join("\n")
   );
 }
@@ -543,8 +629,8 @@ async function addByIds(
       ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
       "",
       ...(remaining.length > 0
-        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "确认名单后回复「开始审稿」开始评测。"]
-        : ["回复「开始审稿」开始评测。"]),
+        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]
+        : ["请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]),
     ].join("\n")
   );
 }
@@ -561,7 +647,7 @@ async function selectAllAndConfirm(
     tmpDir,
     state,
     "confirmSelection",
-    `已选择全部 ${personas.length} 位评审员。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n回复「开始审稿」确认开始评测。`
+    `已选择全部 ${personas.length} 位评审员。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n请向用户展示，等待用户确认后回复「开始审稿」执行评测。`
   );
 }
 
@@ -584,7 +670,7 @@ async function selectExplicitAndConfirm(
     tmpDir,
     state,
     "confirmSelection",
-    `已选择：${names}。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n回复「开始审稿」确认开始评测。`
+    `已选择：${names}。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n请向用户展示，等待用户确认后回复「开始审稿」执行评测。`
   );
 }
 
@@ -636,6 +722,8 @@ async function handlePostReview(
       "请选择要使用的评审员：",
       "",
       ...personas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+      "",
+      "请向用户展示以上列表，等待用户选择后回复编号增加评审员，或回复「开始审稿」确认。",
     ].join("\n"));
   }
 

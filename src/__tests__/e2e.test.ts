@@ -55,7 +55,7 @@ describe("End-to-End integration test", () => {
     ]);
 
     try {
-      // Step 1: Start wizard with content
+      // Step 1: Start wizard with content → waitingForReviewerConfirmation
       const step1 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
@@ -68,20 +68,20 @@ describe("End-to-End integration test", () => {
       assert.equal(step1.content[0].type, "text");
 
       const step1Text = step1.content[0].text;
-      assert.ok(step1Text.includes("当前共有 1 位评审员"), "Should show all personas and ask for confirmation");
-      assert.ok(step1Text.includes("currentStep: confirmSelection"), "Should be in confirmation step directly");
+      assert.ok(step1Text.includes("当前共有 1 位评审员"), "Should show all personas");
+      assert.ok(step1Text.includes("currentStep: waitingForReviewerConfirmation"), "Should be in reviewer confirmation step");
 
       // Extract sessionId
       const sessionIdMatch = step1Text.match(/sessionId:\s*([a-z0-9-]+)/);
       assert.ok(sessionIdMatch, "Should include sessionId");
       const sessionId = sessionIdMatch[1];
 
-      // Step 2: Non-affirmative reply → re-shows current selection
+      // Step 2: confirm reviewers → selectDimensions
       const step2 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
           sessionId,
-          userMessage: "通用",
+          userMessage: "开始审稿",
         },
       });
 
@@ -89,15 +89,15 @@ describe("End-to-End integration test", () => {
       assert.ok(Array.isArray(step2.content), "Step 2 response should have content array");
       assert.equal(step2.content[0].type, "text");
       const step2Text = step2.content[0].text;
-      assert.ok(step2Text.includes("E2E Tester"), "Should list the persona");
-      assert.ok(step2Text.includes("currentStep: confirmSelection"), "Should be in confirmation step");
+      assert.ok(step2Text.includes("currentStep: selectDimensions"), "Should be in dimension selection step");
+      assert.ok(step2Text.includes("✅ 评审员已确认"), "Should confirm reviewers");
 
-      // Step 3: Confirm → execute review
+      // Step 3: confirm dimensions → confirmSelection
       const step3 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
           sessionId,
-          userMessage: "确认",
+          userMessage: "开始审稿",
         },
       });
 
@@ -105,8 +105,24 @@ describe("End-to-End integration test", () => {
       assert.ok(Array.isArray(step3.content), "Step 3 response should have content array");
       assert.equal(step3.content[0].type, "text");
       const step3Text = step3.content[0].text;
-      assert.ok(step3Text.includes("E2E Tester"), "Should include persona name in report");
-      assert.ok(step3Text.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
+      assert.ok(step3Text.includes("currentStep: confirmSelection"), "Should be in confirmation step");
+      assert.ok(step3Text.includes("E2E Tester"), "Should list the persona");
+
+      // Step 4: Confirm → execute review
+      const step4 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: {
+          sessionId,
+          userMessage: "开始审稿",
+        },
+      });
+
+      assert.ok(step4, "Step 4 response should exist");
+      assert.ok(Array.isArray(step4.content), "Step 4 response should have content array");
+      assert.equal(step4.content[0].type, "text");
+      const step4Text = step4.content[0].text;
+      assert.ok(step4Text.includes("E2E Tester"), "Should include persona name in report");
+      assert.ok(step4Text.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
     } finally {
       await client.close();
       await server.close();
