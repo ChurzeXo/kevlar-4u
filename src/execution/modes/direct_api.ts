@@ -279,7 +279,7 @@ async function executePersonaReview(
   contextNote: string | undefined,
   dimensions?: import("../dimensions.js").DimensionsConfig,
 ): Promise<string> {
-  const userMessage = buildUserMessage(content, contextNote);
+  const userMessage = buildUserMessage(content, contextNote, dimensions);
 
   const response = await callApi(keyInfo, {
     model: process.env.KEVLAR_MODEL || "",

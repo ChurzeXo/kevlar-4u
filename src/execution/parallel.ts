@@ -8,7 +8,7 @@
 import type { Persona } from "../utils/parser.js";
 import type { ExecutionMode, ExecutionResult, ExecutionContext } from "./base.js";
 import type { DimensionsConfig } from "./dimensions.js";
-import { DEFAULT_DIMENSIONS_CONFIG, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective } from "./dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, buildReviewUserMessage } from "./dimensions.js";
 import { readConfig } from "./config.js";
 import { getRateLimiter, withRetry } from "./limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "./aggregator.js";
@@ -135,9 +135,9 @@ export function augmentSystemPrompt(
 
   // ④ Tone constraint (last — constrains output style)
   if (persona.meta.tone) {
-    const toneList = Array.isArray(persona.meta.tone) ? persona.meta.tone.join("、") : persona.meta.tone;
-    if (toneList) {
-      parts.push(`## 🎙️ 讲话语气\n\n请以「${toneList}」的语气进行评审输出。`);
+    const toneDirective = buildToneDirective(persona.meta.tone);
+    if (toneDirective) {
+      parts.push(toneDirective);
     }
   }
 
@@ -153,13 +153,10 @@ export function augmentSystemPromptWithDefensive(systemPrompt: string): string {
 	return `${systemPrompt}\n\n---\n\n${defensiveDirective}`;
 }
 
-export function buildUserMessage(content: string, contextNote?: string): string {
+export function buildUserMessage(content: string, contextNote: string | undefined, dimensions?: DimensionsConfig): string {
+  const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
   const wrapped = wrapContent(content);
-  let message = `请对以下内容进行评论：\n\n${wrapped}`;
-  if (contextNote) {
-    message += `\n\n**发布平台 & 目标受众背景**：${contextNote}`;
-  }
-  return message;
+  return buildReviewUserMessage(wrapped, contextNote, dimsConfig);
 }
 
 function summarizeContent(content: string, maxLength = 50): string {

@@ -4,6 +4,7 @@ import {
 	validateWritePath,
 	writePersonaFile,
 	PersonaMeta,
+	PersonaBehaviorHints,
 } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 import {
@@ -320,6 +321,9 @@ function buildPersonaMeta(
 			: typeof draft?.fields?.tone === "string" && draft.fields.tone
 				? { tone: [sanitizePersistentField(draft.fields.tone)] }
 				: {}),
+		...(input.behaviorHints && typeof input.behaviorHints === "object"
+			? { behaviorHints: input.behaviorHints }
+			: {}),
 	};
 }
 
@@ -336,6 +340,7 @@ export interface CreatePersonaInput {
 	dimensionBias?: import("../execution/dimensions.js").DimensionBias;
 	blindSpot?: string;
 	gender?: string;
+	behaviorHints?: PersonaBehaviorHints;
 }
 
 export async function handleSaveDraft(

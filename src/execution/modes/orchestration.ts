@@ -9,7 +9,7 @@
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
-import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective, DEFENSIVE_DIMENSION_IDS } from "../dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, DEFENSIVE_DIMENSION_IDS } from "../dimensions.js";
 import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
 
 const MODE: ExecutionMode = "orchestration";
@@ -129,9 +129,9 @@ function buildPersonaBlock(
   // Build tone section (last, as output style constraint)
   let toneSection = "";
   if (persona.meta.tone) {
-    const toneList = Array.isArray(persona.meta.tone) ? persona.meta.tone.join("、") : persona.meta.tone;
-    if (toneList) {
-      toneSection = `\n\n---\n\n## 🎙️ 讲话语气\n\n请以「${toneList}」的语气进行评审输出。`;
+    const toneDirective = buildToneDirective(persona.meta.tone);
+    if (toneDirective) {
+      toneSection = `\n\n---\n\n${toneDirective}`;
     }
   }
 

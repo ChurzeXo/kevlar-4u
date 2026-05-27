@@ -21,6 +21,19 @@ export interface PersonaMeta {
   gender?: string;
   ageRange?: string;
   tone?: string | string[];
+  /** AI-generated behavior hints for each persona attribute — explains how each attribute influences the reviewer's judgment */
+  behaviorHints?: PersonaBehaviorHints;
+}
+
+/** AI-generated behavior hints for each persona attribute */
+export interface PersonaBehaviorHints {
+  ageRange?: string;
+  gender?: string;
+  tags?: string;
+  culturalContext?: string;
+  perspective?: string;
+  blindSpot?: string;
+  authorRelation?: string;
 }
 
 export interface Persona {
@@ -99,6 +112,15 @@ export async function parsePersonaFile(filePath: string): Promise<Persona | null
     gender: data.gender ? String(data.gender) : undefined,
     ageRange: data.ageRange ? String(data.ageRange) : undefined,
     tone: Array.isArray(data.tone) ? data.tone.map(String) : (data.tone ? [String(data.tone)] : undefined),
+    behaviorHints: data.behaviorHints && typeof data.behaviorHints === "object" ? {
+      ageRange: typeof data.behaviorHints.ageRange === "string" ? data.behaviorHints.ageRange : undefined,
+      gender: typeof data.behaviorHints.gender === "string" ? data.behaviorHints.gender : undefined,
+      tags: typeof data.behaviorHints.tags === "string" ? data.behaviorHints.tags : undefined,
+      culturalContext: typeof data.behaviorHints.culturalContext === "string" ? data.behaviorHints.culturalContext : undefined,
+      perspective: typeof data.behaviorHints.perspective === "string" ? data.behaviorHints.perspective : undefined,
+      blindSpot: typeof data.behaviorHints.blindSpot === "string" ? data.behaviorHints.blindSpot : undefined,
+      authorRelation: typeof data.behaviorHints.authorRelation === "string" ? data.behaviorHints.authorRelation : undefined,
+    } : undefined,
   };
 
   // New format: dimensionBias stored directly in YAML

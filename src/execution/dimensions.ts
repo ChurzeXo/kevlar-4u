@@ -468,20 +468,149 @@ export function buildOffensiveSystemDirective(config: DimensionsConfig): string 
 	return directive;
 }
 
-/** Build the persona context directive from PersonaMeta fields */
+/** Build the persona context directive from PersonaMeta fields + behavior hints */
 export function buildPersonaContextDirective(meta: import("../utils/parser.js").PersonaMeta): string {
+	const hints = meta.behaviorHints;
 	const lines: string[] = ["## 👤 评审员画像\n\n以下是你作为评审员的身份属性，请严格以此身份进行评审：\n"];
 
-	if (meta.ageRange) lines.push(`- 年龄段：${meta.ageRange}`);
-	if (meta.gender) lines.push(`- 性别：${meta.gender}`);
-	if (meta.tags && meta.tags.length > 0) lines.push(`- 兴趣方向：${meta.tags.join("、")}`);
-	if (meta.culturalContext) lines.push(`- 文化背景：${meta.culturalContext}`);
-	if (meta.dimensionBias?.perspective) lines.push(`- 立场视角：${meta.dimensionBias.perspective}`);
-	if (meta.blindSpot) lines.push(`- 盲区：${meta.blindSpot}`);
-	if (meta.authorRelation) lines.push(`- 与作者关系：${meta.authorRelation}`);
+	if (meta.ageRange) {
+		lines.push(`- 年龄段：${meta.ageRange}`);
+		if (hints?.ageRange) lines.push(`  → ${hints.ageRange}`);
+	}
+	if (meta.gender) {
+		lines.push(`- 性别：${meta.gender}`);
+		if (hints?.gender) lines.push(`  → ${hints.gender}`);
+	}
+	if (meta.tags && meta.tags.length > 0) {
+		lines.push(`- 兴趣方向：${meta.tags.join("、")}`);
+		if (hints?.tags) lines.push(`  → ${hints.tags}`);
+	}
+	if (meta.culturalContext) {
+		lines.push(`- 文化背景：${meta.culturalContext}`);
+		if (hints?.culturalContext) lines.push(`  → ${hints.culturalContext}`);
+	}
+	if (meta.dimensionBias?.perspective) {
+		lines.push(`- 立场视角：${meta.dimensionBias.perspective}`);
+		if (hints?.perspective) lines.push(`  → ${hints.perspective}`);
+	}
+	if (meta.blindSpot) {
+		lines.push(`- 盲区：${meta.blindSpot}`);
+		if (hints?.blindSpot) lines.push(`  → ${hints.blindSpot}`);
+	}
+	if (meta.authorRelation) {
+		lines.push(`- 与作者关系：${meta.authorRelation}`);
+		if (hints?.authorRelation) lines.push(`  → ${hints.authorRelation}`);
+	}
 
 	lines.push("");
 	return lines.join("\n");
+}
+
+/** Build the tone directive with behavioral constraints */
+export function buildToneDirective(tone: string | string[]): string {
+	const toneList = Array.isArray(tone) ? tone.join("、") : tone;
+	if (!toneList) return "";
+
+	// Generate positive and negative constraints based on tone keywords
+	const positive: string[] = [];
+	const negative: string[] = [];
+
+	const toneStr = Array.isArray(tone) ? tone.join(" ") : tone;
+
+	if (/犀利|毒舌|尖锐|直接|不客气/.test(toneStr)) {
+		positive.push("评价一针见血，不绕弯子，不堆砌客套");
+		positive.push("用具体的比喻或类比点出问题，而非抽象概括");
+		negative.push("不要使用「综上所述」「笔者认为」等公文式表达");
+	} else if (/温柔|耐心|暖心|治愈|柔软/.test(toneStr)) {
+		positive.push("以理解和共情的方式指出问题，先肯定再建议");
+		positive.push("用温暖但诚实的语言表达真实感受");
+		negative.push("不要用冷酷或居高临下的语气批评");
+	} else if (/幽默|风趣|调侃|讽刺|阴阳/.test(toneStr)) {
+		positive.push("用巧妙的比喻或反讽揭示问题");
+		positive.push("让批评有趣但不失深度");
+		negative.push("不要变成纯段子手而忽略实质问题");
+	} else if (/理性|冷静|分析|客观|专业/.test(toneStr)) {
+		positive.push("用数据和逻辑论证观点，保持论述的严密性");
+		positive.push("观点有层次，先说结论再展开论证");
+		negative.push("不要堆砌术语或故作高深");
+	} else if (/暴躁|急躁|没耐心|大白话/.test(toneStr)) {
+		positive.push("直戳痛点，不废话铺垫，结论先行");
+		positive.push("用最直白的大白话说出感受");
+		negative.push("不要写长段落，不要铺垫背景");
+	} else {
+		positive.push("保持你自然的表达方式，让评价有个性");
+		positive.push("观点明确，不模糊其词");
+		negative.push("不要使用模板化或公文式表达");
+	}
+
+	let directive = `## 🎙️ 讲话语气\n\n你必须以「${toneList}」的语气进行评审输出。具体要求：`;
+	for (const p of positive) {
+		directive += `\n- ${p}`;
+	}
+	for (const n of negative) {
+		directive += `\n- ${n}`;
+	}
+	directive += "\n- 可以尖锐/犀利/温柔（取决于你的设定），但必须基于你的维度判定，不可为风格而牺牲准确性";
+
+	return directive;
+}
+
+/** Build the user message for content review, with dimension-referencing instructions */
+export function buildReviewUserMessage(
+	content: string,
+	contextNote: string | undefined,
+	dimensions: DimensionsConfig,
+): string {
+	const defensiveLabels = DEFENSIVE_DIMENSION_IDS.map(id => DIMENSIONS[id].label);
+	const offensiveLabels = dimensions.offensive.map(id => DIMENSIONS[id].label);
+
+	let message = `请按照你的评审体系对以下内容进行严格审查。
+
+## 评审要求
+
+1. **必须逐维度评估**：按你被指定的评审维度逐一审查，不可跳过任何维度，不可合并维度结论。
+2. **每个维度必须包含**：
+   - 风险/价值等级：🟢 / 🟡 / 🔴
+   - 判定依据：引用内容中的具体表述，结合你自身身份属性说明为何触发该判定
+   - 修改建议（🟡/🔴 时必填）：给出具体可执行的修改方向
+
+3. **输出格式**：
+
+### 🛡️ 防御性风险评估
+| 维度 | 等级 | 判定依据 | 修改建议 |
+|------|------|---------|---------|`;
+
+	for (const label of defensiveLabels) {
+		message += `\n| ${label} | 🟢/🟡/🔴 | ... | ... |`;
+	}
+
+	message += `
+
+### 🚀 进攻性价值评估
+| 维度 | 等级 | 判定依据 | 优化建议 |
+|------|------|---------|---------|`;
+
+	for (const label of offensiveLabels) {
+		message += `\n| ${label} | 🟢/🟡/🔴 | ... | ... |`;
+	}
+
+	message += `
+
+### 综合结论
+- 一句话总评：
+- 最紧急修改项：
+- 优先优化项：
+
+---
+
+`;
+
+	if (contextNote) {
+		message += `**发布平台 & 目标受众背景**：${contextNote}\n\n`;
+	}
+
+	message += content;
+	return message;
 }
 
 // ── Dimension Bias (replaces Persona stance) ────────────────────────────────

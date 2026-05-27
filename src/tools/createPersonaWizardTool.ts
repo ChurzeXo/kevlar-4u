@@ -20,6 +20,7 @@ import {
   OFFENSIVE_DIMENSION_IDS,
   DIMENSIONS,
 } from "../execution/dimensions.js";
+import type { PersonaBehaviorHints } from "../utils/parser.js";
 
 // ── Prompt Injection Defense for LLM Extraction ──────────────────────────────
 // Shared security rules appended AFTER the role definition in every extraction
@@ -194,6 +195,7 @@ interface WizardState {
     blindSpot?: string | null;
     personaName?: string | null;
     gender?: string | null;
+    behaviorHints?: PersonaBehaviorHints | null;
   };
 }
 
@@ -719,6 +721,7 @@ async function completeWizard(
     dimensionBias: state.fields.dimensionBias,
     blindSpot: state.fields.blindSpot ?? undefined,
     gender: state.fields.gender ?? undefined,
+    behaviorHints: state.fields.behaviorHints ?? undefined,
   });
 
   if (!createResult.isError) {
@@ -900,7 +903,7 @@ async function inferFinalFields(
   state: WizardState,
   skillsDir: string,
   samplingFn?: MultiTurnSamplingFunction
-): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "blindSpot" | "personaName" | "gender">> {
+): Promise<Pick<WizardState["fields"], "culturalContext" | "authorRelation" | "blindSpot" | "personaName" | "gender" | "behaviorHints">> {
   const { refs: existingRefs } = readExistingPersonas(state, skillsDir);
 
   if (!samplingFn) {
@@ -910,6 +913,7 @@ async function inferFinalFields(
       blindSpot: generateFallbackBlindSpot(state),
       personaName: generateFallbackPersonaName(state, skillsDir),
       gender: inferFallbackGender(state),
+      behaviorHints: generateFallbackBehaviorHints(state),
     };
   }
 
@@ -943,6 +947,14 @@ async function inferFinalFields(
         `- gender：男 / 女。根据年龄段、兴趣方向、性格特质和讲话语气推断。如果确实无法判断，输出 null（不要输出"未知""不详""未指定"等）`,
         `- culturalContext：该角色的文化语境`,
         `- blindSpot：该角色因自身局限可能忽略的视角。必须给出一个具体的盲区描述，体现这个角色因背景、兴趣或性格导致的认知局限。禁止输出"无特定盲区""无明显盲区""暂无"等空泛描述`,
+        `- behaviorHints：为每个已有属性生成一段行为暗示，说明该属性如何影响评审判断。每个字段是一句具体的、行为化的描述（20-50字），而非抽象标签。必须包含以下有对应属性值的字段：`,
+        `  - ageRange：说明该年龄段如何影响评审判断（如"你会以25-30岁的生活经验审视内容的消费诱惑力，对必买清单类话术天然警觉"）`,
+        `  - gender：说明该性别视角如何影响评审关注点（如"你会从女性视角关注措辞中隐含的性别预设和身体焦虑暗示"）`,
+        `  - tags：说明兴趣方向如何影响专业判断（如"你对美妆成分和穿搭版型有专业判断力，能识别伪功效和版型硬伤"）`,
+        `  - culturalContext：说明文化背景如何影响贴近度判断（如"你习惯一线城市的消费节奏，对下沉市场视角的内容会本能感到距离"）`,
+        `  - perspective：说明立场视角如何影响判定权重（如"这是你的核心审视角度，会让你对所有涉及措辞和情绪的内容更敏感"）`,
+        `  - blindSpot：说明盲区如何约束评审行为（如"遇到科技产品评测内容时你应标注为盲区，不做确定性判断"）`,
+        `  - authorRelation：说明与作者关系如何影响可信度判断（如"你会以这东西值不值得我掏钱的标准审视内容的可信度"）`,
         ``,
         `重要规则：`,
         `- personaName 不能与同平台已有评审员重名或高度相似`,
@@ -954,20 +966,20 @@ async function inferFinalFields(
         ``,
         `<output>`,
         `严格输出 JSON（不要输出 markdown、解释、多余文本，不要输出多个 JSON 对象）：`,
-        `{"personaName":"...或null","gender":"男或女或未指定或null","culturalContext":"...","blindSpot":"...或null"}`,
+        `{"personaName":"...或null","gender":"男或女或未指定或null","culturalContext":"...","blindSpot":"...或null","behaviorHints":{"ageRange":"...","gender":"...","tags":"...","culturalContext":"...","perspective":"...","blindSpot":"...","authorRelation":"..."}}`,
         ``,
         `示例：`,
         `已确认字段：{"ageRange":"25-30岁","platform":"小红书","interests":["时尚穿搭","美妆测评"],"traits":["跟风 → 因此当看到热门内容时会倾向于推荐"],"tone":["直接了当"],"dimensionBias":{"perspective":"关注措辞细节、情绪表达与社会议题感受的都市女性视角"}}`,
         `输出：`,
-        `{"personaName":"奶茶仓鼠","gender":"女","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略小众品牌或性价比路线的内容，对非视觉化产品缺乏耐心"}`,
+        `{"personaName":"奶茶仓鼠","gender":"女","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略小众品牌或性价比路线的内容，对非视觉化产品缺乏耐心","behaviorHints":{"ageRange":"你会以25-30岁的生活经验审视内容的消费诱惑力，对必买清单类话术天然警觉","gender":"你会从女性视角关注措辞中隐含的性别预设和身体焦虑暗示","tags":"你对时尚穿搭和美妆测评有专业判断力，能识别伪功效和版型硬伤","culturalContext":"你习惯大陆互联网语境，对需要文化背景转换的内容会有距离感","perspective":"这是你的核心审视角度，会让你对所有涉及措辞和情绪的内容更敏感","blindSpot":"遇到非视觉化产品评测内容时你应标注为盲区，不做确定性判断","authorRelation":"你会以这东西值不值得我掏钱的标准审视内容的可信度"}}`,
         ``,
         `已确认字段：{"ageRange":"30-35岁","platform":"知乎","interests":["科技","AI","数码"],"traits":["理性 → 因此当看到夸大宣传时会质疑数据来源"],"tone":["冷静分析"],"dimensionBias":{"perspective":"关注逻辑结构、信息准确度与技术细节的理性分析视角"}}`,
         `输出：`,
-        `{"personaName":"赛博咸鱼","gender":"男","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略非技术用户的使用体验和情感诉求，对感性表达缺乏共鸣"}`,
+        `{"personaName":"赛博咸鱼","gender":"男","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略非技术用户的使用体验和情感诉求，对感性表达缺乏共鸣","behaviorHints":{"ageRange":"你会以30-35岁的职场经验审视内容的实用性，对空洞鸡汤类内容天然免疫","gender":"你会从男性视角关注内容中是否有过度简化性别议题的倾向","tags":"你对科技和AI领域有专业判断力，能识别伪技术噱头和过度包装","culturalContext":"你习惯大陆互联网语境，对海外视角的内容会自动做本地化映射","perspective":"这是你的核心审视角度，会让你对所有涉及逻辑和事实的内容更严格","blindSpot":"遇到需要情感共鸣而非逻辑论证的内容时你应坦诚标注盲区","authorRelation":"你会以这说法经不经得起推敲的标准审视内容的可信度"}}`,
         ``,
         `已确认字段：{"ageRange":"25-30岁","platform":"小红书","interests":["科技","理财","游戏"],"traits":["拒绝黑话 → 因此当遇到术语堆砌时会直接质疑","注意力极短 → 因此当内容冗长时会迅速跳过","实用主义 → 因此当内容缺乏可操作信息时会表达不满","政治正确 → 因此当触碰敏感话题时会主动追击","寻找舆论雷区 → 因此当发现争议点时会放大讨论"],"tone":["语速快、没耐心、大白话、直戳痛点"],"dimensionBias":{"perspective":"关注商业表达、营销语言与消费真实性的商业观察视角；同时具备强调个体表达、价值一致性与真实感受的独立思考视角"}}`,
         `输出：`,
-        `{"personaName":"暴躁韭菜","gender":"男","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略需要长期投入才能见效的内容，对情感共鸣类内容缺乏耐心，容易因追求「爽感」而错过深度价值"}`,
+        `{"personaName":"暴躁韭菜","gender":"男","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略需要长期投入才能见效的内容，对情感共鸣类内容缺乏耐心，容易因追求爽感而错过深度价值","behaviorHints":{"ageRange":"你会以25-30岁的消费经验审视内容的实用价值，对画饼类内容天然反感","gender":"你会从男性视角关注内容中是否有消费主义陷阱和虚假承诺","tags":"你对科技理财游戏领域有实操经验，能识别伪专业和纸上谈兵","culturalContext":"你习惯大陆互联网语境，对需要文化背景转换的内容会有距离感","perspective":"这是你的核心审视角度，会让你对所有涉及商业话术和消费诱导的内容更警觉","blindSpot":"遇到需要情感共鸣而非实用信息的内容时你应坦诚标注盲区","authorRelation":"你会以这东西值不值得我花时间看的标准审视内容的可信度"}}`,
         ``,
         `规则：`,
         `- culturalContext 可根据平台推断，不应为 null`,
@@ -981,6 +993,20 @@ async function inferFinalFields(
       inputSemantics: "strong",
     });
     const VAGUE_BLINDSPOT_LOCAL = /^(无特定盲区|无明显盲区|暂无|无|不适用|n\/a|没有盲区)$/i;
+
+    // Parse behaviorHints from LLM response
+    const rawHints = json.behaviorHints as Record<string, unknown> | undefined;
+    const behaviorHints: PersonaBehaviorHints | null = (rawHints && typeof rawHints === "object")
+      ? {
+          ageRange: typeof rawHints.ageRange === "string" ? sanitizePersistentField(rawHints.ageRange) : undefined,
+          gender: typeof rawHints.gender === "string" ? sanitizePersistentField(rawHints.gender) : undefined,
+          tags: typeof rawHints.tags === "string" ? sanitizePersistentField(rawHints.tags) : undefined,
+          culturalContext: typeof rawHints.culturalContext === "string" ? sanitizePersistentField(rawHints.culturalContext) : undefined,
+          perspective: typeof rawHints.perspective === "string" ? sanitizePersistentField(rawHints.perspective) : undefined,
+          blindSpot: typeof rawHints.blindSpot === "string" ? sanitizePersistentField(rawHints.blindSpot) : undefined,
+          authorRelation: typeof rawHints.authorRelation === "string" ? sanitizePersistentField(rawHints.authorRelation) : undefined,
+        }
+      : null;
 
     return {
       personaName: typeof json.personaName === "string" && json.personaName.trim().length > 0
@@ -996,6 +1022,7 @@ async function inferFinalFields(
       blindSpot: typeof json.blindSpot === "string" && json.blindSpot.trim().length > 0 && !VAGUE_BLINDSPOT_LOCAL.test(json.blindSpot.trim())
         ? sanitizePersistentField(json.blindSpot.trim())
         : null,
+      behaviorHints,
     };
   } catch {
     return {
@@ -1004,6 +1031,7 @@ async function inferFinalFields(
       blindSpot: generateFallbackBlindSpot(state),
       personaName: generateFallbackPersonaName(state, skillsDir),
       gender: inferFallbackGender(state),
+      behaviorHints: generateFallbackBehaviorHints(state),
     };
   }
 }
@@ -1797,6 +1825,79 @@ function inferCulturalContext(state: WizardState): string {
     return "海外互联网文化语境";
   }
   return "未提供";
+}
+
+/**
+ * Generate fallback behavior hints when MCP sampling is unavailable.
+ * Uses the same interest/trait/perspective mappings as generateFallbackBlindSpot
+ * but produces behavior-anchored descriptions for each attribute.
+ */
+function generateFallbackBehaviorHints(state: WizardState): PersonaBehaviorHints {
+  const fields = state.fields;
+  const hints: PersonaBehaviorHints = {};
+
+  if (fields.ageRange) {
+    const ageHintMap: Record<string, string> = {
+      "18岁以下": "你会以学生视角审视内容，对校园和生活类内容更有共鸣，对职场内容缺乏体验",
+      "18-24岁": "你会以初入社会的视角审视内容，对新潮和性价比敏感，对需要深度阅历的内容判断力有限",
+      "25-30岁": "你会以25-30岁的生活经验审视内容的消费诱惑力，对必买清单类话术天然警觉",
+      "30-35岁": "你会以30-35岁的职场经验审视内容的实用性，对空洞鸡汤类内容天然免疫",
+      "35-40岁": "你会以35-40岁的生活阅历审视内容的深度，对浅尝辄止的内容缺乏耐心",
+      "40岁以上": "你会以丰富的人生阅历审视内容的分量，对浮于表面的内容缺乏兴趣",
+    };
+    hints.ageRange = ageHintMap[fields.ageRange] || `你会以${fields.ageRange}的生活经验审视内容的相关性`;
+  }
+
+  if (fields.gender) {
+    hints.gender = fields.gender === "女"
+      ? "你会从女性视角关注措辞中隐含的性别预设和身体焦虑暗示"
+      : "你会从男性视角关注内容中是否有过度简化性别议题的倾向";
+  }
+
+  const interests = fields.interests || [];
+  if (interests.length > 0) {
+    const interestHintMap: Record<string, string> = {
+      科技: "你对科技领域有专业判断力，能识别伪技术噱头和过度包装",
+      AI: "你对AI领域有专业判断力，能识别伪技术噱头和过度包装",
+      数码: "你对数码领域有专业判断力，能识别伪技术噱头和过度包装",
+      美妆: "你对美妆领域有专业判断力，能识别伪功效和成分硬伤",
+      穿搭: "你对穿搭领域有专业判断力，能识别版型硬伤和消费陷阱",
+      时尚: "你对时尚领域有专业判断力，能识别伪潮流和消费陷阱",
+      理财: "你对理财领域有专业判断力，能识别虚假承诺和收益陷阱",
+      游戏: "你对游戏领域有专业判断力，能识别伪评测和过度宣传",
+      健身: "你对健身领域有专业判断力，能识别伪科学和效果夸大",
+    };
+    const matched = interests.find(i => interestHintMap[i]);
+    hints.tags = matched
+      ? interestHintMap[matched]
+      : `你对${interests.join("、")}领域有专业判断力，能识别内容中的专业硬伤`;
+  }
+
+  const culturalContext = fields.culturalContext || "";
+  if (culturalContext && culturalContext !== "未提供") {
+    hints.culturalContext = /大陆/.test(culturalContext)
+      ? "你习惯大陆互联网语境，对需要文化背景转换的内容会有距离感"
+      : `你习惯${culturalContext}，对跨文化内容的贴近度会有不同判断`;
+  }
+
+  const perspective = fields.dimensionBias?.perspective || "";
+  if (perspective) {
+    hints.perspective = "这是你的核心审视角度，会影响你对每个维度的判定权重";
+  }
+
+  const blindSpot = fields.blindSpot || "";
+  if (blindSpot) {
+    hints.blindSpot = `遇到相关内容时你应坦诚标注盲区，不做超出自身经验的确定性判断`;
+  }
+
+  const relation = fields.authorRelation || "";
+  if (relation) {
+    hints.authorRelation = relation === "已关注"
+      ? "你对作者有一定信任基础，但期望值也更高，对内容质量更挑剔"
+      : "你对作者没有信任基础，更容易因细节问题流失注意力";
+  }
+
+  return hints;
 }
 
 
