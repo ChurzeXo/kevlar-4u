@@ -27,5 +27,8 @@ skills/*/*.md
 # Kevlar lab documents (audit reports, experiments, etc.)
 .kevlar_lab/
 
+# Schedule planning (local only, not tracked)
+schedule/
+
 # Release guide (local only)
 RELEASE.md

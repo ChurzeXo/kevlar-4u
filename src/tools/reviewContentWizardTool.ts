@@ -5,15 +5,116 @@ import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
-import { estimateTokenCost } from "../execution/aggregator.js";
-import { DEFAULT_DIMENSIONS_CONFIG, OFFENSIVE_DIMENSION_IDS, formatDimensionSelectionList, parseDimensionSelection, type DimensionsConfig, type OffensiveDimensionId } from "../execution/dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, type DimensionsConfig } from "../execution/dimensions.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
   description:
-    "当用户说「审稿/评测/评论这篇/帮我看看这篇文案/内容」时，调用此工具（评论区模拟器）。首次调用时 userMessage 传入待评测内容；工具自动保存内容，由 AI 根据内容特色推荐 1-3 位最合适的评审员，同时展示备选评审员列表。用户可回复编号增加评审员，或回复「开始审稿」确认执行评测。不会在未经用户确认评审员名单的情况下直接执行评测。",
+    `用于对用户提交的文本内容进行多维度社会语义风险评测。
+
+当用户请求以下内容时调用本工具：
+- 审稿
+- 评测文案
+- 评论文章
+- 分析帖子风险
+- 检查社交媒体内容
+- 帮我看看这篇内容
+- 分析内容是否存在争议
+- 分析内容传播风险
+- 检查评论区风险
+- 评估内容是否容易引发误解
+
+工具流程：
+1. 调度系统审查员执行防御性初审
+2. 分析以下风险维度：
+   - 合规风险
+   - 语境脱嵌风险
+   - 网络文化误读
+   - 事实硬伤
+   - 社会语义风险
+3. 初审结束后，必须同时展示：
+   - 初审结果
+   - 根据初稿推荐的 1-3 位用户创建的复审评审员
+4. 展示完成后，必须暂停并等待用户操作
+
+用户交互规则：
+
+用户只能执行以下单一操作之一：
+
+1. 输入「开始复审」
+- 进入完整复审流程
+- 调度已确认的复审评审员执行完整评审
+
+2. 输入「评审员编号 + 换一位」
+例如：
+- 2 换一位
+- 3 换一位
+
+执行逻辑：
+- 仅替换指定评审员
+- 重新生成新的评审员推荐列表
+- 不重复展示初审结果
+- 替换完成后再次等待用户确认
+
+禁止：
+- 自动开始复审
+- 跳过用户确认
+- 一次替换多个评审员
+- 未确认直接进入下一阶段
+- 自动连续换人
+- 用户未明确确认时执行完整评审
+- 换评审员时重复执行初审
+- 换评审员时重复展示初审结果
+
+输入内容规则：
+
+输入内容必须为纯文本。
+
+支持：
+- 推文
+- 公告
+- 评论
+- 长文
+- 社交媒体帖子
+- 视频文案
+- Reddit 帖子
+- 新闻稿
+- 产品介绍
+- 社区公告
+
+不支持：
+- 图片
+- PDF 文件
+- Word 文件
+- Excel 文件
+- 数据库内容
+- 代码仓库
+- 二进制文件
+
+不要用于：
+- 法律意见
+- 医疗建议
+- 投资分析
+- 代码安全审计
+- 图片分析
+- 数据库查询
+- 财务决策
+- 临床诊断
+
+本工具不会：
+- 修改原文
+- 自动优化文案
+- 自动重写内容
+- 自动生成公关方案
+
+本工具仅生成：
+- 风险评测
+- 社会语义分析
+- 传播风险分析
+- 评审意见
+- 多视角反馈`,
   inputSchema: {
     type: "object",
     properties: {
@@ -25,7 +126,7 @@ export const reviewContentWizardToolDefinition: Tool = {
       userMessage: {
         type: "string",
         description:
-          "用户在当前步骤的回复内容。首次调用时传入待评测的完整内容或评测请求（例如用户粘贴了文案，或说「帮我审一下这段文字」）。后续步骤传入用户对工具提问的回复，如编号增加评审员或「开始审稿」确认执行。",
+          "用户在当前步骤的回复内容。首次调用时传入待评测的完整内容或评测请求（例如用户粘贴了文案，或说「帮我审一下这段文字」）。后续步骤传入用户对工具提问的回复，如「开始复审」确认执行或「X 换一位」替换评审员。",
       },
     },
     required: ["userMessage"],
@@ -43,10 +144,6 @@ type ReviewWizardStep =
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
   | "waitingForReviewerConfirmation"
-  | "collectPlatforms"
-  | "selectDimensions"
-  | "confirmSelection"
-  | "postReview"
   | "completed";
 
 interface ReviewWizardState {
@@ -127,16 +224,7 @@ async function advanceWizard(
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
 
     case "waitingForReviewerConfirmation":
-      return handleReviewerConfirmation(tmpDir, state, personas, userMessage, samplingFn);
-
-    case "selectDimensions":
-      return handleDimensionSelection(tmpDir, state, personas, userMessage, samplingFn);
-
-    case "confirmSelection":
-      return handleSelectionConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
-
-    case "postReview":
-      return handlePostReview(tmpDir, state, personas, userMessage);
+      return handleReviewerConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
 
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
@@ -154,8 +242,27 @@ async function handleSystemAudit(
   systemAuditors: Persona[],
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
-  if (!samplingFn || systemAuditors.length === 0) {
-    state.preAuditReport = { dimensions: [], summary: "未配置大模型或未找到系统审查员，跳过初审" };
+  if (systemAuditors.length === 0) {
+    state.preAuditReport = { dimensions: [], summary: "未找到系统审查员，跳过初审" };
+    state.step = "checkPersonaInventory";
+    await saveState(tmpDir, state);
+    return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
+  }
+
+  // 规则模式降级（MCP Sampling 不可用时）
+  if (!samplingFn) {
+    const results = ruleBasedPreAudit(state.content, systemAuditors);
+    const summaryLines: string[] = [];
+    for (const r of results) {
+      const levelIcon = r.level || "🟢";
+      summaryLines.push(`${levelIcon} ${r.name}`);
+      for (const f of (r.findings || [])) {
+        summaryLines.push(`  ${f.suggestedLevel || "⚪"} ${f.dimension || f.description || ""}`);
+      }
+    }
+    state.preAuditReport = { dimensions: results, summary: summaryLines.join("\n") };
+    state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
+    state.selectedPersonaIds = [...state.systemAuditorIds];
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
@@ -182,24 +289,27 @@ async function handleSystemAudit(
     })
   );
 
-  let highRisk = 0;
-  let medRisk = 0;
   for (const r of results) {
     let dimLevel: string = "🟢";
     for (const f of r.findings) {
       if (f.suggestedLevel === "🔴") { dimLevel = "🔴"; break; }
       if (f.suggestedLevel === "🟡") dimLevel = "🟡";
-      if (f.suggestedLevel === "🔴") highRisk++;
-      else if (f.suggestedLevel === "🟡") medRisk++;
     }
     (r as any).level = dimLevel;
   }
 
+  const summaryLines: string[] = [];
+  for (const r of results) {
+    const levelIcon = (r as any).level || "🟢";
+    summaryLines.push(`${levelIcon} ${r.name}`);
+    for (const f of (r.findings || [])) {
+      summaryLines.push(`  ${f.suggestedLevel || "⚪"} ${f.dimension || f.description || ""}`);
+    }
+  }
+
   state.preAuditReport = {
     dimensions: results,
-    summary: highRisk > 0 || medRisk > 0
-      ? `🔴 高风险项 ${highRisk} 个 · 🟡 中风险项 ${medRisk} 个`
-      : "🟢 未发现明显风险项",
+    summary: summaryLines.join("\n"),
   };
   state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
   state.selectedPersonaIds = [...state.systemAuditorIds];
@@ -207,6 +317,98 @@ async function handleSystemAudit(
   await saveState(tmpDir, state);
 
   return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
+}
+
+// ── Rule-based pre-audit fallback (when MCP sampling is unavailable) ──
+
+interface RuleGroup {
+  dimension: string;
+  keywords: string[];
+  description: string;
+  yellowThreshold: number;
+  redThreshold: number;
+}
+
+const PRE_AUDIT_RULES: Record<string, RuleGroup[]> = {
+  legal_compliance: [
+    { dimension: "合规风险", keywords: ["最", "第一", "唯一", "全网", "绝对", "100%", "百分百", "顶级", "极致", "首创", "独家", "首款"], description: "内容包含疑似绝对化用语或极限词", yellowThreshold: 2, redThreshold: 5 },
+    { dimension: "合规风险", keywords: ["根治", "治愈", "永不复发", "保证效果", "疗效", "药到病除", "神效"], description: "内容包含可能的虚假医疗/功效宣称", yellowThreshold: 1, redThreshold: 3 },
+    { dimension: "合规风险", keywords: ["保本", "稳赚", "稳赚不赔", "承诺收益", "无风险", "收益率", "翻倍"], description: "内容包含可能的违规金融承诺", yellowThreshold: 1, redThreshold: 3 },
+    { dimension: "合规风险", keywords: ["点击领取", "限时优惠", "错过今天", "仅限今日", "立即购买", "马上抢"], description: "内容包含诱导性营销话术", yellowThreshold: 3, redThreshold: 5 },
+  ],
+  context_distortion: [
+    { dimension: "语境脱嵌风险", keywords: ["懂的自然懂", "你懂的", "懂得都懂", "不多说"], description: "内容包含模糊暗示表述，容易被脱离语境放大", yellowThreshold: 1, redThreshold: 3 },
+    { dimension: "语境脱嵌风险", keywords: ["据说", "网传", "网曝", "大家说", "有人说", "某专家", "业内人士透露"], description: "内容包含缺乏明确来源的转述", yellowThreshold: 2, redThreshold: 4 },
+    { dimension: "语境脱嵌风险", keywords: ["截图", "聊天记录", "录音", "曝光", "实锤"], description: "内容引用非公开/片段化信息", yellowThreshold: 1, redThreshold: 3 },
+  ],
+  network_culture_risk: [
+    { dimension: "网络文化误读", keywords: ["yygq", "yyds", "awsl", "xswl", "nbcs", "u1s1"], description: "内容包含网络缩写/黑话", yellowThreshold: 2, redThreshold: 5 },
+    { dimension: "网络文化误读", keywords: ["冲", "带节奏", "引流", "水军", "控评", "举报", "网暴"], description: "内容包含特定社区行为用语", yellowThreshold: 2, redThreshold: 4 },
+    { dimension: "网络文化误读", keywords: ["绷不住了", "破防", "麻了", "急了", "典", "孝", "乐"], description: "内容包含梗文化/抽象话表达", yellowThreshold: 3, redThreshold: 5 },
+  ],
+  factual_integrity: [
+    { dimension: "事实硬伤", keywords: ["研究表明", "调查显示", "据统计", "据调查", "报告指出"], description: "内容引用统计/研究但未提供具体来源", yellowThreshold: 1, redThreshold: 3 },
+    { dimension: "事实硬伤", keywords: ["一直", "永远", "从来", "所有", "每个", "大家", "全世界", "全国"], description: "内容包含可能过度概括的全称判断", yellowThreshold: 2, redThreshold: 4 },
+    { dimension: "事实硬伤", keywords: ["颠覆", "革命性", "前所未有", "史无前例", "划时代", "突破", "重大突破"], description: "内容包含可能夸大的事实性宣称", yellowThreshold: 1, redThreshold: 3 },
+  ],
+  social_risk: [
+    { dimension: "社会语义风险", keywords: ["女司机", "女拳", "男拳", "小仙女", "田园"], description: "内容包含可能引发性别对立的表述", yellowThreshold: 1, redThreshold: 3 },
+    { dimension: "社会语义风险", keywords: ["地域黑", "地图炮", "歧视", "看不起", "low"], description: "内容包含可能的歧视性表述", yellowThreshold: 1, redThreshold: 3 },
+    { dimension: "社会语义风险", keywords: ["智商税", "割韭菜", "收智商税", "坑"], description: "内容包含可能的群体贬低或对立煽动", yellowThreshold: 1, redThreshold: 3 },
+  ],
+};
+
+function countOccurrences(text: string, keyword: string): number {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = text.match(new RegExp(escaped, "g"));
+  return matches ? matches.length : 0;
+}
+
+function ruleBasedPreAudit(
+  content: string,
+  auditors: Persona[]
+): Array<{ id: string; name: string; findings: any[]; level: string }> {
+  const results: Array<{ id: string; name: string; findings: any[]; level: string }> = [];
+  const lower = content.toLowerCase();
+
+  for (const auditor of auditors) {
+    const rules = PRE_AUDIT_RULES[auditor.meta.id];
+    if (!rules) {
+      results.push({ id: auditor.meta.id, name: auditor.meta.name, findings: [], level: "🟢" });
+      continue;
+    }
+
+    const findings: any[] = [];
+
+    for (const group of rules) {
+      const matchedKeywords = group.keywords.filter(kw => lower.includes(kw));
+      if (matchedKeywords.length === 0) continue;
+
+      const totalOccurrences = group.keywords.reduce(
+        (sum, kw) => sum + countOccurrences(lower, kw), 0
+      );
+
+      let suggestedLevel = "🟢";
+      if (totalOccurrences >= group.redThreshold) suggestedLevel = "🔴";
+      else if (totalOccurrences >= group.yellowThreshold) suggestedLevel = "🟡";
+
+      findings.push({
+        dimension: group.dimension,
+        description: `${group.description}（命中：${matchedKeywords.join("、")}，共 ${totalOccurrences} 处）`,
+        suggestedLevel,
+      });
+    }
+
+    let level = "🟢";
+    for (const f of findings) {
+      if (f.suggestedLevel === "🔴") { level = "🔴"; break; }
+      if (f.suggestedLevel === "🟡") level = "🟡";
+    }
+
+    results.push({ id: auditor.meta.id, name: auditor.meta.name, findings, level });
+  }
+
+  return results;
 }
 
 async function handleInventoryCheck(
@@ -223,7 +425,7 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}` : "",
+        state.preAuditReport?.summary ? `【初审结果】\n${state.preAuditReport.summary}` : "",
         "",
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
@@ -248,16 +450,14 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}\n` : "",
+        state.preAuditReport?.summary ? `【初审结果】\n${state.preAuditReport.summary}` : "",
         auditorLine,
         "",
-        `当前共有 ${personas.length} 位评审员：`,
+        `当前共有 ${personas.length} 位评审员，已全部选中：`,
         "",
-        ...personas.map((p) => `- ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
+        ...personas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
         "",
-        "以上评审员已全部选中。请向用户展示初审结果和评审员，等待用户确认后回复「开始审稿」进入维度选择。",
-        "",
-        "等待用户输入后，再调用此工具以继续。",
+        "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
       ].filter(Boolean).join("\n")
     );
   }
@@ -284,205 +484,17 @@ async function handleInventoryCheck(
       "",
       ...(remainingPersonas.length > 0
         ? [
-            "**备选评审员**（回复对应编号可增加）：",
+            "**备选评审员**（暂未选入）：",
             ...remainingPersonas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
           ]
         : []),
       "",
-      "请向用户展示初审结果和以上推荐结果。用户可回复编号增加评审员，或回复「开始审稿」确认进入维度选择。",
-      "",
-      "等待用户输入后，再调用此工具以继续。",
+      "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
     ].filter(Boolean).join("\n")
   );
 }
 
 async function handleReviewerConfirmation(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  userMessage: string,
-  samplingFn?: MultiTurnSamplingFunction
-): Promise<ToolResult> {
-  // 使用全部 / 全选评审员
-  if (/使用全部|全部评审|全选评审|所有评审/.test(userMessage)) {
-    state.selectedPersonaIds = [...personas.map((p) => p.meta.id), ...state.systemAuditorIds];
-    state.remainingPersonaIds = [];
-    await saveState(tmpDir, state);
-    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-    return toolResponse(
-      state,
-      [
-        `✅ 已选择全部 ${personas.length} 位评审员。`,
-        "",
-        "当前已选评审员：",
-        ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
-        "",
-        "请向用户展示，回复「开始审稿」确认进入维度选择。",
-      ].join("\n")
-    );
-  }
-
-  // 通过编号从备选列表增加评审员
-  const numIndices = parseNumberIndices(userMessage);
-  if (numIndices.length > 0 && state.remainingPersonaIds.length > 0) {
-    return addByNumbersWithMessage(tmpDir, state, personas, numIndices);
-  }
-
-  // "开始审稿" 或确认类回复 → 进入维度选择
-  if (isAffirmative(userMessage)) {
-    if (state.selectedPersonaIds.length === 0) {
-      return toolResponse(state, "❌ 当前没有已选择的评审员。请回复编号选择评审员后再试。");
-    }
-    state.step = "selectDimensions";
-    await saveState(tmpDir, state);
-    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-    return toolResponse(
-      state,
-      [
-        `✅ 评审员已确认，共 ${selected.length} 位：${selected.map((p) => p.meta.name).join("、")}`,
-        "",
-        "接下来请选择评审维度：",
-        "",
-        formatDimensionSelectionList(),
-        "",
-        "默认全部启用。用户可回复编号取消对应进攻性维度，或回复「开始审稿」使用全部维度。",
-        "",
-        "等待用户输入后，再调用此工具以继续。",
-      ].join("\n")
-    );
-  }
-
-  // 未识别到有效指令 → 重新展示当前评审员状态
-  await saveState(tmpDir, state);
-  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
-  return toolResponse(
-    state,
-    [
-      "当前已选评审员：",
-      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
-      "",
-      ...(remaining.length > 0
-        ? [
-            "备选评审员（回复对应编号可增加）：",
-            ...remaining.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
-            "",
-            "请向用户展示，等待用户回复编号增加评审员，或回复「开始审稿」确认进入维度选择。",
-          ]
-        : ["请向用户展示，等待用户回复「开始审稿」确认进入维度选择。"]),
-    ].join("\n")
-  );
-}
-
-/** 在评审员确认步骤中，根据编号增加评审员并展示结果 */
-async function addByNumbersWithMessage(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  numIndices: number[]
-): Promise<ToolResult> {
-  const toAdd: string[] = [];
-  for (const num of numIndices) {
-    if (num > 0 && num <= state.remainingPersonaIds.length) {
-      toAdd.push(state.remainingPersonaIds[num - 1]);
-    }
-  }
-
-  if (toAdd.length === 0) {
-    await saveState(tmpDir, state);
-    return toolResponse(state, "未找到对应编号的评审员，请重新输入。");
-  }
-
-  state.selectedPersonaIds = [...state.selectedPersonaIds, ...toAdd];
-  state.remainingPersonaIds = state.remainingPersonaIds.filter((id) => !toAdd.includes(id));
-
-  const addedNames = personas.filter((p) => toAdd.includes(p.meta.id)).map((p) => p.meta.name);
-  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
-
-  await saveState(tmpDir, state);
-  return toolResponse(
-    state,
-    [
-      `✅ 已增加评审员：${addedNames.join("、")}`,
-      "",
-      "当前已选评审员：",
-      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
-      "",
-      ...(remaining.length > 0
-        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "回复编号继续增加评审员，或回复「开始审稿」确认进入维度选择。"]
-        : ["回复「开始审稿」确认进入维度选择。"]),
-    ].join("\n")
-  );
-}
-
-async function handleDimensionSelection(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  userMessage: string,
-  samplingFn?: MultiTurnSamplingFunction
-): Promise<ToolResult> {
-  // Parse dimension selection
-  if (/开始|审稿|评测|确认|默认|全部维度|ok|yes/i.test(userMessage)) {
-    // Use default or already-set dimensions, proceed to confirm
-    state.step = "confirmSelection";
-    await saveState(tmpDir, state);
-    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-    const cost = estimateTokenCost(selected.length, state.content.length);
-    return toolResponse(
-      state,
-      [
-        "✅ 评审维度已确认。",
-        "",
-        `已选评审员：${selected.map((p) => p.meta.name).join("、")}`,
-        `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
-        `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
-        "",
-        "请向用户展示以上信息，等待用户确认后回复「开始审稿」以执行评测。",
-      ].join("\n")
-    );
-  }
-
-  // Parse dimension exclusion (numbers refer to offensive dimension indices)
-  const newDimensions = parseDimensionSelection(userMessage, state.dimensions);
-  state.dimensions = newDimensions;
-
-  // Check if this looks like a "start" intent
-  if (state.dimensions.offensive.length === 0) {
-    await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      [
-        "⚠️ 至少需要保留一个进攻性维度。请重新选择。",
-        "",
-        formatDimensionSelectionList(),
-        "",
-        "请向用户展示维度列表，等待用户回复编号取消对应维度，或回复「开始审稿」使用全部维度。",
-      ].join("\n")
-    );
-  }
-
-  state.step = "confirmSelection";
-  await saveState(tmpDir, state);
-  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-  const cost = estimateTokenCost(selected.length, state.content.length);
-  const excludedCount = OFFENSIVE_DIMENSION_IDS.length - state.dimensions.offensive.length;
-  return toolResponse(
-    state,
-    [
-      `✅ 已排除 ${excludedCount} 个进攻性维度，保留 ${state.dimensions.offensive.length} 个。`,
-        "",
-        `已选评审员：${selected.map((p) => p.meta.name).join("、")}`,
-        `激活维度：防御性 4 个（系统强制） + 进攻性 ${state.dimensions.offensive.length} 个`,
-        `预估 Token 消耗：约 ${cost.toLocaleString()} tokens`,
-        "",
-        "请向用户展示以上信息，等待用户确认后回复「开始审稿」以执行评测。",
-    ].join("\n")
-  );
-}
-
-async function handleSelectionConfirmation(
   skillsDir: string,
   tmpDir: string,
   state: ReviewWizardState,
@@ -490,55 +502,123 @@ async function handleSelectionConfirmation(
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
-  // 使用全部 / 全选
-  if (/使用全部|全部|全选|所有/.test(userMessage)) {
-    return selectAllAndConfirm(tmpDir, state, personas);
+  const normalized = userMessage.trim();
+
+  // Parse "X 换一位"
+  const swapMatch = normalized.match(/^(\d+)\s*换一位$/);
+  if (swapMatch) {
+    const idx = parseInt(swapMatch[1], 10);
+    return handleSwapReviewer(tmpDir, state, personas, idx, samplingFn);
   }
 
-  // 通过编号从备选列表增加评审员
-  const numIndices = parseNumberIndices(userMessage);
-  if (numIndices.length > 0 && state.remainingPersonaIds.length > 0) {
-    return addByNumbers(tmpDir, state, personas, numIndices);
-  }
-
-  // 通过名称或 ID 明确指定
-  const explicitIds = extractPersonaIds(userMessage, personas);
-  if (explicitIds.length > 0) {
-    const newIds = explicitIds.filter((id) => !state.selectedPersonaIds.includes(id));
-    if (newIds.length > 0) {
-      return addByIds(tmpDir, state, personas, newIds);
-    }
-  }
-
-  // "开始审稿" 或确认类回复 → 执行评测
-  if (isAffirmative(userMessage)) {
-    if (state.selectedPersonaIds.length === 0) {
-      return toolResponse(state, "❌ 当前没有已选择的评审员。请回复编号选择评审员后再试。");
+  // "开始复审" → 直接执行完整复审
+  if (/^(开始复审|确认复审|执行复审)$/.test(normalized)) {
+    const selectedUserCount = state.selectedPersonaIds.filter(
+      id => !state.systemAuditorIds.includes(id)
+    ).length;
+    if (selectedUserCount === 0) {
+      return toolResponse(state, "❌ 当前没有已选择的复审评审员。请先通过「X 换一位」选择评审员后再试。");
     }
     return executeReview(skillsDir, tmpDir, state, samplingFn);
   }
 
-  // 未识别到有效指令 → 重新展示当前状态
+  // 未识别 → 重新展示当前评审员状态
   await saveState(tmpDir, state);
-  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
+  const selectedUserPersonas = personas.filter(
+    p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+  );
+  const remaining = personas.filter(p => state.remainingPersonaIds.includes(p.meta.id));
   return toolResponse(
     state,
     [
-      "当前已选评审员：",
-      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
+      "当前已选复审评审员：",
+      ...selectedUserPersonas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
       "",
       ...(remaining.length > 0
-        ? [
-            "备选评审员（回复编号可增加）：",
-            ...remaining.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
-            "",
-            "请向用户展示当前评审员，等待用户回复编号增加或回复「开始审稿」确认。",
-          ]
-        : ["请向用户展示当前评审员，等待用户回复「开始审稿」确认执行。"]),
+        ? [`备选评审员（共 ${remaining.length} 位）`, "请回复「X 换一位」替换指定评审员（例如：2 换一位）。"]
+        : []),
+      "",
+      "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员。",
     ].join("\n")
   );
 }
+
+async function handleSwapReviewer(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  position: number,
+  samplingFn?: MultiTurnSamplingFunction
+): Promise<ToolResult> {
+  const selectedUserPersonaIds = state.selectedPersonaIds.filter(
+    id => !state.systemAuditorIds.includes(id)
+  );
+
+  if (position < 1 || position > selectedUserPersonaIds.length) {
+    const selected = personas.filter(
+      p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+    );
+    return toolResponse(
+      state,
+      [
+        `❌ 编号 ${position} 超出范围。当前已选复审评审员：`,
+        ...selected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+        "",
+        "请重新输入正确的编号。",
+      ].join("\n")
+    );
+  }
+
+  // 备选池为空，告知用户并询问是否开始评审
+  if (state.remainingPersonaIds.length === 0) {
+    const selected = personas.filter(
+      p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+    );
+    return toolResponse(
+      state,
+      [
+        "⚠️ 备选池已没有可替换的评审员。",
+        "",
+        "当前已选复审评审员：",
+        ...selected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+        "",
+        "请回复「开始复审」确认执行。",
+      ].join("\n")
+    );
+  }
+
+  const removedId = selectedUserPersonaIds[position - 1];
+  const removedPersona = personas.find(p => p.meta.id === removedId);
+
+  // 从备选池取第一位加入已选，被换下的回到备选池末尾
+  const addedId = state.remainingPersonaIds.shift()!;
+  state.selectedPersonaIds = state.selectedPersonaIds.filter(id => id !== removedId);
+  state.selectedPersonaIds.push(addedId);
+  state.remainingPersonaIds.push(removedId);
+
+  state.step = "waitingForReviewerConfirmation";
+  await saveState(tmpDir, state);
+
+  const updatedSelected = personas.filter(
+    p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+  );
+  const remaining = personas.filter(p => state.remainingPersonaIds.includes(p.meta.id));
+  const addedPersona = personas.find(p => p.meta.id === addedId);
+
+  return toolResponse(state, [
+    `✅ 已替换：${removedPersona?.meta.name || "未知"} → ${addedPersona?.meta.name || "未知"}`,
+    "",
+    "当前已选复审评审员：",
+    ...updatedSelected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+    "",
+    ...(remaining.length > 0
+      ? [`备选评审员（共 ${remaining.length} 位）`]
+      : []),
+    "请回复「开始复审」确认执行，或回复「X 换一位」继续替换。",
+  ].join("\n"));
+}
+
+
 
 async function recommendPersonas(
   state: ReviewWizardState,
@@ -563,7 +643,7 @@ async function recommendPersonas(
       }
       const response = await samplingFn({
         systemPrompt:
-          "你是评审员推荐助手。根据待评测内容和系统初审报告推荐 1-3 个最匹配的评审员，输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"推荐理由+询问确认\"}。assistantMessage 应包含「根据内容特色和初审发现的风险点，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。",
+          "你是评审员推荐助手。根据待评测内容和系统初审报告推荐 1-3 个最匹配的评审员，输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"推荐理由\"}。assistantMessage 应包含「根据内容特色和初审发现的风险点，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。",
         messages: [
           {
             role: "user",
@@ -615,155 +695,12 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
       "",
       ...selected.map((p) => `- ${p.meta.name}（推荐理由：标签与描述和本次内容更接近）`),
       "",
-      "请向用户展示以上推荐结果，等待用户选择。用户可回复编号增加评审员，或回复「开始审稿」确认。",
+      "请向用户展示以上推荐结果，等待用户选择。",
     ].join("\n"),
   };
 }
 
-// ── State transition & selection helpers ──
 
-async function transitionTo(
-  tmpDir: string,
-  state: ReviewWizardState,
-  step: ReviewWizardStep,
-  message: string
-): Promise<ToolResult> {
-  state.step = step;
-  await saveState(tmpDir, state);
-  return toolResponse(state, message);
-}
-
-function personaLineBrief(p: Persona): string {
-  return `- ${p.meta.name} (ID: ${p.meta.id}) · ${p.meta.description}`;
-}
-
-/** 从用户输入中解析数字编号（用于从备选列表增加评审员） */
-function parseNumberIndices(input: string): number[] {
-  const numbers: number[] = [];
-  const numPattern = /\b([1-9]\d*)\b/g;
-  let match;
-  while ((match = numPattern.exec(input)) !== null) {
-    numbers.push(parseInt(match[1], 10));
-  }
-  return [...new Set(numbers)]; // 去重
-}
-
-/** 根据备选列表中的编号增加评审员 */
-async function addByNumbers(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  numIndices: number[]
-): Promise<ToolResult> {
-  const toAdd: string[] = [];
-  for (const num of numIndices) {
-    if (num > 0 && num <= state.remainingPersonaIds.length) {
-      toAdd.push(state.remainingPersonaIds[num - 1]);
-    }
-  }
-
-  if (toAdd.length === 0) {
-    await saveState(tmpDir, state);
-    return toolResponse(state, "未找到对应编号的评审员，请重新输入。");
-  }
-
-  state.selectedPersonaIds = [...state.selectedPersonaIds, ...toAdd];
-  state.remainingPersonaIds = state.remainingPersonaIds.filter((id) => !toAdd.includes(id));
-
-  const addedNames = personas.filter((p) => toAdd.includes(p.meta.id)).map((p) => p.meta.name);
-  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
-
-  await saveState(tmpDir, state);
-  return toolResponse(
-    state,
-    [
-      `✅ 已增加评审员：${addedNames.join("、")}`,
-      "",
-      "当前已选评审员：",
-      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
-      "",
-      ...(remaining.length > 0
-        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]
-        : ["请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]),
-    ].join("\n")
-  );
-}
-
-/** 根据名称/ID 增加评审员 */
-async function addByIds(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  idsToAdd: string[]
-): Promise<ToolResult> {
-  const validIds = idsToAdd.filter((id) => state.remainingPersonaIds.includes(id));
-  if (validIds.length === 0) {
-    await saveState(tmpDir, state);
-    return toolResponse(state, "指定的评审员已在列表中或不存在。");
-  }
-
-  state.selectedPersonaIds = [...state.selectedPersonaIds, ...validIds];
-  state.remainingPersonaIds = state.remainingPersonaIds.filter((id) => !validIds.includes(id));
-
-  const addedNames = personas.filter((p) => validIds.includes(p.meta.id)).map((p) => p.meta.name);
-  const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
-  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
-
-  await saveState(tmpDir, state);
-  return toolResponse(
-    state,
-    [
-      `✅ 已增加评审员：${addedNames.join("、")}`,
-      "",
-      "当前已选评审员：",
-      ...selected.map((p) => `- ${p.meta.name} · ${p.meta.description}`),
-      "",
-      ...(remaining.length > 0
-        ? [`剩余 ${remaining.length} 位备选评审员可增加。`, "请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]
-        : ["请向用户展示当前评审员，等待用户确认后回复「开始审稿」。"]),
-    ].join("\n")
-  );
-}
-
-async function selectAllAndConfirm(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[]
-): Promise<ToolResult> {
-  state.selectedPersonaIds = [...personas.map((p) => p.meta.id), ...state.systemAuditorIds];
-  state.remainingPersonaIds = [];
-  const cost = estimateTokenCost(personas.length, state.content.length);
-  return transitionTo(
-    tmpDir,
-    state,
-    "confirmSelection",
-    `已选择全部 ${personas.length} 位评审员。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n请向用户展示，等待用户确认后回复「开始审稿」执行评测。`
-  );
-}
-
-async function selectExplicitAndConfirm(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  selectedIds: string[]
-): Promise<ToolResult> {
-  state.selectedPersonaIds = [...selectedIds, ...state.systemAuditorIds];
-  state.remainingPersonaIds = personas
-    .filter((p) => !selectedIds.includes(p.meta.id))
-    .map((p) => p.meta.id);
-  const names = personas
-    .filter((p) => selectedIds.includes(p.meta.id))
-    .map((p) => p.meta.name)
-    .join("、");
-  const cost = estimateTokenCost(selectedIds.length, state.content.length);
-  return transitionTo(
-    tmpDir,
-    state,
-    "confirmSelection",
-    `已选择：${names}。\n预估 Token 消耗：约 ${cost.toLocaleString()} tokens\n请向用户展示，等待用户确认后回复「开始审稿」执行评测。`
-  );
-}
 
 async function executeReview(
   skillsDir: string,
@@ -795,34 +732,11 @@ async function executeReview(
     };
   }
 
-  state.step = "postReview";
-  await saveState(tmpDir, state);
+  state.step = "completed";
   const resultText = reviewResult.content[0]?.text || "";
-  return toolResponse(state, resultText + "\n\n---\n\n评测完成。是否需要更换评审员再次评审？");
-}
-
-async function handlePostReview(
-  tmpDir: string,
-  state: ReviewWizardState,
-  personas: Persona[],
-  userMessage: string
-): Promise<ToolResult> {
-  if (isAffirmative(userMessage)) {
-    state.selectedPersonaIds = [];
-    state.remainingPersonaIds = [];
-    return transitionTo(tmpDir, state, "confirmSelection", [
-      "请选择要使用的评审员：",
-      "",
-      ...personas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
-      "",
-      "请向用户展示以上列表，等待用户选择后回复编号增加评审员，或回复「开始审稿」确认。",
-    ].join("\n"));
-  }
-
+  const response = toolResponse(state, resultText + "\n\n---\n\n评测完成。");
   await cleanupState(tmpDir, state.sessionId);
-  return {
-    content: [{ type: "text", text: "评测流程已结束。需要评测新内容时，请重新调用 review_content_wizard。" }],
-  };
+  return response;
 }
 
 async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
@@ -923,51 +837,6 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
       },
     ],
   };
-}
-
-function extractPersonaIds(input: string, personas: Persona[]): string[] {
-  // Detect exclusion intent: "不要X" / "不用X" / "排除X" / "去掉X" / "除了X"
-  const exclusionPattern = /(?:不要|不用|排除|去掉|除了)\s*([^\s，。,\.]+)/g;
-  const excluded = new Set<string>();
-  let excludeMatch: RegExpExecArray | null;
-  while ((excludeMatch = exclusionPattern.exec(input)) !== null) {
-    const term = excludeMatch[1].toLowerCase();
-    for (const persona of personas) {
-      if (persona.meta.name.toLowerCase().includes(term) || persona.meta.id.toLowerCase().includes(term)) {
-        excluded.add(persona.meta.id);
-      }
-    }
-  }
-
-  const selected: string[] = [];
-  for (const persona of personas) {
-    if (excluded.has(persona.meta.id)) continue;
-    const idMatch = input.includes(persona.meta.id);
-    // For very short names (≤2 chars), require exact match to prevent false positives
-    // e.g. persona named "好" should not match "这篇不好"
-    const nameMatch =
-      persona.meta.name.length > 2
-        ? input.includes(persona.meta.name)
-        : input.trim() === persona.meta.name;
-    if (idMatch || nameMatch) {
-      selected.push(persona.meta.id);
-    }
-  }
-  return selected;
-}
-
-function isAffirmative(input: string): boolean {
-  const normalized = input.trim().toLowerCase();
-  // Short/ambiguous words require exact match to avoid false positives.
-  const exactMatchWords = ["是", "对", "好", "y"];
-  const containsMatchWords = [
-    "确认", "可以", "没问题", "开始", "执行", "ok", "yes",
-    "开始审稿", "开始评测", "开始评审", "执行评测",
-  ];
-  return (
-    exactMatchWords.some((w) => normalized === w) ||
-    containsMatchWords.some((w) => normalized.includes(w))
-  );
 }
 
 function stripCodeFence(text: string): string {
