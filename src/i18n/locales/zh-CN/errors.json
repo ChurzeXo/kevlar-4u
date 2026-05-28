@@ -1,0 +1,50 @@
+{
+  "common": {
+    "unknown": "未知错误",
+    "invalidInput": "输入无效",
+    "operationFailed": "操作失败",
+    "notFound": "未找到",
+    "permissionDenied": "权限不足",
+    "networkError": "网络错误",
+    "timeout": "操作超时",
+    "internalError": "内部错误"
+  },
+  "tool": {
+    "notFound": "工具未找到",
+    "invalidParams": "参数无效",
+    "missingRequired": "缺少必需参数",
+    "executionFailed": "工具执行失败"
+  },
+  "persona": {
+    "notFound": "评审员未找到",
+    "alreadyExists": "评审员已存在",
+    "createFailed": "创建评审员失败",
+    "deleteFailed": "删除评审员失败",
+    "invalidConfig": "评审员配置无效",
+    "parseError": "评审员文件解析错误"
+  },
+  "review": {
+    "contentRequired": "请输入要评测的内容",
+    "reviewFailed": "评测失败",
+    "aggregationFailed": "报告聚合失败",
+    "noDimensions": "未选择评测维度",
+    "lockFailed": "获取评测锁失败"
+  },
+  "config": {
+    "invalidMode": "无效的执行模式",
+    "invalidConcurrency": "无效的并发数",
+    "readFailed": "配置读取失败",
+    "writeFailed": "配置写入失败"
+  },
+  "wizard": {
+    "sessionExpired": "向导会话已过期",
+    "invalidStep": "无效的步骤",
+    "stepNotFound": "步骤未找到",
+    "inputRequired": "需要输入内容"
+  },
+  "mcp": {
+    "samplingFailed": "MCP 采样失败",
+    "connectionFailed": "MCP 连接失败",
+    "protocolError": "MCP 协议错误"
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "common": {
+    "goBack": "← 返回上一步",
+    "goBackTo": "← 回到第{{step}}步",
+    "skip": "跳过此步",
+    "confirm": "确认",
+    "cancel": "取消",
+    "retry": "重试",
+    "or": "或",
+    "inputPrompt": "请输入：",
+    "invalidOption": "无效选项，请重新选择",
+    "sessionExpired": "会话已过期，请重新开始"
+  },
+  "platform": {
+    "title": "选择目标平台",
+    "prompt": "请选择评审员的目标平台：",
+    "options": {
+      "xiaohongshu": "小红书",
+      "zhihu": "知乎",
+      "wechat_official": "微信公众号",
+      "douyin": "抖音",
+      "weibo": "微博",
+      "bilibili": "B站"
+    }
+  },
+  "ageRange": {
+    "title": "选择年龄段",
+    "prompt": "请选择评审员的年龄段：",
+    "options": {
+      "18-24": "18-24岁（Z世代/大学生）",
+      "25-30": "25-30岁（职场新人）",
+      "31-40": "31-40岁（职场中坚）",
+      "41-50": "41-50岁（成熟群体）",
+      "50+": "50岁以上（银发群体）"
+    }
+  },
+  "gender": {
+    "title": "选择性别",
+    "prompt": "请选择评审员的性别：",
+    "options": {
+      "male": "男性",
+      "female": "女性",
+      "neutral": "不限/中性"
+    }
+  },
+  "interests": {
+    "title": "选择兴趣方向",
+    "prompt": "请选择评审员的兴趣方向（可多选，回复编号，如 1 3 5）：",
+    "options": {
+      "fashion": "时尚美妆",
+      "food": "美食",
+      "travel": "旅行",
+      "parenting": "育儿",
+      "tech": "科技数码",
+      "fitness": "健身运动",
+      "finance": "理财投资",
+      "culture": "文化艺术",
+      "entertainment": "娱乐追星",
+      "education": "教育学习",
+      "career": "职场发展",
+      "lifestyle": "生活方式"
+    }
+  },
+  "tone": {
+    "title": "选择讲话语气",
+    "prompt": "请选择评审员的讲话语气：",
+    "options": {
+      "sharp": "犀利毒舌",
+      "gentle": "温柔暖心",
+      "humorous": "幽默风趣",
+      "rational": "理性分析",
+      "impatient": "暴躁直白",
+      "formal": "正式专业",
+      "casual": "轻松随意"
+    }
+  },
+  "authorRelation": {
+    "title": "选择与作者关系",
+    "prompt": "请选择评审员与作者的关系：",
+    "options": {
+      "stranger": "陌生人（首次看到）",
+      "follower": "粉丝（长期关注）",
+      "friend": "朋友（私下认识）",
+      "peer": "同行（相同领域）",
+      "critic": "批评者（持不同观点）",
+      "mentor": "前辈（经验丰富）",
+      "junior": "后辈（正在学习）"
+    }
+  },
+  "perspective": {
+    "title": "选择立场视角",
+    "prompt": "请选择评审员的立场视角（可多选，回复编号，如 1 3）：",
+    "options": {
+      "traditional_culture": "关注传统文化表达、本土品牌与文化认同感",
+      "workplace_comm": "关注职场沟通体验、表达方式与实际使用场景",
+      "urban_female": "关注措辞细节、情绪表达与社会议题感受",
+      "rational_analyst": "关注逻辑结构、信息准确度与技术细节",
+      "public_opinion": "容易受到公共讨论氛围与评论区情绪影响",
+      "independent_thinker": "强调个体表达、价值一致性与真实感受",
+      "commercial_observer": "关注商业表达、营销语言与消费真实性",
+      "family_tradition": "关注家庭观念、代际关系与传统价值表达",
+      "community_core": "关注圈层表达习惯与社区氛围"
+    }
+  },
+  "dimensions": {
+    "title": "选择评测维度",
+    "prompt": "请选择要评测的维度（防御性维度为必选）：",
+    "defensive": "防御性维度（系统强制）",
+    "offensive": "进攻性维度（可选）",
+    "select": "请选择要评测的进攻性维度（回复编号取消选择，如 1 3 表示取消第1和第3个）："
+  },
+  "name": {
+    "title": "命名评审员",
+    "prompt": "请为评审员命名（留空将自动生成）：",
+    "generating": "正在生成评审员名称...",
+    "generated": "已生成名称："
+  },
+  "confirm": {
+    "title": "确认创建",
+    "prompt": "请确认创建以下评审员：",
+    "preview": "评审员预览",
+    "confirmCreate": "确认创建",
+    "editAgain": "重新编辑",
+    "goBack": "返回修改"
+  },
+  "review": {
+    "contentInput": "请输入要评测的内容：",
+    "platformNote": "发布平台 & 目标受众背景",
+    "initialReview": "正在执行防御性初审...",
+    "reviewComplete": "初审完成",
+    "startRetrial": "开始复审",
+    "selectReviewers": "请选择要使用的复审评审员：",
+    "replaceReviewer": "换一位",
+    "confirmReplace": "确认替换"
+  },
+  "configure": {
+    "selectMode": "请选择执行模式：",
+    "setConcurrency": "请设置最大并发数（1-10）：",
+    "confirmChanges": "请确认以下配置变更：",
+    "currentConfig": "当前配置",
+    "newConfig": "新配置"
+  },
+  "delete": {
+    "selectPersona": "请选择要删除的评审员：",
+    "confirmDelete": "请回复完整评审员名称以确认删除：",
+    "deleted": "评审员已删除",
+    "cancelled": "删除已取消",
+    "notFound": "未找到该评审员"
+  },
+  "errors": {
+    "invalidStep": "无效的步骤",
+    "sessionNotFound": "会话未找到",
+    "personaNotFound": "评审员未找到",
+    "operationFailed": "操作失败",
+    "pleaseRetry": "请重试"
+  }
+}

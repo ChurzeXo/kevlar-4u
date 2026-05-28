@@ -3,18 +3,18 @@ import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { PLATFORM_TO_EN } from "../utils/personaIdMaps.js";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
+import { getToolDescription, getListPersonasCount, getPlatformCount } from "../i18n/tools-i18n.js";
+import { t, getCurrentLanguage } from "../i18n/index.js";
 
 export const listPersonasToolDefinition: Tool = {
   name: "list_personas",
-  description:
-    "当用户想查看已有评审员列表时调用（如「有哪些评审员」「列出角色」）。\n\n行为：\n- 不传 platform → 返回各平台评审员数量概览 → 你应据此询问用户想看哪个平台\n- 传入中文平台名（如「小红书」「知乎」）→ 列出该平台下的评审员\n- 传入「全部」 → 列出所有平台的全部评审员\n\n纯查询工具，不触发评审流程。",
+  description: getToolDescription("listPersonas"),
   inputSchema: {
     type: "object" as const,
     properties: {
       platform: {
         type: "string",
-        description:
-          "中文平台名（如「小红书」「知乎」）。不传 → 各平台数量概览；传平台名 → 该平台列表；传「全部」 → 全部列出。",
+        description: t("listPersonas.platformDescription", { ns: "tools", defaultValue: "Platform name (e.g., 'Xiaohongshu', 'Zhihu'). No param → overview by platform; with platform name → list for that platform; 'all' → list all." }),
       },
     },
     required: [],
@@ -31,7 +31,7 @@ function getPersonaPlatform(persona: Persona): string {
   for (const [name, key] of Object.entries(PLATFORM_TO_EN)) {
     if (id.includes(key)) return name;
   }
-  return "通用";
+  return getCurrentLanguage() === "zh-CN" ? "通用" : "General";
 }
 
 function formatPersonaLines(
@@ -40,10 +40,12 @@ function formatPersonaLines(
   tags: string[],
   plat: string,
 ): string[] {
+  const locale = getCurrentLanguage();
+  const tagLabel = locale === "zh-CN" ? "标签" : "Tags";
   return tags.length > 0
     ? [
         `- **${name}**（${plat}）— ${description}`,
-        `  标签：${tags.map((t) => `\`${t}\``).join(" · ")}`,
+        `  ${tagLabel}：${tags.map((t) => `\`${t}\``).join(" · ")}`,
       ]
     : [`- **${name}**（${plat}）— ${description}`];
 }
@@ -61,13 +63,14 @@ export async function handleListPersonas(
   platform?: string
 ): Promise<ToolResult> {
   const personas = await loadAllPersonas(skillsDir);
+  const locale = getCurrentLanguage();
 
   if (personas.length === 0) {
     return {
       content: [
         {
           type: "text",
-          text: "⚠️ 当前没有任何评审员可用。你可以创建自定义评审员来开始评测。",
+          text: t("listPersonas.emptyMessage", { ns: "tools", defaultValue: "⚠️ No reviewers available. You can create custom reviewers to start reviewing." }),
         },
       ],
     };
@@ -83,27 +86,28 @@ export async function handleListPersonas(
   // No platform specified → show overview
   if (!platform) {
     const lines: string[] = [
-      `📊 共有 ${personas.length} 位评审员，分布在以下平台：`,
+      `📊 ${getListPersonasCount(personas.length)}`,
       "",
     ];
 
     for (const plat of Object.keys(byPlatform).sort()) {
-      lines.push(`- **${plat}**（${byPlatform[plat].length} 位）`);
+      lines.push(`- **${plat}**（${getPlatformCount(plat, byPlatform[plat].length)}）`);
     }
 
-    lines.push(
-      "",
-      "💡 请选择你要查看的平台（一次只能选择一个），",
-      "例如：列出小红书的评审员 / 查看知乎的评审员",
-    );
+    const selectPlatformHint = locale === "zh-CN"
+      ? "💡 请选择你要查看的平台（一次只能选择一个），\n例如：列出小红书的评审员 / 查看知乎的评审员"
+      : "💡 Please select the platform you want to view (one at a time),\ne.g.: List Xiaohongshu reviewers / Show Zhihu reviewers";
+
+    lines.push("", selectPlatformHint);
 
     return { content: [{ type: "text", text: lines.join("\n") }] };
   }
 
-  // "全部" → show all, grouped by platform
-  if (platform === "全部") {
+  // "全部" or "all" → show all, grouped by platform
+  if (platform === "全部" || platform.toLowerCase() === "all") {
+    const allLabel = locale === "zh-CN" ? "所有评审员" : "All Reviewers";
     const lines: string[] = [
-      `🎭 **所有评审员**（共 ${personas.length} 位）\n`,
+      `🎭 **${allLabel}**（${getListPersonasCount(personas.length)}）\n`,
     ];
 
     for (const [plat, list] of Object.entries(byPlatform).sort()) {
@@ -120,22 +124,22 @@ export async function handleListPersonas(
   // Specific platform → filter
   const matched = byPlatform[platform];
   if (!matched) {
+    const noReviewersMsg = locale === "zh-CN"
+      ? `❌ 平台「${platform}」没有评审员。\n\n现有平台：${Object.keys(byPlatform).sort().join("、")}。`
+      : `❌ No reviewers for platform "${platform}".\n\nAvailable platforms: ${Object.keys(byPlatform).sort().join(", ")}.`;
     return {
       content: [
         {
           type: "text",
-          text: [
-            `❌ 平台「${platform}」没有评审员。`,
-            "",
-            `现有平台：${Object.keys(byPlatform).sort().join("、")}。`,
-          ].join("\n"),
+          text: noReviewersMsg,
         },
       ],
     };
   }
 
+  const platformReviewersLabel = locale === "zh-CN" ? `${platform}评审员` : `${platform} Reviewers`;
   const lines: string[] = [
-    `🎭 **${platform}评审员**（共 ${matched.length} 位）\n`,
+    `🎭 **${platformReviewersLabel}**（${getListPersonasCount(matched.length)}）\n`,
   ];
 
   for (const p of matched) {

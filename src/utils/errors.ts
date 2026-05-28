@@ -2,6 +2,8 @@
  * Structured error types for Kevlar-4u
  */
 
+import { formatLocalizedError } from "../i18n/errors-i18n.js";
+
 export enum ErrorCode {
   // Validation errors (4xx)
   VALIDATION_ERROR = "VALIDATION_ERROR",
@@ -54,7 +56,7 @@ export function formatErrorResponse(err: unknown): ToolResult {
 
   const message = getErrorMessage(err);
   return {
-    content: [{ type: "text", text: `❌ 操作失败：${message}` }],
+    content: [{ type: "text", text: `❌ ${formatLocalizedError("common", "operationFailed")}${message}` }],
     isError: true,
   };
 }

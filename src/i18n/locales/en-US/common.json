@@ -1,0 +1,55 @@
+{
+  "app": {
+    "name": "Kevlar-4u Comment Section Simulator",
+    "version": "Version"
+  },
+  "actions": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "back": "Back",
+    "retry": "Retry",
+    "skip": "Skip",
+    "next": "Next",
+    "previous": "Previous",
+    "finish": "Finish",
+    "save": "Save",
+    "delete": "Delete",
+    "create": "Create",
+    "edit": "Edit",
+    "list": "List",
+    "help": "Help"
+  },
+  "status": {
+    "loading": "Loading...",
+    "processing": "Processing...",
+    "success": "Success",
+    "failed": "Failed",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info"
+  },
+  "messages": {
+    "operationFailed": "Operation failed",
+    "invalidInput": "Invalid input",
+    "notFound": "Not found",
+    "permissionDenied": "Permission denied",
+    "networkError": "Network error",
+    "timeout": "Operation timed out"
+  },
+  "platforms": {
+    "xiaohongshu": "Xiaohongshu (RED)",
+    "zhihu": "Zhihu",
+    "wechat_official": "WeChat Official Account",
+    "douyin": "Douyin (TikTok China)",
+    "weibo": "Weibo",
+    "bilibili": "Bilibili",
+    "twitter": "Twitter",
+    "instagram": "Instagram",
+    "linkedin": "LinkedIn",
+    "medium": "Medium"
+  },
+  "languages": {
+    "zh-CN": "简体中文",
+    "en-US": "English"
+  }
+}

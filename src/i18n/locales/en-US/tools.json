@@ -1,0 +1,117 @@
+{
+  "help": {
+    "title": "Kevlar-4u Help",
+    "description": "Display complete usage help including feature descriptions, available tools, and FAQs.",
+    "sections": {
+      "overview": "## Overview\n\nKevlar-4u is a comment section simulator that simulates real audience reactions before content publishing, helping creators identify expression issues, misunderstandings, and spread risks.",
+      "tools": "## Available Tools\n\n### 📋 Content Review\n- `review_content_wizard` - Multi-dimensional content risk assessment (Recommended)\n\n### 👤 Reviewer Management\n- `list_personas` - List existing reviewers\n- `create_persona_wizard` - Create new reviewer\n- `delete_persona_wizard` - Delete reviewer\n\n### ⚙️ System Configuration\n- `configure_wizard` - Configure execution mode\n- `get_execution_modes` - View current configuration\n\n### 🌐 Language Settings\n- `set_language` - Switch interface language (Chinese/English)",
+      "faq": "## FAQs\n\n**Q: How to start reviewing content?**\nA: Call the `review_content_wizard` tool and follow the wizard prompts.\n\n**Q: What are reviewers?**\nA: Reviewers are AI roles that simulate different audience perspectives, evaluating content from specific angles.\n\n**Q: How to switch languages?**\nA: Call the `set_language` tool with 'zh-CN' (Chinese) or 'en-US' (English)."
+    }
+  },
+  "setLanguage": {
+    "title": "Language Settings",
+    "description": "Switch interface language. Supports Chinese (zh-CN) and English (en-US)."
+  },
+  "listPersonas": {
+    "title": "Reviewer List",
+    "description": "View existing reviewer list.",
+    "empty": "No reviewers yet",
+    "count": "Total {{count}} reviewers",
+    "platformCount": "{{platform}}: {{count}} reviewers"
+  },
+  "createPersona": {
+    "title": "Create Reviewer",
+    "description": "Create a new reviewer role."
+  },
+  "createPersonaWizard": {
+    "title": "Create Reviewer Wizard",
+    "description": "Create new reviewer through interactive wizard. First call without sessionId, tool guides user through information collection step by step.",
+    "steps": {
+      "platform": "Select target platform",
+      "ageRange": "Select age range",
+      "gender": "Select gender",
+      "interests": "Select interests",
+      "tone": "Select speaking tone",
+      "authorRelation": "Select author relation",
+      "perspective": "Select perspective",
+      "name": "Name the reviewer",
+      "confirm": "Confirm creation"
+    },
+    "prompts": {
+      "platform": "Please select the reviewer's target platform:",
+      "ageRange": "Please select the reviewer's age range:",
+      "gender": "Please select the reviewer's gender:",
+      "interests": "Please select the reviewer's interests (multiple selection):",
+      "tone": "Please select the reviewer's speaking tone:",
+      "authorRelation": "Please select the reviewer's relation to the author:",
+      "perspective": "Please select the reviewer's perspective:",
+      "name": "Please name the reviewer (leave empty for auto-generation):",
+      "confirm": "Please confirm creating the following reviewer:"
+    },
+    "options": {
+      "goBack": "← Go back",
+      "skip": "Skip this step",
+      "all": "All"
+    }
+  },
+  "deletePersona": {
+    "title": "Delete Reviewer",
+    "description": "Delete an existing reviewer."
+  },
+  "deletePersonaWizard": {
+    "title": "Delete Reviewer Wizard",
+    "description": "Delete existing reviewer. Tool automatically lists all reviewers for matching.",
+    "prompts": {
+      "select": "Please select the reviewer to delete:",
+      "confirm": "Please reply with full reviewer name to confirm deletion:"
+    },
+    "messages": {
+      "deleted": "Reviewer deleted",
+      "cancelled": "Deletion cancelled",
+      "notFound": "Reviewer not found"
+    }
+  },
+  "reviewContent": {
+    "title": "Content Review",
+    "description": "Perform multi-dimensional social semantic risk assessment on user-submitted text content."
+  },
+  "reviewContentWizard": {
+    "title": "Content Review Wizard",
+    "description": "Perform multi-dimensional social semantic risk assessment on user-submitted text content. After initial review, displays results and recommends re-review reviewers.",
+    "prompts": {
+      "content": "Please enter the content to review:",
+      "startReview": "Start re-review",
+      "replaceReviewer": "Replace one",
+      "confirmReplace": "Confirm replacement"
+    },
+    "messages": {
+      "initialReview": "Executing defensive initial review...",
+      "reviewComplete": "Initial review complete",
+      "startRetrial": "Start re-review",
+      "selectReviewers": "Please select re-review reviewers to use:"
+    }
+  },
+  "configure": {
+    "title": "System Configuration",
+    "description": "Directly modify Kevlar-4u runtime configuration."
+  },
+  "configureWizard": {
+    "title": "Configuration Wizard",
+    "description": "Called when user says 'set/configure/switch mode/change concurrency'. Tool previews configuration changes, writes to config file only after user confirmation.",
+    "prompts": {
+      "mode": "Please select execution mode:",
+      "maxConcurrency": "Please set maximum concurrency (1-10):",
+      "confirm": "Please confirm the following configuration changes:"
+    },
+    "modes": {
+      "auto": "Auto mode (Recommended)",
+      "orchestration": "Host-assisted fallback mode",
+      "mcp_sampling": "MCP Sampling mode",
+      "direct_api": "Direct API mode"
+    }
+  },
+  "getModes": {
+    "title": "View Execution Modes",
+    "description": "Query availability and current configuration status of host-assisted fallback, MCP sampling, and direct API execution modes."
+  }
+}

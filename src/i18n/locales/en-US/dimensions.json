@@ -1,0 +1,224 @@
+{
+  "social_risk_ethics": {
+    "label": "Social Risk & Group Ethics",
+    "description": "Review whether content touches on group conflicts, public morality, or unintentional vulgar associations",
+    "sentinelPoints": [
+      "Gender/region/class/occupation discrimination",
+      "Objectification and vulgar suggestive content",
+      "Implicit privilege gaze",
+      "Polyphonic/homophonic/associative vulgarization risks (including body organ associations, sexual innuendo associations, dialect slang associations)"
+    ],
+    "conditionalSentinels": {
+      "crossCulture": {
+        "trigger": "Cross-cultural/subcultural/ethnic/religious elements",
+        "description": "Cultural appropriation and secondary cultural misinterpretation—whether cultural elements are reduced to decorative symbols, used out of original context, or distorted for sensationalism"
+      },
+      "sensoryDescription": {
+        "trigger": "Food/body/sensory descriptions (especially color+shape+texture combinations)",
+        "description": "Vocabulary body association risk—whether descriptions phonetically, visually, or semantically associate with sexual organs/sensitive body parts; high-sensitivity combinations like pink+ear/flower/hole, white+tender/smooth/soft, fat+thick/full/moist require word-by-word review for unintentional vulgarization"
+      }
+    },
+    "criteria": {
+      "green": "Content does not involve any group-sensitive topics, or involves them but handles them respectfully, balanced, and without stereotypes; no vulgar association risks in wording",
+      "yellow": "Implicit risks exist—may be interpreted as offensive by some groups but without clear malicious intent; uses controversial metaphors/analogies but contextually explainable; implicit privilege gaze exists but not as dominant narrative; wording has potential vulgar associations but requires deliberate interpretation",
+      "red": "Explicit offense exists—includes objectification, stereotypes, group labeling, vulgar suggestive content, class conflict implications; or implicit privilege gaze forms core logic of content; wording combinations directly trigger body organ/sexual innuendo associations, constituting vulgarization risk even without subjective intent"
+    }
+  },
+  "legal_compliance": {
+    "label": "Compliance & Legal Boundaries",
+    "description": "Review whether content violates advertising laws, platform rules, or ideological red lines",
+    "sentinelPoints": [
+      "Advertising law violations (absolute claims, false advertising)",
+      "Platform rules and throttling keywords",
+      "Political/historical red lines",
+      "Pseudoscience and false efficacy claims"
+    ],
+    "criteria": {
+      "green": "Content complies with advertising laws and platform rules, no absolute claims, no sensitive keyword trigger risks",
+      "yellow": "Gray areas exist—uses near-absolute expressions but may not constitute illegal acts in context; efficacy descriptions have inflation tendencies but don't reach pseudoscience level; platform throttling keywords present but not deliberately evaded",
+      "red": "Violates advertising laws (absolute claims, false advertising); touches political/historical red lines; suspected inducement/fraud; clear pseudoscience/false efficacy claims; contains platform-ban-level sensitive words"
+    }
+  },
+  "context_distortion": {
+    "label": "Context Detachment & Malicious Distortion Risk",
+    "description": "Review whether content is easily maliciously distorted when removed from context",
+    "sentinelPoints": [
+      "Screenshot decontextualization risk",
+      "Clickbait truncation risk",
+      "Short video remix misinterpretation risk",
+      "Meme-ification spread risk"
+    ],
+    "criteria": {
+      "green": "Content has complete, self-consistent context; difficult to distort meaning even when screenshotted/truncated; key judgments have sufficient precondition qualifications",
+      "yellow": "Key sentences that can be decontextualized exist—certain sentences shift meaning when separated from context but intent can be restored when read completely; segments easily extracted for clickbait",
+      "red": "Expressions highly susceptible to malicious distortion exist—certain sentences undergo fundamental meaning reversal when decontextualized; key conclusions lack precondition protection; content naturally suited for screenshot spread and misinterpretation"
+    }
+  },
+  "factual_integrity": {
+    "label": "Factual Flaws & Common Sense Deviation",
+    "description": "Review whether content contains common sense errors, out-of-context quotes, or logical flaws",
+    "sentinelPoints": [
+      "Data fabrication or serious inaccuracies",
+      "Common sense errors (violating physics/physiology/legal common sense)",
+      "Pseudoscience and false efficacy claims",
+      "Outdated information",
+      "Causal fallacies"
+    ],
+    "criteria": {
+      "green": "Factual claims are verifiable, data has sources, causal reasoning logic holds; no common sense errors in non-professional domains",
+      "yellow": "Correctable factual issues exist—data not updated but not core to argument; individual wording imprecise but true intent can be inferred; causal reasoning has leaps but doesn't constitute logical flaws",
+      "red": "Fundamental factual errors exist—data fabrication or serious inaccuracies; common sense errors; pseudoscience/false efficacy claims; causal fallacies form foundation of core content arguments"
+    }
+  },
+  "hook_retention": {
+    "label": "Opening Hook & First Screen Retention",
+    "description": "Review the eye-catching quality of content opening and first screen information density",
+    "sentinelPoints": [
+      "Title/paragraph hook sharpness",
+      "First screen information density and redundant padding",
+      "Visual/semantic differentiation in feed"
+    ],
+    "criteria": {
+      "green": "Opening precisely hits target readers' pain points/curiosity/identity; first screen has high information density without redundant padding; clear differentiation in feed",
+      "yellow": "Opening has attraction but lacks sharpness—needs 1-2 sentences of padding to reach core; first screen has information but lacks hook to stop scrolling; easily passed over in feed",
+      "red": "Opening is generic greeting/self-introduction/background padding; first screen has no effective information; no differentiation from similar content in feed, lacking reasons to stay"
+    }
+  },
+  "virality_potential": {
+    "label": "Virality & Spread Potential",
+    "description": "Review whether content has social drivers for sharing/bookmarking/commenting",
+    "sentinelPoints": [
+      "Social currency value (does sharing make one appear tasteful/foresighted/information-advantaged)",
+      "Emotional drivers (anger/empathy/resonance)",
+      "Self-spread mechanisms (quotable lines/screenshotable paragraphs/controversial viewpoints)"
+    ],
+    "criteria": {
+      "green": "Content provides high-value social currency or triggers strong emotional drivers; clear self-spread mechanisms exist (quotable lines/screenshotable paragraphs/controversial viewpoints)",
+      "yellow": "Content has value but lacks spread drivers—useful but not enough to motivate active sharing; has emotion but not strong enough; lacks quotable anchor points for extraction and spread",
+      "red": "Content is pure self-indulgence/brand monologue; no social currency value or emotional drivers; readers have no psychological motivation to share after reading"
+    }
+  },
+  "narrative_structure": {
+    "label": "Narrative Structure & Information Density",
+    "description": "Review content structure fluency, logical coherence, and information redundancy",
+    "sentinelPoints": [
+      "Logical chain completeness and break detection",
+      "Paragraph transition naturalness",
+      "Information redundancy (repetitive expressions/filler content)",
+      "Pacing control (alternating tension and release)"
+    ],
+    "criteria": {
+      "green": "Clear structure, complete unbroken logical chain; natural paragraph transitions with varied pacing; high information density without redundant filler; argumentation has layered progression",
+      "yellow": "Overall structure recognizable but locally loose; redundant paragraphs or repetitive expressions exist; logical chain has leaps but can be self-completed; pacing is flat, lacking variation",
+      "red": "Disorganized structure, broken logical chain; large amounts of filler content reduce information density; no transitions or logical conflicts between paragraphs; readers struggle to extract core arguments"
+    }
+  },
+  "emotional_resonance": {
+    "label": "Emotional Resonance & Tension",
+    "description": "Review content's emotional engagement ability and immersion",
+    "sentinelPoints": [
+      "Emotional arc (buildup→tension→release)",
+      "Language imagery and immersion",
+      "Emotional progression pacing"
+    ],
+    "criteria": {
+      "green": "Content successfully engages target readers' emotional arc; language has imagery and immersion; emotional progression has pacing; readers can feel 'this is exactly about me'",
+      "yellow": "Content has emotion but is flat—same emotional tone throughout without variation; has imagery but lacks immersion; emotional expression is straightforward, lacking the power of white space and suggestion",
+      "red": "Content is pure information stacking, no emotional layer; language is dry without imagery; emotional progression is zero—beginning and ending emotional temperature identical; target readers cannot generate immersion"
+    }
+  },
+  "action_conversion": {
+    "label": "User Action Conversion Rate",
+    "description": "Review whether content's CTA is clear and effective, capable of guiding readers to take target actions",
+    "sentinelPoints": [
+      "CTA clarity and urgency",
+      "Sufficiency of preceding content's motivation building",
+      "Action threshold and path clarity"
+    ],
+    "criteria": {
+      "green": "CTA is clear, specific, and urgent; preceding content has completed sufficient motivation building (pain point→solution→action); low action threshold with clear path; sufficient persuasion/recommendation power",
+      "yellow": "CTA exists but is vague or lacks driving force; preceding padding insufficient, readers don't yet have impulse to act; action path unclear",
+      "red": "Missing CTA or CTA disconnected from content; no action reason established throughout; readers don't know what to do or don't want to do anything after reading"
+    }
+  },
+  "differentiation": {
+    "label": "Differentiation & Memory Points",
+    "description": "Review content's recognizability and memorability within its category",
+    "sentinelPoints": [
+      "Unique perspective/expression method/information source",
+      "Conceptual anchors for secondary citation",
+      "Substitutability within same category"
+    ],
+    "criteria": {
+      "green": "Content has clear differentiation within its category—unique perspective/expression method/information source; readers can remember at least one viewpoint or expression 'only found in this piece'; has conceptual anchors for secondary citation",
+      "yellow": "Content quality is acceptable but highly homogeneous with similar content; lacks unique memory anchors—difficult to recall specific points after reading; can be replaced by any same-category content",
+      "red": "Content is industry boilerplate/template output; highly similar to competitor content; no unique perspectives, exclusive information, or differentiated expression; readers will feel 'I think I've seen this somewhere before'"
+    }
+  },
+  "information_gap": {
+    "label": "Information Gap Value",
+    "description": "Review whether content provides information not easily obtainable by target readers through regular channels",
+    "sentinelPoints": [
+      "Information exclusivity (exclusive data/first-hand experience/counter-intuitive insights/insider perspective)",
+      "Information timeliness and depth superiority over public materials",
+      "Information increment vs information transportation"
+    ],
+    "criteria": {
+      "green": "Content provides information not easily obtainable by target readers through regular channels—exclusive data/first-hand experience/counter-intuitive insights/insider perspective; information timeliness or depth significantly superior to public materials",
+      "yellow": "Content has information volume but doesn't exceed target readers' regular cognitive boundaries—integrates public information but lacks increment; viewpoints correct but constitute 'correct platitudes'; certain proportion of target audience already knows this information",
+      "red": "Content provides no information increment—entirely common knowledge searchable on Baidu; or information outdated, target readers already informed through other channels; content essence is information transportation rather than information value-add"
+    }
+  },
+  "ui": {
+    "defensiveTitle": "🛡️ Defensive Risk Assessment (System Mandatory)",
+    "offensiveTitle": "🚀 Offensive Value Assessment",
+    "defensiveMandatory": "Defensive Dimensions (System Mandatory, All Reviewers Must Execute)",
+    "offensiveOptional": "Offensive Dimensions (Optional, Reply with Number to Deselect)",
+    "assessmentTarget": "Audit Target",
+    "assessmentSentinels": "Audit Sentinels",
+    "conditionalSentinels": "Conditional Sentinels (Activated When Content Matches Related Elements)",
+    "triggerCondition": "Trigger Condition",
+    "scoringCriteria": "Scoring Criteria",
+    "systemDirectiveIntro": "The following four defensive dimensions are mandatory system review items. Regardless of your role positioning, you must evaluate content on these four dimensions and cannot skip them:",
+    "mustIncludeConclusion": "Please clearly include the conclusions of the above four defensive assessments in your review results.",
+    "offensiveDirectiveIntro": "The following {{count}} offensive dimensions require your evaluation, examining content value and effectiveness from these dimensions:",
+    "mustIncludeOffensiveConclusion": "Please clearly include the conclusions of the above offensive dimension assessments in your review results.",
+    "personaTitle": "👤 Reviewer Profile",
+    "personaIntro": "The following are your identity attributes as a reviewer. Please review strictly according to this identity:",
+    "ageRange": "Age Range",
+    "gender": "Gender",
+    "interests": "Interests",
+    "culturalContext": "Cultural Context",
+    "perspective": "Perspective",
+    "blindSpot": "Blind Spot",
+    "authorRelation": "Author Relation",
+    "toneTitle": "🎙️ Speaking Tone",
+    "toneIntro": "You must conduct review output with a '{{tone}}' tone. Specific requirements:",
+    "viewpoint": "Perspective",
+    "noBias": "No particular dimension bias",
+    "focusDimensions": "Key Focus",
+    "simultaneously具备": "simultaneously possessing"
+  },
+  "stancePresets": {
+    "traditional_culture": "Focus on traditional cultural expression, local brands, and cultural identity",
+    "workplace_comm": "Focus on workplace communication experience, expression methods, and practical usage scenarios",
+    "urban_female": "Focus on wording details, emotional expression, and social issue sensitivities",
+    "rational_analyst": "Focus on logical structure, information accuracy, and technical details",
+    "public_opinion": "Easily influenced by public discussion atmosphere and comment section emotions",
+    "independent_thinker": "Emphasizes individual expression, value consistency, and authentic feelings",
+    "commercial_observer": "Focus on commercial expression, marketing language, and consumption authenticity",
+    "family_tradition": "Focus on family values, intergenerational relations, and traditional value expression",
+    "community_core": "Focus on community expression habits and atmosphere"
+  },
+  "stancePerspectives": {
+    "traditional_culture": "User perspective focusing on traditional cultural expression, local brands, and cultural identity",
+    "workplace_comm": "Workplace user perspective focusing on communication experience, expression methods, and practical scenarios",
+    "urban_female": "Urban female perspective focusing on wording details, emotional expression, and social issue sensitivities",
+    "rational_analyst": "Rational analysis perspective focusing on logical structure, information accuracy, and technical details",
+    "public_opinion": "General user perspective easily influenced by public discussion atmosphere and comment section emotions",
+    "independent_thinker": "Independent thinking perspective emphasizing individual expression, value consistency, and authentic feelings",
+    "commercial_observer": "Commercial observation perspective focusing on commercial expression, marketing language, and consumption authenticity",
+    "family_tradition": "Traditional culture perspective focusing on family values, intergenerational relations, and traditional value expression",
+    "community_core": "Core player perspective familiar with vertical community culture, focusing on community expression habits and atmosphere"
+  }
+}

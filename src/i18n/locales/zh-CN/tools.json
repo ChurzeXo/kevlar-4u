@@ -1,0 +1,117 @@
+{
+  "help": {
+    "title": "Kevlar-4u 使用帮助",
+    "description": "显示完整使用帮助，包括功能说明、可用工具和常见问题。",
+    "sections": {
+      "overview": "## 概述\n\nKevlar-4u 是一个评论区模拟器，可以在内容发布前模拟真实受众反应，帮助创作者发现表达问题、误解和传播风险。",
+      "tools": "## 可用工具\n\n### 📋 内容评测\n- `review_content_wizard` - 多维度内容风险评测（推荐）\n\n### 👤 评审员管理\n- `list_personas` - 列出已有评审员\n- `create_persona_wizard` - 创建新评审员\n- `delete_persona_wizard` - 删除评审员\n\n### ⚙️ 系统配置\n- `configure_wizard` - 配置执行模式\n- `get_execution_modes` - 查看当前配置\n\n### 🌐 语言设置\n- `set_language` - 切换界面语言（中文/英文）",
+      "faq": "## 常见问题\n\n**Q: 如何开始评测内容？**\nA: 调用 `review_content_wizard` 工具，按照向导提示操作。\n\n**Q: 评审员是什么？**\nA: 评审员是模拟不同受众视角的 AI 角色，可以从特定角度评测内容。\n\n**Q: 如何切换语言？**\nA: 调用 `set_language` 工具，传入 'zh-CN'（中文）或 'en-US'（英文）。"
+    }
+  },
+  "setLanguage": {
+    "title": "语言设置",
+    "description": "切换界面语言。支持中文 (zh-CN) 和英文 (en-US)。"
+  },
+  "listPersonas": {
+    "title": "评审员列表",
+    "description": "查看已有评审员列表。",
+    "empty": "暂无评审员",
+    "count": "共 {{count}} 个评审员",
+    "platformCount": "{{platform}} 平台: {{count}} 个"
+  },
+  "createPersona": {
+    "title": "创建评审员",
+    "description": "创建新的评审员角色。"
+  },
+  "createPersonaWizard": {
+    "title": "创建评审员向导",
+    "description": "通过交互式向导创建新评审员。首次调用不带 sessionId，工具会引导用户逐步完成信息收集。",
+    "steps": {
+      "platform": "选择目标平台",
+      "ageRange": "选择年龄段",
+      "gender": "选择性别",
+      "interests": "选择兴趣方向",
+      "tone": "选择讲话语气",
+      "authorRelation": "选择与作者关系",
+      "perspective": "选择立场视角",
+      "name": "命名评审员",
+      "confirm": "确认创建"
+    },
+    "prompts": {
+      "platform": "请选择评审员的目标平台：",
+      "ageRange": "请选择评审员的年龄段：",
+      "gender": "请选择评审员的性别：",
+      "interests": "请选择评审员的兴趣方向（可多选）：",
+      "tone": "请选择评审员的讲话语气：",
+      "authorRelation": "请选择评审员与作者的关系：",
+      "perspective": "请选择评审员的立场视角：",
+      "name": "请为评审员命名（留空将自动生成）：",
+      "confirm": "请确认创建以下评审员："
+    },
+    "options": {
+      "goBack": "← 返回上一步",
+      "skip": "跳过此步",
+      "all": "全部"
+    }
+  },
+  "deletePersona": {
+    "title": "删除评审员",
+    "description": "删除一个已存在的评审员。"
+  },
+  "deletePersonaWizard": {
+    "title": "删除评审员向导",
+    "description": "删除已存在的评审员。工具自动列出所有评审员供匹配。",
+    "prompts": {
+      "select": "请选择要删除的评审员：",
+      "confirm": "请回复完整评审员名称以确认删除："
+    },
+    "messages": {
+      "deleted": "评审员已删除",
+      "cancelled": "删除已取消",
+      "notFound": "未找到该评审员"
+    }
+  },
+  "reviewContent": {
+    "title": "内容评测",
+    "description": "对用户提交的文本内容进行多维度社会语义风险评测。"
+  },
+  "reviewContentWizard": {
+    "title": "内容评测向导",
+    "description": "用于对用户提交的文本内容进行多维度社会语义风险评测。初审结束后展示初审结果和复审评审员推荐。",
+    "prompts": {
+      "content": "请输入要评测的内容：",
+      "startReview": "开始复审",
+      "replaceReviewer": "换一位",
+      "confirmReplace": "确认替换"
+    },
+    "messages": {
+      "initialReview": "正在执行防御性初审...",
+      "reviewComplete": "初审完成",
+      "startRetrial": "开始复审",
+      "selectReviewers": "请选择要使用的复审评审员："
+    }
+  },
+  "configure": {
+    "title": "系统配置",
+    "description": "直接修改 Kevlar-4u 运行配置。"
+  },
+  "configureWizard": {
+    "title": "配置向导",
+    "description": "当用户说「设置/配置/切换模式/改并发数」时调用。工具先预览配置变更，用户确认后才写入配置文件。",
+    "prompts": {
+      "mode": "请选择执行模式：",
+      "maxConcurrency": "请设置最大并发数（1-10）：",
+      "confirm": "请确认以下配置变更："
+    },
+    "modes": {
+      "auto": "自动模式（推荐）",
+      "orchestration": "宿主辅助兜底模式",
+      "mcp_sampling": "MCP 采样模式",
+      "direct_api": "直接 API 模式"
+    }
+  },
+  "getModes": {
+    "title": "查看执行模式",
+    "description": "查询宿主辅助兜底、MCP 采样、直接 API 三种执行模式的可用性及当前配置状态。"
+  }
+}

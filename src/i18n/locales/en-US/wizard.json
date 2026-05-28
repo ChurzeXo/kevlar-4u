@@ -1,0 +1,157 @@
+{
+  "common": {
+    "goBack": "← Go back",
+    "goBackTo": "← Go back to step {{step}}",
+    "skip": "Skip this step",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "retry": "Retry",
+    "or": "or",
+    "inputPrompt": "Please enter:",
+    "invalidOption": "Invalid option, please try again",
+    "sessionExpired": "Session expired, please start over"
+  },
+  "platform": {
+    "title": "Select Target Platform",
+    "prompt": "Please select the reviewer's target platform:",
+    "options": {
+      "xiaohongshu": "Xiaohongshu (RED)",
+      "zhihu": "Zhihu",
+      "wechat_official": "WeChat Official Account",
+      "douyin": "Douyin (TikTok China)",
+      "weibo": "Weibo",
+      "bilibili": "Bilibili"
+    }
+  },
+  "ageRange": {
+    "title": "Select Age Range",
+    "prompt": "Please select the reviewer's age range:",
+    "options": {
+      "18-24": "18-24 years old (Gen Z / College students)",
+      "25-30": "25-30 years old (Early career)",
+      "31-40": "31-40 years old (Mid-career)",
+      "41-50": "41-50 years old (Mature group)",
+      "50+": "50+ years old (Silver generation)"
+    }
+  },
+  "gender": {
+    "title": "Select Gender",
+    "prompt": "Please select the reviewer's gender:",
+    "options": {
+      "male": "Male",
+      "female": "Female",
+      "neutral": "Neutral / Non-binary"
+    }
+  },
+  "interests": {
+    "title": "Select Interests",
+    "prompt": "Please select the reviewer's interests (multiple selection, reply with numbers like 1 3 5):",
+    "options": {
+      "fashion": "Fashion & Beauty",
+      "food": "Food & Dining",
+      "travel": "Travel",
+      "parenting": "Parenting",
+      "tech": "Tech & Gadgets",
+      "fitness": "Fitness & Sports",
+      "finance": "Finance & Investment",
+      "culture": "Culture & Arts",
+      "entertainment": "Entertainment & Celebrity",
+      "education": "Education & Learning",
+      "career": "Career Development",
+      "lifestyle": "Lifestyle"
+    }
+  },
+  "tone": {
+    "title": "Select Speaking Tone",
+    "prompt": "Please select the reviewer's speaking tone:",
+    "options": {
+      "sharp": "Sharp & Witty",
+      "gentle": "Gentle & Warm",
+      "humorous": "Humorous & Playful",
+      "rational": "Rational & Analytical",
+      "impatient": "Impatient & Direct",
+      "formal": "Formal & Professional",
+      "casual": "Casual & Relaxed"
+    }
+  },
+  "authorRelation": {
+    "title": "Select Author Relation",
+    "prompt": "Please select the reviewer's relation to the author:",
+    "options": {
+      "stranger": "Stranger (first time seeing)",
+      "follower": "Follower (long-term subscriber)",
+      "friend": "Friend (personally acquainted)",
+      "peer": "Peer (same field)",
+      "critic": "Critic (different viewpoint)",
+      "mentor": "Mentor (experienced)",
+      "junior": "Junior (still learning)"
+    }
+  },
+  "perspective": {
+    "title": "Select Perspective",
+    "prompt": "Please select the reviewer's perspective (multiple selection, reply with numbers like 1 3):",
+    "options": {
+      "traditional_culture": "Focus on traditional cultural expression, local brands, and cultural identity",
+      "workplace_comm": "Focus on workplace communication experience, expression methods, and practical scenarios",
+      "urban_female": "Focus on wording details, emotional expression, and social issue sensitivities",
+      "rational_analyst": "Focus on logical structure, information accuracy, and technical details",
+      "public_opinion": "Easily influenced by public discussion atmosphere and comment section emotions",
+      "independent_thinker": "Emphasizes individual expression, value consistency, and authentic feelings",
+      "commercial_observer": "Focus on commercial expression, marketing language, and consumption authenticity",
+      "family_tradition": "Focus on family values, intergenerational relations, and traditional value expression",
+      "community_core": "Focus on community expression habits and atmosphere"
+    }
+  },
+  "dimensions": {
+    "title": "Select Review Dimensions",
+    "prompt": "Please select dimensions to review (defensive dimensions are mandatory):",
+    "defensive": "Defensive Dimensions (System Mandatory)",
+    "offensive": "Offensive Dimensions (Optional)",
+    "select": "Please select offensive dimensions to review (reply with numbers to deselect, e.g., 1 3 to deselect #1 and #3):"
+  },
+  "name": {
+    "title": "Name the Reviewer",
+    "prompt": "Please name the reviewer (leave empty for auto-generation):",
+    "generating": "Generating reviewer name...",
+    "generated": "Generated name:"
+  },
+  "confirm": {
+    "title": "Confirm Creation",
+    "prompt": "Please confirm creating the following reviewer:",
+    "preview": "Reviewer Preview",
+    "confirmCreate": "Confirm Create",
+    "editAgain": "Edit Again",
+    "goBack": "Go Back to Modify"
+  },
+  "review": {
+    "contentInput": "Please enter the content to review:",
+    "platformNote": "Publishing Platform & Target Audience Context",
+    "initialReview": "Executing defensive initial review...",
+    "reviewComplete": "Initial review complete",
+    "startRetrial": "Start re-review",
+    "selectReviewers": "Please select re-review reviewers to use:",
+    "replaceReviewer": "Replace one",
+    "confirmReplace": "Confirm replacement"
+  },
+  "configure": {
+    "selectMode": "Please select execution mode:",
+    "setConcurrency": "Please set maximum concurrency (1-10):",
+    "confirmChanges": "Please confirm the following configuration changes:",
+    "currentConfig": "Current Configuration",
+    "newConfig": "New Configuration"
+  },
+  "delete": {
+    "selectPersona": "Please select the reviewer to delete:",
+    "confirmDelete": "Please reply with full reviewer name to confirm deletion:",
+    "deleted": "Reviewer deleted",
+    "cancelled": "Deletion cancelled",
+    "notFound": "Reviewer not found"
+  },
+  "errors": {
+    "invalidStep": "Invalid step",
+    "sessionNotFound": "Session not found",
+    "personaNotFound": "Reviewer not found",
+    "operationFailed": "Operation failed",
+    "pleaseRetry": "Please try again"
+  }
+}

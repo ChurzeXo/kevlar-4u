@@ -7,6 +7,8 @@
 import type { ExecutionMode } from "./base.js";
 import type { DimensionsConfig } from "./dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions } from "./dimensions.js";
+import { t, getCurrentLanguage } from "../i18n/index.js";
+import { getModeLabel } from "../i18n/tools-i18n.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
@@ -96,36 +98,35 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
   const successful = personas.filter((p) => !p.error);
   const failed = personas.filter((p) => p.error);
 
-  const modeLabels: Record<ExecutionMode, string> = {
-    orchestration: "宿主辅助兜底模式",
-    mcp_sampling: "MCP 采样模式",
-    direct_api: "直接 API 模式",
-  };
+  const modeLabel = getModeLabel(mode);
+  const locale = getCurrentLanguage();
+  const joinChar = locale === "zh-CN" ? "、" : ", ";
 
-  let report = `## 🛡️ Kevlar-4u 压力测试报告
+  let report = `## 🛡️ Kevlar-4u ${t("report.title", { ns: "common", defaultValue: "Stress Test Report" })}
 
-**执行模式**：${modeLabels[mode]}
-**测试内容摘要**：${contentSummary}
-**参与评审员**：${successful.map((p) => p.personaName).join("、")}（共 ${successful.length} 位）`;
+**${t("report.executionMode", { ns: "common", defaultValue: "Execution Mode" })}**：${modeLabel}
+**${t("report.contentSummary", { ns: "common", defaultValue: "Content Summary" })}**：${contentSummary}
+**${t("report.reviewers", { ns: "common", defaultValue: "Reviewers" })}**：${successful.map((p) => p.personaName).join(joinChar)}（${t("report.total", { ns: "common", defaultValue: "Total", count: successful.length })}）`;
 
   if (failed.length > 0) {
-    report += `\n**部分失败**：${failed.map((p) => `${p.personaName}（${p.error}）`).join("、")}`;
+    report += `\n**${t("report.partialFailure", { ns: "common", defaultValue: "Partial Failure" })}**：${failed.map((p) => `${p.personaName}（${p.error}）`).join(joinChar)}`;
   }
 
-  report += `\n**测试完成时间**：${new Date().toLocaleString("zh-CN")}`;
+  const dateLocale = locale === "zh-CN" ? "zh-CN" : "en-US";
+  report += `\n**${t("report.completedAt", { ns: "common", defaultValue: "Completed At" })}**：${new Date().toLocaleString(dateLocale)}`;
 
   if (options.preAuditReport && options.preAuditReport.dimensions && options.preAuditReport.dimensions.length > 0) {
     const hasFindings = options.preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
     if (hasFindings) {
-      report += `\n\n---\n\n## 🚨 系统初审发现\n\n`;
-      report += `系统初审扫描出潜在风险点如下：\n`;
+      report += `\n\n---\n\n## 🚨 ${t("report.systemFindings", { ns: "common", defaultValue: "System Initial Findings" })}\n\n`;
+      report += `${t("report.systemFindingsDesc", { ns: "common", defaultValue: "The system initial review scanned the following potential risk points:" })}\n`;
       for (const audit of options.preAuditReport.dimensions) {
         if (audit.findings && audit.findings.length > 0) {
-          report += `\n### 【${audit.name}】发现 ${audit.findings.length} 个风险项\n`;
+          report += `\n### 【${audit.name}】${t("report.foundRisks", { ns: "common", defaultValue: "Found {{count}} risk items", count: audit.findings.length })}\n`;
           for (const f of audit.findings) {
-            report += `- **${f.suggestedLevel || "未知"} ${f.keyword}**\n`;
-            report += `  - 触发原因：${f.trigger}\n`;
-            report += `  - 风险描述：${f.riskDescription}\n`;
+            report += `- **${f.suggestedLevel || t("report.unknown", { ns: "common", defaultValue: "Unknown" })} ${f.keyword}**\n`;
+            report += `  - ${t("report.triggerReason", { ns: "common", defaultValue: "Trigger Reason" })}：${f.trigger}\n`;
+            report += `  - ${t("report.riskDescription", { ns: "common", defaultValue: "Risk Description" })}：${f.riskDescription}\n`;
           }
         }
       }
@@ -134,7 +135,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
 
   // Individual reviews
   if (successful.length > 0) {
-    report += "\n\n---\n\n## 各评审员观点\n";
+    report += `\n\n---\n\n## ${t("report.reviewerOpinions", { ns: "common", defaultValue: "Reviewer Opinions" })}\n`;
     for (const p of successful) {
       report += `\n### ${p.personaName}\n\n${p.review}\n`;
     }
@@ -145,13 +146,13 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
 
 ---
 
-## 综合维度评估
+## ${t("report.dimensionAssessment", { ns: "common", defaultValue: "Dimension Assessment" })}
 
 ${buildDimensionTable(dimsConfig)}
 
 ---
 
-## 综合摘要
+## ${t("report.summary", { ns: "common", defaultValue: "Summary" })}
 
 ${resultsSummary(successful)}`;
 
@@ -159,18 +160,22 @@ ${resultsSummary(successful)}`;
 
 ---
 
-*由 Kevlar-4u 驱动 · 本地多智能体内容防弹衣*`;
+*${t("report.poweredBy", { ns: "common", defaultValue: "Powered by Kevlar-4u · Local Multi-Agent Content Armor" })}*`;
 
   return report;
 }
 
 function resultsSummary(successful: PersonaResultWithMeta[]): string {
-  if (successful.length === 0) return "无评审员成功完成评测。";
+  if (successful.length === 0) return t("report.noReviewers", { ns: "common", defaultValue: "No reviewers successfully completed the review." });
+
+  const locale = getCurrentLanguage();
+  const colon = locale === "zh-CN" ? "：" : ": ";
+  const ellipsis = locale === "zh-CN" ? "…" : "...";
 
   const lines: string[] = [];
   for (const p of successful) {
     const firstLine = p.review.split("\n")[0]?.replace(/^[#*\s]+/, "").slice(0, 80) || "";
-    lines.push(`- **${p.personaName}**：${firstLine}${firstLine.length >= 80 ? "…" : ""}`);
+    lines.push(`- **${p.personaName}**${colon}${firstLine}${firstLine.length >= 80 ? ellipsis : ""}`);
   }
   return lines.join("\n");
 }

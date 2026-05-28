@@ -1,0 +1,50 @@
+{
+  "common": {
+    "unknown": "Unknown error",
+    "invalidInput": "Invalid input",
+    "operationFailed": "Operation failed",
+    "notFound": "Not found",
+    "permissionDenied": "Permission denied",
+    "networkError": "Network error",
+    "timeout": "Operation timed out",
+    "internalError": "Internal error"
+  },
+  "tool": {
+    "notFound": "Tool not found",
+    "invalidParams": "Invalid parameters",
+    "missingRequired": "Missing required parameters",
+    "executionFailed": "Tool execution failed"
+  },
+  "persona": {
+    "notFound": "Reviewer not found",
+    "alreadyExists": "Reviewer already exists",
+    "createFailed": "Failed to create reviewer",
+    "deleteFailed": "Failed to delete reviewer",
+    "invalidConfig": "Invalid reviewer configuration",
+    "parseError": "Reviewer file parse error"
+  },
+  "review": {
+    "contentRequired": "Please enter content to review",
+    "reviewFailed": "Review failed",
+    "aggregationFailed": "Report aggregation failed",
+    "noDimensions": "No review dimensions selected",
+    "lockFailed": "Failed to acquire review lock"
+  },
+  "config": {
+    "invalidMode": "Invalid execution mode",
+    "invalidConcurrency": "Invalid concurrency value",
+    "readFailed": "Failed to read configuration",
+    "writeFailed": "Failed to write configuration"
+  },
+  "wizard": {
+    "sessionExpired": "Wizard session expired",
+    "invalidStep": "Invalid step",
+    "stepNotFound": "Step not found",
+    "inputRequired": "Input required"
+  },
+  "mcp": {
+    "samplingFailed": "MCP sampling failed",
+    "connectionFailed": "MCP connection failed",
+    "protocolError": "MCP protocol error"
+  }
+}
