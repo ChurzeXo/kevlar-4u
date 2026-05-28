@@ -263,7 +263,6 @@ async function handleSystemAudit(
     }
     state.preAuditReport = { dimensions: results, summary: summaryLines.join("\n") };
     state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
-    state.selectedPersonaIds = [...state.systemAuditorIds];
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
@@ -313,7 +312,6 @@ async function handleSystemAudit(
     summary: summaryLines.join("\n"),
   };
   state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
-  state.selectedPersonaIds = [...state.systemAuditorIds];
   state.step = "checkPersonaInventory";
   await saveState(tmpDir, state);
 
@@ -418,6 +416,11 @@ async function handleInventoryCheck(
   personas: Persona[],
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
+  // 初审结果摘要提示
+  const preAuditSummary = state.preAuditReport?.summary
+    ? `【初审结果】\n${state.preAuditReport.summary}`
+    : "【初审结果】未找到系统审查员，跳过初审";
+
   if (personas.length === 0) {
     state.step = "waitingForPersonaCreation";
     state.selectedPersonaIds = [];
@@ -426,7 +429,7 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        state.preAuditReport?.summary ? `【初审结果】\n${state.preAuditReport.summary}` : "",
+        preAuditSummary,
         "",
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
@@ -435,24 +438,16 @@ async function handleInventoryCheck(
     );
   }
 
-  // 自动选入系统审查员（必选）
-  const systemAuditorNames = state.preAuditReport?.dimensions
-    ?.map((d: any) => d.name)
-    .filter(Boolean)
-    .join("、") || "合规、语境脱嵌、网络文化、事实硬伤、社会风险";
-  const auditorLine = `✅ 系统审查员（${systemAuditorNames}）已自动选入`;
-
   // 仅 1-2 位评审员：直接全选，进入评审员确认
   if (personas.length <= 2) {
-    state.selectedPersonaIds = [...personas.map((p) => p.meta.id), ...state.systemAuditorIds];
+    state.selectedPersonaIds = [...personas.map((p) => p.meta.id)];
     state.remainingPersonaIds = [];
     state.step = "waitingForReviewerConfirmation";
     await saveState(tmpDir, state);
     return toolResponse(
       state,
       [
-        state.preAuditReport?.summary ? `【初审结果】\n${state.preAuditReport.summary}` : "",
-        auditorLine,
+        preAuditSummary,
         "",
         `当前共有 ${personas.length} 位评审员，已全部选中：`,
         "",
@@ -467,7 +462,7 @@ async function handleInventoryCheck(
   const recommendation = await recommendPersonas(state, personas, samplingFn);
   const recommendedIds = new Set(recommendation.personaIds);
 
-  state.selectedPersonaIds = [...recommendation.personaIds, ...state.systemAuditorIds];
+  state.selectedPersonaIds = [...recommendation.personaIds];
   state.remainingPersonaIds = personas
     .filter((p) => !recommendedIds.has(p.meta.id))
     .map((p) => p.meta.id);
@@ -478,8 +473,7 @@ async function handleInventoryCheck(
   return toolResponse(
     state,
     [
-      state.preAuditReport?.summary ? `【初审结果】${state.preAuditReport.summary}\n` : "",
-      auditorLine,
+      preAuditSummary + "\n",
       "",
       recommendation.assistantMessage,
       "",
@@ -514,10 +508,7 @@ async function handleReviewerConfirmation(
 
   // "开始复审" → 直接执行完整复审
   if (/^(开始复审|确认复审|执行复审)$/.test(normalized)) {
-    const selectedUserCount = state.selectedPersonaIds.filter(
-      id => !state.systemAuditorIds.includes(id)
-    ).length;
-    if (selectedUserCount === 0) {
+    if (state.selectedPersonaIds.length === 0) {
       return toolResponse(state, "❌ 当前没有已选择的复审评审员。请先通过「X 换一位」选择评审员后再试。");
     }
     return executeReview(skillsDir, tmpDir, state, samplingFn);
@@ -526,7 +517,7 @@ async function handleReviewerConfirmation(
   // 未识别 → 重新展示当前评审员状态
   await saveState(tmpDir, state);
   const selectedUserPersonas = personas.filter(
-    p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+    p => state.selectedPersonaIds.includes(p.meta.id)
   );
   const remaining = personas.filter(p => state.remainingPersonaIds.includes(p.meta.id));
   return toolResponse(
@@ -551,13 +542,9 @@ async function handleSwapReviewer(
   position: number,
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
-  const selectedUserPersonaIds = state.selectedPersonaIds.filter(
-    id => !state.systemAuditorIds.includes(id)
-  );
-
-  if (position < 1 || position > selectedUserPersonaIds.length) {
+  if (position < 1 || position > state.selectedPersonaIds.length) {
     const selected = personas.filter(
-      p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+      p => state.selectedPersonaIds.includes(p.meta.id)
     );
     return toolResponse(
       state,
@@ -573,7 +560,7 @@ async function handleSwapReviewer(
   // 备选池为空，告知用户并询问是否开始评审
   if (state.remainingPersonaIds.length === 0) {
     const selected = personas.filter(
-      p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+      p => state.selectedPersonaIds.includes(p.meta.id)
     );
     return toolResponse(
       state,
@@ -588,7 +575,7 @@ async function handleSwapReviewer(
     );
   }
 
-  const removedId = selectedUserPersonaIds[position - 1];
+  const removedId = state.selectedPersonaIds[position - 1];
   const removedPersona = personas.find(p => p.meta.id === removedId);
 
   // 从备选池取第一位加入已选，被换下的回到备选池末尾
@@ -601,7 +588,7 @@ async function handleSwapReviewer(
   await saveState(tmpDir, state);
 
   const updatedSelected = personas.filter(
-    p => state.selectedPersonaIds.includes(p.meta.id) && !state.systemAuditorIds.includes(p.meta.id)
+    p => state.selectedPersonaIds.includes(p.meta.id)
   );
   const remaining = personas.filter(p => state.remainingPersonaIds.includes(p.meta.id));
   const addedPersona = personas.find(p => p.meta.id === addedId);
