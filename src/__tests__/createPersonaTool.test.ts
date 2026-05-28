@@ -13,7 +13,7 @@ import {
   handleDeletePersonaDraft,
   handleCreatePersona,
 } from "../tools/createPersonaTool.js";
-import { invalidatePersonasCache } from "../utils/parser.js";
+import { loadAllPersonas, invalidatePersonasCache } from "../utils/parser.js";
 
 let tmpDir: string;
 let skillsDir: string;
@@ -100,24 +100,28 @@ describe("getSubDirFromDraft", () => {
 
 // ── applyDedup ───────────────────────────────────────────────────────────
 describe("applyDedup", () => {
-  it("returns baseId when no conflict", () => {
-    assert.equal(applyDedup(skillsDir, "my_persona"), "my_persona");
+  it("returns baseId when no conflict", async () => {
+    assert.equal(await applyDedup(skillsDir, "my_persona"), "my_persona");
   });
 
-  it("appends _1, _2 when conflicts exist", () => {
-    fs.writeFileSync(path.join(skillsDir, "my_persona.md"), "", "utf-8");
-    fs.writeFileSync(path.join(skillsDir, "my_persona_1.md"), "", "utf-8");
+  it("appends _1, _2 when conflicts exist in persona files", async () => {
+    // Create fallback.json with existing IDs
+    const personasPath = path.join(skillsDir, "fallback.json");
+    fs.writeFileSync(personasPath, JSON.stringify({
+      version: "1.0.0",
+      last_updated: "2026-05-28",
+      personas: {
+        my_persona: { meta: { id: "my_persona" }, systemPrompt: "" },
+        my_persona_1: { meta: { id: "my_persona_1" }, systemPrompt: "" },
+      },
+    }), "utf-8");
 
-    const id = applyDedup(skillsDir, "my_persona");
+    const id = await applyDedup(skillsDir, "my_persona");
     assert.equal(id, "my_persona_2");
   });
 
-  it("works with subDir", () => {
-    fs.mkdirSync(path.join(skillsDir, "testdir"), { recursive: true });
-    fs.writeFileSync(path.join(skillsDir, "testdir", "foo.md"), "", "utf-8");
-
-    const id = applyDedup(skillsDir, "foo", "testdir");
-    assert.equal(id, "foo_1");
+  it("handles empty persona files gracefully", async () => {
+    assert.equal(await applyDedup(skillsDir, "foo"), "foo");
   });
 });
 
@@ -245,7 +249,7 @@ describe("handleDeletePersonaDraft", () => {
 
 // ── handleCreatePersona ─────────────────────────────────────────────────
 describe("handleCreatePersona", () => {
-  it("creates persona with provided id", async () => {
+  it("creates persona with provided id in platform file", async () => {
     const result = await handleCreatePersona(skillsDir, tmpDir, {
       name: "测试读者",
       id: "test_reader",
@@ -254,7 +258,13 @@ describe("handleCreatePersona", () => {
     });
 
     assert.ok(result.content[0].text.includes("测试读者"));
-    assert.ok(fs.existsSync(path.join(skillsDir, "test_reader.md")));
+
+    const personas = await loadAllPersonas(skillsDir);
+    assert.ok(personas.some(p => p.meta.id === "test_reader"));
+
+    // Verify it's stored in the correct platform file, not as .md
+    assert.ok(fs.existsSync(path.join(skillsDir, "xiaohongshu.json")));
+    assert.ok(!fs.existsSync(path.join(skillsDir, "test_reader.md")));
   });
 
   it("generates id from draft when no id provided", async () => {
@@ -277,10 +287,11 @@ describe("handleCreatePersona", () => {
 
     assert.ok(result.content[0].text.includes("理性知乎人"));
 
-    const zhihuDir = path.join(skillsDir, "zhihu");
-    assert.ok(fs.existsSync(zhihuDir));
-    const files = fs.readdirSync(zhihuDir);
-    assert.ok(files.some(f => f.endsWith(".md")));
+    // Verifies it's stored in platform file (no subdirectory)
+    const personas = await loadAllPersonas(skillsDir);
+    const persona = personas.find(p => p.meta.name === "理性知乎人");
+    assert.ok(persona);
+    assert.equal(persona.meta.tags.includes("知乎"), true);
   });
 
   it("returns error when draft is incomplete", async () => {
@@ -311,8 +322,16 @@ describe("handleCreatePersona", () => {
     assert.ok(result.content[0].text.includes("名称格式不合法"));
   });
 
-  it("applies dedup when id conflicts", async () => {
-    fs.writeFileSync(path.join(skillsDir, "my_persona.md"), "existing", "utf-8");
+  it("applies dedup when id conflicts in persona files", async () => {
+    // Pre-create a persona in fallback.json
+    const personasPath = path.join(skillsDir, "fallback.json");
+    fs.writeFileSync(personasPath, JSON.stringify({
+      version: "1.0.0",
+      last_updated: "2026-05-28",
+      personas: {
+        my_persona: { meta: { id: "my_persona", name: "existing" }, systemPrompt: "" },
+      },
+    }), "utf-8");
 
     const result = await handleCreatePersona(skillsDir, tmpDir, {
       name: "my_persona",
@@ -322,9 +341,6 @@ describe("handleCreatePersona", () => {
 
     const text = result.content.map(c => c.text).join("\n");
     assert.ok(text.includes("my_persona"));
-
-    const files = fs.readdirSync(skillsDir);
-    assert.equal(files.filter(f => f.startsWith("my_persona")).length, 2);
   });
 
   it("falls back to random id when name is empty", async () => {
@@ -338,7 +354,7 @@ describe("handleCreatePersona", () => {
     assert.ok(text.includes("已成功创建"));
   });
 
-  it("creates persona from draft with subdirectory", async () => {
+  it("creates persona from draft in platform file (no subdirectory)", async () => {
     const filePath = path.join(tmpDir, "sub-session_draft.json");
     fs.writeFileSync(filePath, JSON.stringify({
       sessionId: "sub-session",
@@ -358,10 +374,13 @@ describe("handleCreatePersona", () => {
 
     assert.ok(result.content[0].text.includes("美妆种草机"));
 
-    const subDir = path.join(skillsDir, "xiaohongshu");
-    assert.ok(fs.existsSync(subDir));
+    // Verify persona is stored in platform file, not in a subdirectory
+    const personas = await loadAllPersonas(skillsDir);
+    const persona = personas.find(p => p.meta.name === "美妆种草机");
+    assert.ok(persona);
+    assert.equal(persona.meta.tags.includes("小红书"), true);
 
-    const files = fs.readdirSync(subDir);
-    assert.ok(files.some(f => f.endsWith(".md")));
+    // No subdirectory should be created
+    assert.ok(!fs.existsSync(path.join(skillsDir, "xiaohongshu")));
   });
 });

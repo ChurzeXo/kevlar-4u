@@ -5,7 +5,8 @@ import * as path from "path";
 import * as os from "os";
 
 import { handleDeletePersonaWizard } from "../tools/deletePersonaWizardTool.js";
-import { invalidatePersonasCache } from "../utils/parser.js";
+import { writePersonaFile, invalidatePersonasCache, loadPersonaById } from "../utils/parser.js";
+import type { PersonaMeta } from "../utils/parser.js";
 
 let skillsDir: string;
 let tmpDir: string;
@@ -31,29 +32,23 @@ function extractSessionId(text: string): string {
   return match[1];
 }
 
-function writePersona(id: string, name: string): string {
-  const filePath = path.join(skillsDir, `${id}.md`);
-  const file = [
-    "---",
-    `id: ${id}`,
-    `name: ${name}`,
-    "name_en: Test Persona",
-    "version: 1.0.0",
-    "author: ai-generated",
-    "tags:",
-    "  - test",
-    `description: ${name} 的测试描述`,
-    "---",
-    "性格特质：直接。常用平台：小红书。盲区：无特定盲区。",
-  ].join("\n");
-  fs.writeFileSync(filePath, file, "utf-8");
+async function personaExists(id: string): Promise<boolean> {
+  const persona = await loadPersonaById(skillsDir, id);
+  return persona !== null;
+}
+
+async function writePersona(id: string, name: string): Promise<void> {
+  const meta: PersonaMeta = {
+    id, name, name_en: "Test Persona", version: "1.0.0", author: "ai-generated",
+    tags: ["test"], description: `${name} 的测试描述`,
+  };
+  await writePersonaFile(skillsDir, meta, "性格特质：直接。常用平台：小红书。盲区：无特定盲区。");
   invalidatePersonasCache();
-  return filePath;
 }
 
 describe("handleDeletePersonaWizard", () => {
   it("binds the selected persona to a session and does not delete before explicit confirmation", async () => {
-    const filePath = writePersona("visual_reader", "视觉读者");
+    await writePersona("visual_reader", "视觉读者");
 
     const result = await handleDeletePersonaWizard(skillsDir, tmpDir, {
       userMessage: "删除视觉读者",
@@ -63,11 +58,11 @@ describe("handleDeletePersonaWizard", () => {
     assert.ok(text.includes("视觉读者"));
     assert.ok(text.includes("确认删除"));
     assert.ok(text.includes("currentStep: confirmDelete"));
-    assert.ok(fs.existsSync(filePath));
+    assert.ok(await personaExists("visual_reader"));
   });
 
   it("deletes only after the user confirms the bound persona name", async () => {
-    const filePath = writePersona("visual_reader", "视觉读者");
+    await writePersona("visual_reader", "视觉读者");
 
     const started = await handleDeletePersonaWizard(skillsDir, tmpDir, {
       userMessage: "删除视觉读者",
@@ -79,7 +74,7 @@ describe("handleDeletePersonaWizard", () => {
       userMessage: "确认删除别的角色",
     });
     assert.ok(textOf(wrongConfirm).includes("请回复完整确认语"));
-    assert.ok(fs.existsSync(filePath));
+    assert.ok(await personaExists("visual_reader"));
 
     const deleted = await handleDeletePersonaWizard(skillsDir, tmpDir, {
       sessionId,
@@ -87,6 +82,6 @@ describe("handleDeletePersonaWizard", () => {
     });
 
     assert.ok(textOf(deleted).includes("已删除"));
-    assert.ok(!fs.existsSync(filePath));
+    assert.ok(!(await personaExists("visual_reader")));
   });
 });

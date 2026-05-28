@@ -21,6 +21,7 @@ import {
   DIMENSIONS,
 } from "../execution/dimensions.js";
 import type { PersonaBehaviorHints } from "../utils/parser.js";
+import { resolvePlatformFilename } from "../utils/parser.js";
 
 // ── Prompt Injection Defense for LLM Extraction ──────────────────────────────
 // Shared security rules appended AFTER the role definition in every extraction
@@ -502,7 +503,7 @@ async function handlePerspectiveStep({
     tmpDir,
     state,
     "finalConfirm",
-    buildFinalConfirmationMessage(state, skillsDir)
+    await buildFinalConfirmationMessage(state, skillsDir)
   );
 }
 
@@ -530,7 +531,7 @@ async function handlePerspectiveCustomInput(
     tmpDir,
     state,
     "finalConfirm",
-    buildFinalConfirmationMessage(state, skillsDir)
+    await buildFinalConfirmationMessage(state, skillsDir)
   );
 }
 
@@ -555,7 +556,7 @@ async function handleFinalConfirmStep({
   await persistState(tmpDir, state);
   return toolResponse(
     state,
-    [`已更新${fieldLabel(modified)}。`, "", buildFinalConfirmationMessage(state, skillsDir)].join("\n")
+    [`已更新${fieldLabel(modified)}。`, "", await buildFinalConfirmationMessage(state, skillsDir)].join("\n")
   );
 }
 
@@ -1216,56 +1217,43 @@ function generateFallbackPersonaName(state: WizardState, skillsDir: string): str
 }
 
 /**
- * Unified reader for existing personas in the same platform directory.
- * Reads all .md files once and returns both a dedup name set and formatted ref text.
- * Replaces the former getExistingPersonaNames + loadExistingPersonaRefs pair
- * which re-read the same directory separately.
+ * Unified reader for existing personas on the same platform.
+ * Reads platform-specific persona file and returns both a dedup name set and formatted ref text.
  */
 function readExistingPersonas(state: WizardState, skillsDir: string): { names: Set<string>; refs: string } {
   const names = new Set<string>();
-  const subDir = getSubDirFromDraft({ fields: state.fields });
-  if (!subDir) return { names, refs: "" };
-  const dir = path.join(skillsDir, subDir);
+  const platform = state.fields.platform;
+  if (!platform) return { names, refs: "" };
+  const filename = resolvePlatformFilename(platform);
+  if (!filename) return { names, refs: "" };
+  const filePath = path.join(skillsDir, filename);
   try {
-    if (!fs.statSync(dir).isDirectory()) return { names, refs: "" };
-    const files = fs.readdirSync(dir).filter(f => f.endsWith(".md") && f !== "_template.md");
-    if (files.length === 0) return { names, refs: "" };
+    if (!fs.existsSync(filePath)) return { names, refs: "" };
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const data = JSON.parse(raw);
+    const entries = data.personas || {};
 
     const refParts: string[] = [];
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(dir, file), "utf-8");
+    for (const id of Object.keys(entries)) {
+      const meta = entries[id].meta;
 
-      // ── Name (for dedup set) ──
-      const nameMatch = content.match(/^name:\s*(.+)/m);
-      const pName = nameMatch ? nameMatch[1].trim() : file.replace(".md", "");
+      const pName = meta.name || id;
       if (pName.length >= 2) names.add(pName);
 
-      // ── Reference data (for LLM context) ──
-      const genderMatch = content.match(/^gender:\s*(.+)/m);
-      const dimensionBiasMatch = content.match(/^dimensionBias:\s*(.+)/m);
-      const perspectiveMatch = content.match(/^\s+perspective:\s*(.+)/m);
-      const blindSpotMatch = content.match(/^blindSpot:\s*(.+)/m);
-      const traitsMatch = content.match(/^traits:\s*\n((?:\s+- .+\n?)*)/m);
-
-      const gender = genderMatch ? genderMatch[1].trim() : "";
-      // Extract perspective from dimensionBias (new format) or stance (legacy)
+      const gender = meta.gender || "";
       let perspective = "";
-      if (perspectiveMatch) {
-        perspective = perspectiveMatch[1].trim();
-      } else {
-        // Legacy: try to read stance field
-        const stanceMatch = content.match(/^stance:\s*(.+)/m);
-        const stanceArrayMatch = content.match(/^stance:\s*\n((?:\s+- .+\n?)*)/m);
-        perspective = stanceArrayMatch
-          ? stanceArrayMatch[1].trim().split("\n").map(l => l.replace(/^\s*-\s*/, "").trim()).filter(Boolean).join("；")
-          : (stanceMatch ? stanceMatch[1].trim() : "");
+      if (meta.dimensionBias && typeof meta.dimensionBias === "object") {
+        const db = meta.dimensionBias as Record<string, unknown>;
+        if (typeof db.perspective === "string") perspective = db.perspective;
       }
-      const blindSpot = blindSpotMatch ? blindSpotMatch[1].trim() : "";
-      const traits = traitsMatch
-        ? traitsMatch[1].trim().split("\n").map(l => l.replace(/^\s*-\s*/, "").trim()).filter(Boolean).join("、")
+      if (!perspective && meta.stance) {
+        perspective = Array.isArray(meta.stance) ? meta.stance.join("；") : String(meta.stance);
+      }
+      const blindSpot = meta.blindSpot || "";
+      const traits = Array.isArray(meta.tags)
+        ? meta.tags.filter((t: string) => t !== platform).join("、")
         : "";
 
-      // Skip vague / low-quality values
       const parts: string[] = [];
       if (pName && pName.length >= 2) parts.push(`名字="${pName}"`);
       if (gender && !VAGUE_GENDER_RE.test(gender)) parts.push(`性别="${gender}"`);
@@ -1558,7 +1546,7 @@ function toolResponse(state: WizardState, assistantMessage: string): ToolResult 
   };
 }
 
-function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): string {
+async function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): Promise<string> {
   const fields = state.fields;
 
   const previewDraft = { fields };
@@ -1568,7 +1556,7 @@ function buildFinalConfirmationMessage(state: WizardState, skillsDir: string): s
     generateIdFromDraft(previewDraft) ||
     `persona_${Math.random().toString(36).substring(2, 8)}`;
 
-  const id = applyDedup(skillsDir, baseId, subDir);
+  const id = await applyDedup(skillsDir, baseId);
 
   const personaName = fields.personaName ?? "（未推断 ⚠️ 建议补充角色名）";
   const culturalContext = fields.culturalContext || "未提供";

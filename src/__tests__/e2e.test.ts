@@ -4,6 +4,8 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 
+import { writePersonaFile, invalidatePersonasCache } from "../utils/parser.js";
+import type { PersonaMeta } from "../utils/parser.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createKevlarServer } from "../server.js";
@@ -25,22 +27,18 @@ describe("End-to-End integration test", () => {
     const server = createKevlarServer();
 
     // Seed a test persona
-    const personaPath = path.join(tmpDir, "e2e_persona.md");
-    fs.writeFileSync(personaPath, [
-      "---",
-      "id: e2e_persona",
-      "name: E2E Tester",
-      "name_en: E2E Tester",
-      "version: 1.0.0",
-      "author: kevlar-core",
-      "tags: [e2e]",
-      "description: E2E test persona",
-      "blindSpot: none",
-      "---",
-      "常用平台：通用",
-      "性格特质：温和",
-      "盲区：无",
-    ].join("\n"), "utf-8");
+    const meta: PersonaMeta = {
+      id: "e2e_persona",
+      name: "E2E Tester",
+      name_en: "E2E Tester",
+      version: "1.0.0",
+      author: "kevlar-core",
+      tags: ["e2e"],
+      description: "E2E test persona",
+      blindSpot: "none",
+    };
+    await writePersonaFile(tmpDir, meta, "常用平台：通用\n性格特质：温和\n盲区：无");
+    invalidatePersonasCache();
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
@@ -76,12 +74,12 @@ describe("End-to-End integration test", () => {
       assert.ok(sessionIdMatch, "Should include sessionId");
       const sessionId = sessionIdMatch[1];
 
-      // Step 2: confirm reviewers → selectDimensions
+      // Step 2: confirm reviewers → executes review
       const step2 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
           sessionId,
-          userMessage: "开始审稿",
+          userMessage: "开始复审",
         },
       });
 
@@ -89,40 +87,8 @@ describe("End-to-End integration test", () => {
       assert.ok(Array.isArray(step2.content), "Step 2 response should have content array");
       assert.equal(step2.content[0].type, "text");
       const step2Text = step2.content[0].text;
-      assert.ok(step2Text.includes("currentStep: selectDimensions"), "Should be in dimension selection step");
-      assert.ok(step2Text.includes("✅ 评审员已确认"), "Should confirm reviewers");
-
-      // Step 3: confirm dimensions → confirmSelection
-      const step3 = await client.callTool({
-        name: "review_content_wizard",
-        arguments: {
-          sessionId,
-          userMessage: "开始审稿",
-        },
-      });
-
-      assert.ok(step3, "Step 3 response should exist");
-      assert.ok(Array.isArray(step3.content), "Step 3 response should have content array");
-      assert.equal(step3.content[0].type, "text");
-      const step3Text = step3.content[0].text;
-      assert.ok(step3Text.includes("currentStep: confirmSelection"), "Should be in confirmation step");
-      assert.ok(step3Text.includes("E2E Tester"), "Should list the persona");
-
-      // Step 4: Confirm → execute review
-      const step4 = await client.callTool({
-        name: "review_content_wizard",
-        arguments: {
-          sessionId,
-          userMessage: "开始审稿",
-        },
-      });
-
-      assert.ok(step4, "Step 4 response should exist");
-      assert.ok(Array.isArray(step4.content), "Step 4 response should have content array");
-      assert.equal(step4.content[0].type, "text");
-      const step4Text = step4.content[0].text;
-      assert.ok(step4Text.includes("E2E Tester"), "Should include persona name in report");
-      assert.ok(step4Text.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
+      assert.ok(step2Text.includes("E2E Tester"), "Should include persona name in report");
+      assert.ok(step2Text.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
     } finally {
       await client.close();
       await server.close();

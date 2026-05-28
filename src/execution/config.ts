@@ -21,6 +21,18 @@ interface KevlarConfig {
   personaOrder: string[];
   createdAt: string;
   updatedAt: string;
+
+  // ── Phase 2 Reservation: Cloud sync ───────────────────────────────────────
+  // These fields are reserved for the commercial SaaS subscription model.
+  // In Phase 1 (local-only), they remain empty / default values.
+  /** Phase 2: Subscription sync token issued by the Kevlar-4u official website */
+  sync_token?: string;
+  /** Phase 2: Cloud server URL for encrypted rule/prompt patch delivery */
+  cloud_server_url?: string;
+  /** Phase 2: Auto-sync interval in hours (default: 6) */
+  sync_interval_hours?: number;
+  /** Phase 2: Timestamp of last successful sync (epoch ms) */
+  last_sync_at?: number;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
@@ -34,6 +46,8 @@ const DEFAULT_CONFIG: KevlarConfig = {
   personaOrder: [],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
+  sync_token: "",
+  cloud_server_url: "",
 };
 
 // ── Config File Path ─────────────────────────────────────────────────────────

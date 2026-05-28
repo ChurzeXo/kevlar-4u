@@ -11,18 +11,23 @@ dist/
 # Kevlar user config (non-sensitive preferences)
 skills/kevlar-config.json
 
-# Ignore all docs except multi-language README translations
+# Ignore all docs except multi-language README translations and ADRs
 docs/*
 !docs/README.*.md
+!docs/decisions/
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
 
-# Custom persona files (platform-specific reviewer personas)
-skills/*/*.md
+# Persona storage (multi-file JSON — auditors.json + platform files)
+# These JSON files are tracked; user-created personas are managed
+# through the MCP tools (createPersonaTool / createPersonaWizardTool).
+# Ignore draft files under tmp/.
+skills/tmp/
 
-# System auditors (compliance, context, culture, fact, social)
-!skills/system_auditors/*.md
+# Legacy .md persona files (Phase 1 migration — no longer read by the engine)
+# Kept as backup references during the migration period
+# skills/**/*.md
 
 # Kevlar lab documents (audit reports, experiments, etc.)
 .kevlar_lab/

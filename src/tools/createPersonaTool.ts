@@ -3,6 +3,7 @@ import * as fs from "fs";
 import {
 	validateWritePath,
 	writePersonaFile,
+	loadAllPersonas,
 	PersonaMeta,
 	PersonaBehaviorHints,
 } from "../utils/parser.js";
@@ -13,7 +14,7 @@ import {
 	mapPlatformToKey,
 	slugify,
 } from "../utils/personaIdMaps.js";
-import { getErrorInfo } from "../utils/observability.js";
+import { logger, getErrorInfo } from "../utils/observability.js";
 
 // ── Persistent Prompt Injection Defense ──────────────────────────────────────
 // These patterns represent common prompt-injection / jailbreak tokens that
@@ -398,14 +399,13 @@ export async function handleCreatePersona(
 		}
 	}
 
-	// 2. 解析 ID
-	const subDir = !input.id ? getSubDirFromDraft(draft) : undefined;
+	// 2. 解析 ID（JSON 统一存储，按标签路由到对应平台文件）
 	const baseId =
 		input.id ||
 		generateIdFromDraft(draft) ||
 		input.name.replace(/[^a-zA-Z0-9_]/g, "").toLowerCase() ||
 		`persona_${Math.random().toString(36).substring(2, 8)}`;
-	const id = input.id ? baseId : applyDedup(skillsDir, baseId, subDir);
+	const id = input.id ? baseId : await applyDedup(skillsDir, baseId);
 
 	if (!/^[a-z0-9_]+$/.test(id)) {
 		return {
@@ -433,9 +433,9 @@ export async function handleCreatePersona(
 	const meta = buildPersonaMeta(id, input, description, tags, draft);
 	const personaContent = buildPersonaContent(ctx, hasDraft, description);
 
-	// 6. 落盘
+	// 6. 落盘（写入对应平台 JSON 文件）
 	try {
-		await writePersonaFile(skillsDir, meta, personaContent, subDir);
+		await writePersonaFile(skillsDir, meta, personaContent);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		return {
@@ -484,11 +484,13 @@ export function getSubDirFromDraft(draft: any): string | undefined {
 	return platformKey || undefined;
 }
 
-export function applyDedup(skillsDir: string, baseId: string, subDir?: string): string {
+export async function applyDedup(skillsDir: string, baseId: string): Promise<string> {
+	const personas = await loadAllPersonas(skillsDir);
+	const existingIds = new Set(personas.map(p => p.meta.id));
+
 	let id = baseId;
 	let counter = 1;
-	const dir = subDir ? path.join(skillsDir, subDir) : skillsDir;
-	while (fs.existsSync(path.join(dir, `${id}.md`))) {
+	while (existingIds.has(id)) {
 		id = `${baseId}_${counter++}`;
 	}
 	return id;

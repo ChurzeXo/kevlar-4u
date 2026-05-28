@@ -1,6 +1,5 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
-import * as fs from "fs";
-import { loadPersonaById, validateWritePath, invalidatePersonasCache } from "../utils/parser.js";
+import { loadPersonaById, deletePersonaFromJson, invalidatePersonasCache } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
 import { getErrorInfo } from "../utils/observability.js";
@@ -54,28 +53,18 @@ export async function handleDeletePersona(
     };
   }
 
-  // Idempotency: check if already deleted
-  if (!fs.existsSync(persona.filePath)) {
-    return {
-      content: [{ type: "text", text: "⚠️ 该评审员已被删除。" }],
-    };
-  }
-
-  // Security check: validate path is within skillsDir
-  if (!validateWritePath(persona.filePath, skillsDir)) {
-    return {
-      content: [{ type: "text", text: "❌ 非法路径访问被拒绝。" }],
-      isError: true,
-    };
-  }
-
   try {
-    await fs.promises.unlink(persona.filePath);
+    const deleted = await deletePersonaFromJson(skillsDir, input.id);
+    if (!deleted) {
+      return {
+        content: [{ type: "text", text: "⚠️ 该评审员已被删除。" }],
+      };
+    }
     invalidatePersonasCache();
   } catch (err) {
     const info = getErrorInfo(err);
     return {
-      content: [{ type: "text", text: `❌ 删除文件失败：${info.message}` }],
+      content: [{ type: "text", text: `❌ 删除失败：${info.message}` }],
       isError: true,
     };
   }

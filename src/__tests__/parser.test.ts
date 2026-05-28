@@ -9,9 +9,12 @@ import {
   parsePersonaFile,
   writePersonaFile,
   loadAllPersonas,
+  loadPersonaById,
+  loadPersonasByIds,
+  loadPersonasByTag,
+  deletePersonaFromJson,
   invalidatePersonasCache,
 } from "../utils/parser.js";
-import { promises as fsp } from "fs";
 
 let tmpDir: string;
 
@@ -45,106 +48,19 @@ describe("validateWritePath", () => {
   });
 });
 
-describe("parsePersonaFile", () => {
-  it("parses a valid persona file", async () => {
-    const filePath = path.join(tmpDir, "test_persona.md");
-    fs.writeFileSync(
-      filePath,
-      [
-        "---",
-        "id: test_persona",
-        "name: 测试人设",
-        "name_en: Test Persona",
-        "version: 1.0.0",
-        "author: tester",
-        "tags:",
-        "  - test",
-        "  - demo",
-        "description: A test persona",
-        "---",
-        "You are a test persona.",
-      ].join("\n"),
-      "utf-8"
-    );
-
-    const persona = await parsePersonaFile(filePath);
-    assert.ok(persona !== null);
-    assert.equal(persona.meta.id, "test_persona");
-    assert.equal(persona.meta.name, "测试人设");
-    assert.equal(persona.meta.tags.length, 2);
-    assert.equal(persona.systemPrompt, "You are a test persona.");
-  });
-
-  it("parses a persona file with inferred metadata fields", async () => {
-    const filePath = path.join(tmpDir, "inferred_persona.md");
-    fs.writeFileSync(
-      filePath,
-      [
-        "---",
-        "id: inferred_persona",
-        "name: 推断人设",
-        "name_en: Inferred Persona",
-        "version: 1.0.0",
-        "author: tester",
-        "tags: []",
-        "description: A test inferred persona",
-        "culturalContext: Chinese culture",
-        "authorRelation: Subscribed",
-        "stance: Supportive",
-        "blindSpot: Math",
-        "---",
-        "You are an inferred persona.",
-      ].join("\n"),
-      "utf-8"
-    );
-
-    const persona = await parsePersonaFile(filePath);
-    assert.ok(persona !== null);
-    assert.equal(persona.meta.id, "inferred_persona");
-    assert.equal(persona.meta.culturalContext, "Chinese culture");
-    assert.equal(persona.meta.authorRelation, "Subscribed");
-    // stance is deprecated but still read from legacy YAML
-    assert.equal(persona.meta.stance, "Supportive");
-    assert.equal(persona.meta.blindSpot, "Math");
-    assert.equal(persona.systemPrompt, "You are an inferred persona.");
-  });
-
-  // it("skips template files starting with _", async () => {
-  //   const filePath = path.join(tmpDir, "_template.md");
-  //   fs.writeFileSync(filePath, "---\nid: template\nname: Template\n---\nContent", "utf-8");
-
-  //   const persona = await parsePersonaFile(filePath);
-  //   assert.equal(persona, null);
-  // });
-
-  it("returns null for missing id in frontmatter", async () => {
-    const filePath = path.join(tmpDir, "no_id.md");
-    fs.writeFileSync(
-      filePath,
-      "---\nname: No ID\n---\nContent",
-      "utf-8"
-    );
-
-    const persona = await parsePersonaFile(filePath);
-    assert.equal(persona, null);
-  });
-
-  it("returns null for non-existent file", async () => {
-    const persona = await parsePersonaFile("/nonexistent/path.md");
-    assert.equal(persona, null);
+describe("parsePersonaFile (deprecated)", () => {
+  it("returns null in Phase 1 JSON migration", async () => {
+    const result = await parsePersonaFile("/some/path.md");
+    assert.equal(result, null);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// writePersonaFile Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("writePersonaFile", () => {
+describe("writePersonaFile & loadAllPersonas (JSON storage)", () => {
   beforeEach(() => {
     invalidatePersonasCache();
   });
 
-  it("writes a valid persona file and returns the path", async () => {
+  it("writes a persona to the correct JSON file and returns the path", async () => {
     const filePath = await writePersonaFile(tmpDir, {
       id: "test_writer",
       name: "测试写入",
@@ -155,17 +71,17 @@ describe("writePersonaFile", () => {
       description: "Test write",
     }, "You are a test persona.");
 
-    assert.ok(filePath.endsWith("test_writer.md"));
-    assert.ok(fs.existsSync(filePath));
+    assert.ok(filePath.endsWith("fallback.json"));
 
-    const persona = await parsePersonaFile(filePath);
+    const personas = await loadAllPersonas(tmpDir);
+    const persona = personas.find(p => p.meta.id === "test_writer");
     assert.ok(persona);
-    assert.equal(persona.meta.id, "test_writer");
+    assert.equal(persona.meta.name, "测试写入");
     assert.equal(persona.systemPrompt, "You are a test persona.");
   });
 
-  it("writes inferred metadata fields to frontmatter", async () => {
-    const filePath = await writePersonaFile(tmpDir, {
+  it("writes inferred metadata fields to JSON file", async () => {
+    await writePersonaFile(tmpDir, {
       id: "test_inferred_writer",
       name: "测试推断写入",
       name_en: "Test Inferred Writer",
@@ -175,36 +91,25 @@ describe("writePersonaFile", () => {
       description: "Test inferred write",
       culturalContext: "Chinese context",
       authorRelation: "Stranger",
-      stance: "Skeptical",
       blindSpot: "Visuals",
     }, "Content here");
 
-    const persona = await parsePersonaFile(filePath);
+    const persona = await loadPersonaById(tmpDir, "test_inferred_writer");
     assert.ok(persona);
     assert.equal(persona.meta.culturalContext, "Chinese context");
     assert.equal(persona.meta.authorRelation, "Stranger");
-    // stance is deprecated but still read from legacy YAML
-    assert.equal(persona.meta.stance, "Skeptical");
     assert.equal(persona.meta.blindSpot, "Visuals");
   });
 
-  it("rejects path traversal via id", async () => {
-    await assert.rejects(
-      () => writePersonaFile(tmpDir, {
-        id: "../escape",
-        name: "Escape",
-        name_en: "Escape",
-        version: "1.0.0",
-        author: "tester",
-        tags: [],
-        description: "Escape attempt",
-      }, "content"),
-      /Invalid file path/
-    );
+  it("returns empty array when no persona files exist", async () => {
+    const emptyDir = path.join(tmpDir, "empty");
+    fs.mkdirSync(emptyDir, { recursive: true });
+    const personas = await loadAllPersonas(emptyDir);
+    assert.deepEqual(personas, []);
   });
 
-  it("overwrites existing persona file", async () => {
-    const filePath = await writePersonaFile(tmpDir, {
+  it("overwrites existing persona by same id", async () => {
+    await writePersonaFile(tmpDir, {
       id: "overwrite_test",
       name: "Original",
       name_en: "",
@@ -214,7 +119,7 @@ describe("writePersonaFile", () => {
       description: "Original",
     }, "Original content");
 
-    const filePath2 = await writePersonaFile(tmpDir, {
+    await writePersonaFile(tmpDir, {
       id: "overwrite_test",
       name: "Updated",
       name_en: "",
@@ -224,41 +129,122 @@ describe("writePersonaFile", () => {
       description: "Updated",
     }, "Updated content");
 
-    assert.equal(filePath, filePath2);
-
-    const persona = await parsePersonaFile(filePath);
+    const personas = await loadAllPersonas(tmpDir);
+    const persona = personas.find(p => p.meta.id === "overwrite_test");
     assert.equal(persona?.meta.name, "Updated");
     assert.equal(persona?.systemPrompt, "Updated content");
   });
+});
 
-  it("throws error when file system write fails", async () => {
-    const originalWriteFile = fsp.writeFile;
-    (fsp as any).writeFile = async () => {
-      throw new Error("Simulated I/O Error");
-    };
+describe("loadPersonaById", () => {
+  beforeEach(() => {
+    invalidatePersonasCache();
+  });
 
-    try {
-      await assert.rejects(
-        () => writePersonaFile(tmpDir, {
-          id: "write_fail_test",
-          name: "Fail Test",
-          name_en: "",
-          version: "1.0.0",
-          author: "tester",
-          tags: [],
-          description: "Fail attempt",
-        }, "content"),
-        /Simulated I\/O Error/
-      );
-    } finally {
-      (fsp as any).writeFile = originalWriteFile;
-    }
+  it("returns null for invalid id format", async () => {
+    const result = await loadPersonaById(tmpDir, "bad id!");
+    assert.equal(result, null);
+  });
+
+  it("returns null for non-existent persona", async () => {
+    const result = await loadPersonaById(tmpDir, "nonexistent");
+    assert.equal(result, null);
+  });
+
+  it("returns persona by id", async () => {
+    await writePersonaFile(tmpDir, {
+      id: "find_me",
+      name: "Find Me",
+      name_en: "",
+      version: "1.0.0",
+      author: "tester",
+      tags: ["test"],
+      description: "Find me",
+    }, "content");
+
+    const persona = await loadPersonaById(tmpDir, "find_me");
+    assert.ok(persona);
+    assert.equal(persona.meta.name, "Find Me");
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// loadAllPersonas Cache Tests
-// ─────────────────────────────────────────────────────────────────────────────
+describe("loadPersonasByIds", () => {
+  beforeEach(() => {
+    invalidatePersonasCache();
+  });
+
+  it("returns multiple personas by ids", async () => {
+    await writePersonaFile(tmpDir, {
+      id: "p1", name: "P1", name_en: "", version: "1.0.0", author: "t", tags: [], description: "d1",
+    }, "c1");
+    await writePersonaFile(tmpDir, {
+      id: "p2", name: "P2", name_en: "", version: "1.0.0", author: "t", tags: [], description: "d2",
+    }, "c2");
+
+    const personas = await loadPersonasByIds(tmpDir, ["p1", "p2", "nonexistent"]);
+    assert.equal(personas.length, 2);
+    assert.equal(personas[0].meta.id, "p1");
+    assert.equal(personas[1].meta.id, "p2");
+  });
+});
+
+describe("loadPersonasByTag", () => {
+  beforeEach(() => {
+    invalidatePersonasCache();
+  });
+
+  it("filters personas by tag", async () => {
+    await writePersonaFile(tmpDir, {
+      id: "tagged_1", name: "T1", name_en: "", version: "1.0.0", author: "t",
+      tags: ["red", "big"], description: "desc",
+    }, "c1");
+    await writePersonaFile(tmpDir, {
+      id: "tagged_2", name: "T2", name_en: "", version: "1.0.0", author: "t",
+      tags: ["blue", "big"], description: "desc",
+    }, "c2");
+
+    const red = await loadPersonasByTag(tmpDir, "red");
+    assert.equal(red.length, 1);
+    assert.equal(red[0].meta.id, "tagged_1");
+
+    const big = await loadPersonasByTag(tmpDir, "big");
+    assert.equal(big.length, 2);
+  });
+});
+
+describe("deletePersonaFromJson", () => {
+  beforeEach(() => {
+    invalidatePersonasCache();
+  });
+
+  it("deletes a persona from its JSON file", async () => {
+    await writePersonaFile(tmpDir, {
+      id: "to_delete", name: "Delete Me", name_en: "", version: "1.0.0", author: "t",
+      tags: [], description: "desc",
+    }, "content");
+
+    let persona = await loadPersonaById(tmpDir, "to_delete");
+    assert.ok(persona);
+
+    const deleted = await deletePersonaFromJson(tmpDir, "to_delete");
+    assert.equal(deleted, true);
+
+    persona = await loadPersonaById(tmpDir, "to_delete");
+    assert.equal(persona, null);
+  });
+
+  it("returns false for non-existent id", async () => {
+    const result = await deletePersonaFromJson(tmpDir, "nonexistent");
+    assert.equal(result, false);
+  });
+
+  it("returns false when no persona files exist", async () => {
+    const emptyDir = path.join(tmpDir, "no-config");
+    fs.mkdirSync(emptyDir, { recursive: true });
+    const result = await deletePersonaFromJson(emptyDir, "anything");
+    assert.equal(result, false);
+  });
+});
 
 describe("loadAllPersonas caching", () => {
   let cacheDir: string;
@@ -272,7 +258,7 @@ describe("loadAllPersonas caching", () => {
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
-  it("returns cached result on subsequent calls", async () => {
+  it("loads personas from authored JSON files", async () => {
     await writePersonaFile(cacheDir, {
       id: "cache_test",
       name: "Cache Test",
@@ -290,7 +276,7 @@ describe("loadAllPersonas caching", () => {
     assert.equal(second.length, 1);
   });
 
-  it("invalidates cache after writePersonaFile", async () => {
+  it("reflects new writes after cache invalidation", async () => {
     await writePersonaFile(cacheDir, {
       id: "cache_inval_test",
       name: "Before",
@@ -304,7 +290,6 @@ describe("loadAllPersonas caching", () => {
     const before = await loadAllPersonas(cacheDir);
     assert.equal(before.length, 1);
 
-    // Write a new persona — should invalidate cache
     await writePersonaFile(cacheDir, {
       id: "cache_inval_test2",
       name: "After",

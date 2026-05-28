@@ -5,7 +5,8 @@ import * as path from "path";
 import * as os from "os";
 
 import { handleReviewContentWizard } from "../tools/reviewContentWizardTool.js";
-import { invalidatePersonasCache } from "../utils/parser.js";
+import { writePersonaFile, invalidatePersonasCache } from "../utils/parser.js";
+import type { PersonaMeta } from "../utils/parser.js";
 
 let skillsDir: string;
 let tmpDir: string;
@@ -46,21 +47,12 @@ function extractSessionId(text: string): string {
   return match[1];
 }
 
-function writePersona(id: string, name: string, tags: string[]): void {
-  const file = [
-    "---",
-    `id: ${id}`,
-    `name: ${name}`,
-    "name_en: Test Persona",
-    "version: 1.0.0",
-    "author: kevlar-core",
-    "tags:",
-    ...tags.map((tag) => `  - ${tag}`),
-    `description: ${name} 的测试描述`,
-    "---",
-    "性格特质：直接。常用平台：小红书。盲区：无特定盲区。",
-  ].join("\n");
-  fs.writeFileSync(path.join(skillsDir, `${id}.md`), file, "utf-8");
+async function writePersona(id: string, name: string, tags: string[]): Promise<void> {
+  const meta: PersonaMeta = {
+    id, name, name_en: "Test Persona", version: "1.0.0", author: "kevlar-core",
+    tags, description: `${name} 的测试描述`,
+  };
+  await writePersonaFile(skillsDir, meta, "性格特质：直接。常用平台：小红书。盲区：无特定盲区。");
   invalidatePersonasCache();
 }
 
@@ -84,9 +76,9 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(state.content.includes("新品故事"));
   });
 
-  it("with 1-2 personas: shows all, waits for reviewer confirmation, then dimension selection, then confirmation and execute", async () => {
-    writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
-    writePersona("logic_reader", "逻辑读者", ["知乎", "逻辑"]);
+  it("with 1-2 personas: shows all, waits for reviewer confirmation, then executes review", async () => {
+    await writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
+    await writePersona("logic_reader", "逻辑读者", ["知乎", "逻辑"]);
 
     // Step 1: submit content → waitingForReviewerConfirmation
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
@@ -97,46 +89,28 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(startText.includes("当前共有 2 位评审员"));
     assert.ok(startText.includes("视觉读者"));
     assert.ok(startText.includes("逻辑读者"));
-    assert.ok(startText.includes("等待用户输入后，再调用此工具以继续"));
+    assert.ok(startText.includes("请回复「开始复审」确认执行"));
     assert.ok(startText.includes("currentStep: waitingForReviewerConfirmation"));
     assert.ok(!startText.includes("这份内容准备投放在哪些平台"));
     assert.ok(!startText.includes("Kevlar-4u 宿主辅助评测任务"));
 
-    // Step 2: "开始审稿" → selectDimensions (reviewer confirmation → dimension selection)
+    // Step 2: "开始复审" → executes review
     const sessionId = extractSessionId(startText);
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始审稿",
+      userMessage: "开始复审",
     });
     const reviewerText = textOf(reviewerDone);
-    assert.ok(reviewerText.includes("currentStep: selectDimensions"));
-    assert.ok(reviewerText.includes("✅ 评审员已确认"));
-
-    // Step 3: "开始审稿" → confirmSelection (dimension confirmation → final check before execute)
-    const dimConfirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
-      sessionId,
-      userMessage: "开始审稿",
-    });
-    const dimText = textOf(dimConfirmed);
-    assert.ok(dimText.includes("currentStep: confirmSelection"));
-    assert.ok(dimText.includes("✅ 评审维度已确认"));
-
-    // Step 4: "开始审稿" → executes review
-    const executed = await handleReviewContentWizard(skillsDir, tmpDir, {
-      sessionId,
-      userMessage: "开始审稿",
-    });
-    const executedText = textOf(executed);
     assert.ok(
-      executedText.includes("currentStep: postReview") ||
-      executedText.includes("评测完成") ||
-      executedText.includes("评测执行失败")
+      reviewerText.includes("currentStep: postReview") ||
+      reviewerText.includes("评测完成") ||
+      reviewerText.includes("评测执行失败")
     );
   });
 
   it("does not falsely match short persona names", async () => {
     // Create a persona with a very short name "好"
-    writePersona("good_reader", "好", ["小红书", "视觉"]);
+    await writePersona("good_reader", "好", ["小红书", "视觉"]);
     
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
       userMessage: "请评测这篇内容：这是一篇新品发布文案。",
@@ -157,11 +131,11 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(text.includes("currentStep: waitingForReviewerConfirmation"));
   });
 
-  it('with 3+ personas: recommends 1-3, shows remaining, waits for reviewer confirmation before dimension selection', async () => {
-    writePersona("foodie", "美食达人", ["小红书", "美食"]);
-    writePersona("tech_guru", "科技极客", ["知乎", "科技"]);
-    writePersona("mom_user", "宝妈用户", ["抖音", "生活"]);
-    writePersona("student", "学生党", ["B站", "校园"]);
+  it('with 3+ personas: recommends 1-3, shows remaining, waits for reviewer confirmation then executes review', async () => {
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+    await writePersona("tech_guru", "科技极客", ["知乎", "科技"]);
+    await writePersona("mom_user", "宝妈用户", ["抖音", "生活"]);
+    await writePersona("student", "学生党", ["B站", "校园"]);
 
     // Step 1: submit content → waitingForReviewerConfirmation (AI recommends 1-3)
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
@@ -179,34 +153,16 @@ describe("handleReviewContentWizard state machine", () => {
       startText.includes("学生党")
     );
 
-    // Step 2: "开始审稿" → selectDimensions (reviewer confirmation → dimension selection)
+    // Step 2: "开始复审" → executes review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始审稿",
+      userMessage: "开始复审",
     });
     const reviewerText = textOf(reviewerDone);
-    assert.ok(reviewerText.includes("currentStep: selectDimensions"));
-    assert.ok(reviewerText.includes("✅ 评审员已确认"));
-
-    // Step 3: "开始审稿" → confirmSelection (dimension confirmation → final check before execute)
-    const dimConfirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
-      sessionId,
-      userMessage: "开始审稿",
-    });
-    const dimText = textOf(dimConfirmed);
-    assert.ok(dimText.includes("currentStep: confirmSelection"));
-    assert.ok(dimText.includes("✅ 评审维度已确认"));
-
-    // Step 4: "开始审稿" → executes review
-    const executed = await handleReviewContentWizard(skillsDir, tmpDir, {
-      sessionId,
-      userMessage: "开始审稿",
-    });
-    const executedText = textOf(executed);
     assert.ok(
-      executedText.includes("currentStep: postReview") ||
-      executedText.includes("评测完成") ||
-      executedText.includes("评测执行失败")
+      reviewerText.includes("currentStep: postReview") ||
+      reviewerText.includes("评测完成") ||
+      reviewerText.includes("评测执行失败")
     );
   });
 });

@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-28",
+  "categories": {
+    "food": {
+      "enabled": true,
+      "weight": 1.0,
+      "associative_map": [
+        {
+          "root": "木耳",
+          "variants": ["黑木耳", "粉木耳"],
+          "misinterpret_direction": "涉黄暗语/低俗代称",
+          "severity": "HIGH",
+          "base_score": 0.85,
+          "suggestion": "若伴随颜色或外观修饰词，建议替换为'耳菇'、'菌菇'或补充'食材'限定语。"
+        },
+        {
+          "root": "菊花",
+          "variants": ["菊花", "爆菊花"],
+          "misinterpret_direction": "涉黄暗语/人身攻击",
+          "severity": "HIGH",
+          "base_score": 0.80,
+          "suggestion": "在食品/饮品品类下，建议明确为'菊花茶'或'杭白菊'。"
+        }
+      ]
+    },
+    "cosmetics": {
+      "enabled": true,
+      "weight": 1.1,
+      "associative_map": [
+        {
+          "root": "乳晕",
+          "variants": ["乳晕色", "嫩红"],
+          "misinterpret_direction": "擦边/低俗营销",
+          "severity": "MEDIUM",
+          "base_score": 0.65,
+          "suggestion": "建议替换为更中性的色彩描述，如'粉桃色'、'暗粉色'。"
+        }
+      ]
+    }
+  }
+}

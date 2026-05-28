@@ -21,7 +21,8 @@ import { executeReview, loadPersonasForReview, validatePersonaFields } from "../
 import { executePersonasInParallel } from "../execution/parallel.js";
 import { directApiHandler } from "../execution/modes/direct_api.js";
 import { samplingHandler } from "../execution/modes/sampling.js";
-import type { Persona } from "../utils/parser.js";
+import { writePersonaFile } from "../utils/parser.js";
+import type { Persona, PersonaMeta } from "../utils/parser.js";
 
 let tmpDir: string;
 
@@ -61,7 +62,7 @@ describe("orchestrationHandler", () => {
           description: "A test persona",
         },
         systemPrompt: "You are a test.",
-        filePath: "/test/persona.md",
+        filePath: "/test/personas.json",
       },
     ];
 
@@ -447,7 +448,7 @@ describe("executeReview", () => {
         description: "A test persona",
       },
       systemPrompt: "You are a test.",
-      filePath: "/test/persona.md",
+      filePath: "/test/personas.json",
     },
   ];
 
@@ -574,24 +575,16 @@ describe("validatePersonaFields", () => {
 
 describe("loadPersonasForReview", () => {
   beforeEach(async () => {
-    // Create a test persona file in tmpDir
-    const personaPath = path.join(tmpDir, "test_persona.md");
-    fs.writeFileSync(personaPath, [
-      "---",
-      "id: test_persona",
-      "name: 测试人设",
-      "name_en: Test",
-      "version: 1.0.0",
-      "author: test",
-      "tags:",
-      "  - test",
-      "description: A test persona",
-      "blindSpot: none",
-      "---",
-      "常用平台：通用",
-      "性格特质：温和",
-      "盲区：无",
-    ].join("\n"), "utf-8");
+    await writePersonaFile(tmpDir, {
+      id: "test_persona",
+      name: "测试人设",
+      name_en: "Test",
+      version: "1.0.0",
+      author: "test",
+      tags: ["test"],
+      description: "A test persona",
+      blindSpot: "none",
+    }, "常用平台：通用\n性格特质：温和\n盲区：无");
   });
 
   it("returns empty personas when directory empty", async () => {
@@ -639,7 +632,7 @@ describe("executePersonasInParallel", () => {
   const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
     meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
     systemPrompt: sp,
-    filePath: `/test/${id}.md`,
+    filePath: "/test/personas.json",
   });
 
   it("executes all personas successfully", async () => {
@@ -711,7 +704,7 @@ describe("directApiHandler", () => {
   const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
     meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
     systemPrompt: sp,
-    filePath: `/test/${id}.md`,
+    filePath: "/test/personas.json",
   });
 
   let previousKevlarKey: string | undefined;
@@ -898,7 +891,7 @@ describe("samplingHandler", () => {
   const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
     meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
     systemPrompt: sp,
-    filePath: `/test/${id}.md`,
+    filePath: "/test/personas.json",
   });
 
   let previousEnv: string | undefined;
