@@ -6,6 +6,7 @@ import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
 import { DEFAULT_DIMENSIONS_CONFIG, type DimensionsConfig } from "../execution/dimensions.js";
+import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
 
@@ -625,6 +626,20 @@ async function recommendPersonas(
   personas: Persona[],
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<Recommendation> {
+  // First try RST-based recommendation for RST-configured personas
+  const rstRecommendation = recommendRSTPersonas(
+    state.content,
+    state.preAuditReport,
+    personas,
+    state.context || undefined,
+  );
+
+  // If RST recommender found matches, use them
+  if (rstRecommendation.personaIds.length > 0 && rstRecommendation.assistantMessage) {
+    return rstRecommendation;
+  }
+
+  // Fall back to AI recommendation if MCP sampling is available
   if (samplingFn) {
     try {
       const personaSummary = personas.map((p) => ({
@@ -670,6 +685,7 @@ async function recommendPersonas(
     }
   }
 
+  // Final fallback: heuristic recommendation
   return heuristicRecommendation(state, personas);
 }
 

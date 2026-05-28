@@ -35,15 +35,15 @@
 
 단일 AI 시각에서 벗어나 다양한 페르소나를 설정할 수 있습니다:
 
-- **핵심 속성**: 나이, 관심사, 성격, 입장.
+- **핵심 속성**: 나이, 관심사, 성격, 말투.
+- **RST (반응 시뮬레이션 분류 체계)**: 4단계 인터넷 반응 시뮬레이션 — 아키타입(예: "마케팅 감지기"), 콘텐츠 민감도 트리거, 지역 문화 맥락, 플랫폼 문화를 선택합니다. 리뷰어의 평가가 아닌 실제 인터넷 사용자의 반응 패턴을 시뮬레이션합니다.
 - **인지 & 관계**: 블라인드 스팟(예: 도메인 특화 편향)과 저자와의 사회적 관계(예: 엄격한 멘토, 급진적 반대자)를 정의합니다.
-- **문화 적응**: 시스템이 입력 콘텐츠의 언어를 자동 감지하고, 이에 맞는 지역화된 문화적 맥락을 추론합니다.
+- **자연어 생성**: 자연어로 이상적인 리뷰어를 설명(예: "HN의 버즈워드를 싫어하는 냉소적인 기술 사용자")하면 시스템이 자동으로 완전한 RST 설정으로 파싱합니다.
 
-### 2. 완전 자동화된 피드백 파이프라인
+### 2. 2단계 리뷰 파이프라인
 
-- **스마트 디스패치**: 작업을 붙여넣으면 AI 디스패처가 콘텐츠 특성을 자동 분석합니다.
-- **정밀 매칭**: 가장 관련성 높은 리뷰어를 동적으로 필터링하고 스케줄링합니다.
-- **다차원 충돌**: 다양한 입장과 전문적 관점에서 차별화된 코멘트와 피드백을 유발합니다.
+- **Stage 1 — 시스템 사전 감사**: 5개의 전문 시스템 감사자가 컴플라이언스, 맥락 왜곡, 네트워크 문화 위험, 사실 오류, 사회적 위험을 병렬 스캔하여 구조화된 발견 보고서를 생성합니다.
+- **Stage 2 — RST 리뷰**: RST 성격을 가진 사용자 생성 리뷰어가 **포커스 토픽**(사전 감사 발견을 필터링+번역)을 받고, 차원 점수 보고서가 아닌 실제 사용자 반응을 생성합니다.
 
 ---
 
@@ -104,33 +104,45 @@ Kevlar의 모든 핵심 작업은 Wizard 도구를 통해 처리됩니다 — AI
 
 ### 콘텐츠 리뷰 흐름
 
-`review_content_wizard`는 "콘텐츠 저장, 리뷰어 선택, 실행 확인"을 하나의 안정적인 흐름으로 연결합니다.
+`review_content_wizard`는 "사전 감사, 리뷰어 선택, 포커스 토픽 변환, RST 리뷰"를 하나의 안정적인 흐름으로 연결합니다.
 
 ```mermaid
 flowchart TD
-  A["Submit content for review"] --> B{"Number of local personas"}
-  B -->|0| C["Prompt to create a persona first, save current content state"]
-  B -->|1-2| D["Show all reviewers, ask user to confirm"]
-  B -->|3+| E["Sampling recommendation or heuristic recommendation of 1-3 reviewers"]
-  D --> F["Execute review internally"]
-  E --> F
+  A["Submit content"] --> B["Stage 1: System Pre-audit"]
+  B --> C["5 system auditors scan in parallel"]
+  C --> D["Raw findings report"]
+  D --> E{"Any user personas?"}
+  E -->|No| F["Prompt to create persona, save state"]
+  F -.->|"Same sessionId"| E
+  E -->|Yes| G["Select reviewers (RST recommended or manual)"]
+  G --> H["Focus Topic transformation"]
+  H --> I["Filter findings by reviewer's RST triggers"]
+  I --> J["Translate to natural-language prompts"]
+  J --> K["Stage 2: RST Review"]
+  K --> L["Each reviewer produces authentic user reaction"]
+  L --> M["Aggregated report"]
 ```
 
 ### 리뷰어 페르소나 생성
 
-`create_persona_wizard`는 페르소나 생성을 단계별로 안내합니다.
+`create_persona_wizard`는 RST 지원과 함께 페르소나 생성을 안내합니다.
 
 ```mermaid
 flowchart LR
   A["Age range"] --> B["Interests"]
   B --> C["Personality traits"]
-  C --> D["Platforms"]
-  D --> E["Final confirmation"]
-  E -->|Confirm creation| F["Save persona"]
-  E -->|Edit fields| E
+  C --> D["Tone of voice"]
+  D --> E["Platform"]
+  E --> F["Author relation"]
+  F --> G["Perspective / RST archetype"]
+  G --> H["Final confirmation & preview"]
+  H -->|Confirm| I["Save persona"]
+  H -->|Edit| G
 ```
 
-생성 후 Kevlar는 문화적 배경, 저자와의 관계, 입장, 블라인드 스팟을 자동으로 추론하여 해당 플랫폼의 `skills/*.json`에 저장합니다.
+기존 관점 프리셋(9개) 또는 **RST 아키타입**(8개)을 선택할 수 있습니다. RST 아키타입은 트리거, 지역 문화, 플랫폼 문화를 자동 구성합니다. 자연어로 이상적인 리뷰어를 설명(예: "HN의 버즈워드를 싫어하는 냉소적인 기술 사용자")하면 시스템이 완전한 RST 설정으로 파싱합니다.
+
+생성 후 Kevlar는 문화적 배경, 블라인드 스팟, 행동 힌트를 자동으로 추론하여 해당 플랫폼의 `skills/*.json`에 저장합니다.
 
 ---
 
@@ -255,6 +267,10 @@ kevlar/
 ├── config/
 │   └── mcp-config.json                    # MCP 클라이언트 설정 템플릿
 ├── docs/                                  # 아키텍처 결정, ADR, 감사 리포트
+├── schedule/                              # RST 설계 문서 및 단계별 로그
+│   ├── RST-ARCHITECTURE.md                # RST 4단계 아키텍처
+│   ├── RST-需求文档.md                     # RST 요구사항
+│   └── RST-PHASE-LOG.md                   # RST 구현 단계 로그
 ├── scripts/                               # 설치 및 설정 스크립트
 │   ├── cli.ts                             # 인터랙티브 설치 CLI
 │   ├── registry.ts                        # MCP 클라이언트 감지
@@ -263,7 +279,7 @@ kevlar/
 │   ├── auditors.json                      # 시스템 감사자
 │   ├── xiaohongshu.json                   # 플랫폼: 小红书
 │   ├── zhihu.json                         # 플랫폼: 知乎
-│   ├── wechat_official.json               # 플랫폼: 微信公众号
+│   ├── wechat_official.json               # 플랫폼: WeChat 공식 계정
 │   ├── rules.json                         # 의미적 위험 규칙 (DAO 레이어)
 │   ├── _template.md                       # (레거시) 페르소나 참조 템플릿
 │   └── tmp/                               # 런타임 Wizard 세션 상태
@@ -279,7 +295,11 @@ kevlar/
 │   │   ├── aggregator.ts                  # 리뷰 리포트 집계
 │   │   ├── limiter.ts                     # 동시성 제한 및 재시도
 │   │   ├── lock.ts                        # 리뷰 잠금
-│   │   ├── parallel.ts                    # 공유 병렬 실행
+│   │   ├── parallel.ts                    # 공유 병렬 실행 + RST 프롬프트 빌더
+│   │   ├── dimensions.ts                  # 리뷰 차원 + RST 4단계 정의
+│   │   ├── focusTopicTransform.ts         # 포커스 토픽 필터 + 번역 파이프라인
+│   │   ├── rstParser.ts                   # 자연어 → RST 설정 파서
+│   │   ├── rstRecommender.ts              # RST 기반 페르소나 추천 엔진
 │   │   └── modes/
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
@@ -288,7 +308,7 @@ kevlar/
 │   │   ├── index.ts                       # 도구 레지스트리
 │   │   ├── listPersonasTool.ts
 │   │   ├── createPersonaTool.ts           # 페르소나 생성 + 초안 관리
-│   │   ├── createPersonaWizardTool.ts
+│   │   ├── createPersonaWizardTool.ts     # RST 아키타입 선택 지원 Wizard
 │   │   ├── deletePersonaTool.ts
 │   │   ├── deletePersonaWizardTool.ts
 │   │   ├── reviewTool.ts
@@ -297,7 +317,7 @@ kevlar/
 │   │   ├── configureWizardTool.ts
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
-│   ├── dao/                                # 데이터 접근 계층
+│   ├── dao/                               # 데이터 접근 계층
 │   │   ├── IRuleRepository.ts             # 규칙 저장소 인터페이스
 │   │   ├── LocalJsonRuleRepository.ts     # 로컬 JSON 구현
 │   │   ├── index.ts                       # DAO 진입점
@@ -337,6 +357,12 @@ kevlar/
             { "dimension": "information_gap", "weight": "focus" },
             { "dimension": "differentiation", "weight": "focus" }
           ]
+        },
+        "rst": {
+          "archetypes": ["technical_reviewer"],
+          "triggers": ["ai_writing", "overhyped", "data_credibility"],
+          "regionalPack": "china",
+          "platformCulture": "zhihu"
         }
       },
       "systemPrompt": "당신은 知乎에서 활발히 활동하는 사용자입니다..."
@@ -381,7 +407,7 @@ kevlar/
 
 ### 페르소나 생성
 
-`create_persona_wizard` 도구를 사용하세요 — 나이, 관심사, 성격, 말투, 플랫폼, 작성자와의 관계를 단계별로 안내합니다. 페르소나는 자동으로 올바른 플랫폼 JSON 파일에 저장됩니다. 수동 파일 편집은 필요하지 않습니다.
+`create_persona_wizard` 도구를 사용하세요 — 나이, 관심사, 성격, 말투, 플랫폼, 작성자와의 관계, **RST 아키타입 선택**을 단계별로 안내합니다. 자연어로 이상적인 리뷰어를 설명(예: "HN의 버즈워드를 싫어하는 냉소적인 기술 사용자")하면 시스템이 자동으로 완전한 RST 설정으로 파싱합니다. 페르소나는 자동으로 올바른 플랫폼 JSON 파일에 저장됩니다. 수동 파일 편집은 필요하지 않습니다.
 
 ---
 

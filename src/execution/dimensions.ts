@@ -856,3 +856,600 @@ export function migrateStanceToBias(stance: string | string[] | undefined): Dime
 		customParts.length > 0 ? customParts.join("；同时具备") : stances.join("；同时具备")
 	);
 }
+
+// ── RST v1 — Reaction Simulation Taxonomy ────────────────────────────────────
+// 四层互联网反应模拟人格系统：
+//   L1 Archetype   → 基础反馈人格（决定评论角度 + 默认 focus 维度）
+//   L2 Trigger     → 内容敏感触发器（决定哪些表达会引发强烈反应）
+//   L3 Regional    → 地区文化过滤器（提高/降低特定 Trigger 的权重）
+//   L4 Platform    → 平台文化层（决定表达习惯 + 内容期待）
+
+// ── L1 Archetype ────────────────────────────────────────────────────────────
+
+export type ArchetypeId =
+	| "pragmatic_consumer"       // 实用主义消费者
+	| "technical_reviewer"       // 技术真实性审查者
+	| "low_attention_reader"     // 注意力稀缺型路人
+	| "anti_marketing_detector"  // 反营销敏感者
+	| "emotional_reactor"        // 情绪直觉型用户
+	| "logic_hunter"             // 逻辑漏洞猎手
+	| "social_value_observer"    // 社会价值观察者
+	| "subculture_gatekeeper";   // 亚文化圈层守门人
+
+export interface ArchetypeDefinition {
+	id: ArchetypeId;
+	label: string;
+	description: string;
+	/** Which offensive dimensions this archetype focuses on */
+	focusDimensions: OffensiveDimensionId[];
+	/** Default perspective description */
+	perspective: string;
+}
+
+export const RST_ARCHETYPES: Record<ArchetypeId, ArchetypeDefinition> = {
+	pragmatic_consumer: {
+		id: "pragmatic_consumer",
+		label: "实用主义消费者",
+		description: "关注价格与实际价值，讨厌空洞愿景，反感'讲故事不讲功能'",
+		focusDimensions: ["hook_retention", "action_conversion"],
+		perspective: "以实际使用价值和性价比为核心标准的内容消费者视角",
+	},
+	technical_reviewer: {
+		id: "technical_reviewer",
+		label: "技术真实性审查者",
+		description: "审查技术逻辑，对 buzzword 高敏感，关注隐私、架构、实现合理性",
+		focusDimensions: ["information_gap", "narrative_structure"],
+		perspective: "以技术实现真实性和逻辑严谨性为核心标准的审查视角",
+	},
+	low_attention_reader: {
+		id: "low_attention_reader",
+		label: "注意力稀缺型路人",
+		description: "极短阅读耐心，快速滑动，不愿理解复杂上下文",
+		focusDimensions: ["hook_retention", "narrative_structure"],
+		perspective: "以极短注意力窗口和快速判断为特征的路人视角",
+	},
+	anti_marketing_detector: {
+		id: "anti_marketing_detector",
+		label: "反营销敏感者",
+		description: "对营销语言极度敏感，反感'重新定义''颠覆''革命性'",
+		focusDimensions: ["differentiation", "action_conversion"],
+		perspective: "对营销包装和商业话术高度警觉的反营销视角",
+	},
+	emotional_reactor: {
+		id: "emotional_reactor",
+		label: "情绪直觉型用户",
+		description: "优先感知语气与情绪，容易被措辞影响，对'高高在上感'敏感",
+		focusDimensions: ["emotional_resonance", "virality_potential"],
+		perspective: "以情绪感知和直觉反应为判断核心的感性视角",
+	},
+	logic_hunter: {
+		id: "logic_hunter",
+		label: "逻辑漏洞猎手",
+		description: "喜欢找矛盾，放大文本漏洞，容易质疑论证链",
+		focusDimensions: ["information_gap", "differentiation"],
+		perspective: "以逻辑一致性和论证严谨性为核心标准的审查视角",
+	},
+	social_value_observer: {
+		id: "social_value_observer",
+		label: "社会价值观察者",
+		description: "关注社会影响，关注价值导向，关注表达是否伤害群体",
+		focusDimensions: ["emotional_resonance", "virality_potential"],
+		perspective: "以社会影响和群体价值为导向的观察视角",
+	},
+	subculture_gatekeeper: {
+		id: "subculture_gatekeeper",
+		label: "亚文化圈层守门人",
+		description: "强烈圈层意识，对 outsider 极其敏感，反感'蹭文化'",
+		focusDimensions: ["differentiation", "virality_potential"],
+		perspective: "以圈层纯度和文化真实性为核心标准的守门人视角",
+	},
+};
+
+/** Build DimensionBias from one or two ArchetypeIds */
+export function buildDimensionBiasFromArchetypes(archetypeIds: ArchetypeId[]): DimensionBias {
+	const focusSet = new Set<OffensiveDimensionId>();
+	const perspectives: string[] = [];
+
+	for (const id of archetypeIds) {
+		const def = RST_ARCHETYPES[id];
+		if (!def) continue;
+		for (const dim of def.focusDimensions) focusSet.add(dim);
+		perspectives.push(def.perspective);
+	}
+
+	const entries: DimensionBiasEntry[] = OFFENSIVE_DIMENSION_IDS.map(dim => ({
+		dimension: dim,
+		weight: focusSet.has(dim) ? "focus" : "default",
+	}));
+
+	return {
+		entries,
+		perspective: perspectives.join("；同时具备"),
+	};
+}
+
+// ── L2 Trigger ──────────────────────────────────────────────────────────────
+
+export type TriggerId =
+	| "jargon_density"           // 黑话密度敏感
+	| "ai_writing"               // AI 味敏感
+	| "preachy_tone"             // 说教感敏感
+	| "pretentious"              // 装腔感敏感
+	| "clickbait"                // 标题党审查
+	| "slow_pacing"              // 节奏拖沓敏感
+	| "info_density_imbalance"   // 信息密度失衡
+	| "gender_expression"        // 性别表达敏感
+	| "class_expression"         // 阶层表达敏感
+	| "identity_politics"        // 身份政治敏感
+	| "corporate_responsibility" // 企业责任敏感
+	| "authenticity_check"       // 真实性审查
+	| "data_credibility"         // 数据可信度审查
+	| "overhyped";               // 过度包装审查
+
+export type TriggerCategory = "expression" | "propagation" | "social_issue" | "authenticity";
+
+export interface TriggerDefinition {
+	id: TriggerId;
+	label: string;
+	category: TriggerCategory;
+	description: string;
+	/** Which auditor IDs this trigger is interested in findings from */
+	retainedAuditors: string[];
+	/** Optional: specific trigger keyword patterns to match in finding.trigger */
+	retainedPatterns?: string[];
+}
+
+export const RST_TRIGGERS: Record<TriggerId, TriggerDefinition> = {
+	jargon_density: {
+		id: "jargon_density",
+		label: "黑话密度敏感",
+		category: "expression",
+		description: "讨厌 jargon，反感行业术语堆砌",
+		retainedAuditors: ["network_culture_risk"],
+		retainedPatterns: ["黑话", "术语", "行话", "缩写"],
+	},
+	ai_writing: {
+		id: "ai_writing",
+		label: "AI 味敏感",
+		category: "expression",
+		description: "对 AI 写作痕迹敏感，讨厌模板化表达",
+		retainedAuditors: ["network_culture_risk", "context_distortion"],
+		retainedPatterns: ["模板", "套话", "万能句式"],
+	},
+	preachy_tone: {
+		id: "preachy_tone",
+		label: "说教感敏感",
+		category: "expression",
+		description: "反感居高临下，讨厌教育用户",
+		retainedAuditors: ["social_risk"],
+		retainedPatterns: ["说教", "居高临下", "优越感", "精英"],
+	},
+	pretentious: {
+		id: "pretentious",
+		label: "装腔感敏感",
+		category: "expression",
+		description: "反感故作深刻，讨厌'故意高级'",
+		retainedAuditors: ["social_risk"],
+		retainedPatterns: ["装", "做作", "故作", "矫情"],
+	},
+	clickbait: {
+		id: "clickbait",
+		label: "标题党审查",
+		category: "propagation",
+		description: "检测夸张标题，关注标题与正文偏差",
+		retainedAuditors: ["context_distortion"],
+		retainedPatterns: ["标题", "正文", "偏差", "夸张"],
+	},
+	slow_pacing: {
+		id: "slow_pacing",
+		label: "节奏拖沓敏感",
+		category: "propagation",
+		description: "反感铺垫过长，希望快速进入重点",
+		retainedAuditors: ["factual_integrity"],
+		retainedPatterns: ["冗余", "拖沓", "铺垫", "信息密度"],
+	},
+	info_density_imbalance: {
+		id: "info_density_imbalance",
+		label: "信息密度失衡",
+		category: "propagation",
+		description: "太空洞或信息爆炸",
+		retainedAuditors: ["factual_integrity"],
+		retainedPatterns: ["空洞", "信息密度", "冗余"],
+	},
+	gender_expression: {
+		id: "gender_expression",
+		label: "性别表达敏感",
+		category: "social_issue",
+		description: "对性别刻板印象高敏感",
+		retainedAuditors: ["social_risk"],
+		retainedPatterns: ["性别", "刻板印象", "男", "女"],
+	},
+	class_expression: {
+		id: "class_expression",
+		label: "阶层表达敏感",
+		category: "social_issue",
+		description: "对优越感、高位叙事敏感",
+		retainedAuditors: ["social_risk"],
+		retainedPatterns: ["阶层", "优越感", "精英", "凡尔赛"],
+	},
+	identity_politics: {
+		id: "identity_politics",
+		label: "身份政治敏感",
+		category: "social_issue",
+		description: "对群体标签敏感",
+		retainedAuditors: ["social_risk", "network_culture_risk"],
+		retainedPatterns: ["身份", "群体", "标签", "对立"],
+	},
+	corporate_responsibility: {
+		id: "corporate_responsibility",
+		label: "企业责任敏感",
+		category: "social_issue",
+		description: "对 CSR、环保、劳工问题敏感",
+		retainedAuditors: ["social_risk"],
+		retainedPatterns: ["企业", "环保", "劳工", "CSR", "ESG"],
+	},
+	authenticity_check: {
+		id: "authenticity_check",
+		label: "真实性审查",
+		category: "authenticity",
+		description: "怀疑'编故事'，关注真实经历",
+		retainedAuditors: ["factual_integrity"],
+		retainedPatterns: ["编造", "故事", "真实", "经历"],
+	},
+	data_credibility: {
+		id: "data_credibility",
+		label: "数据可信度审查",
+		category: "authenticity",
+		description: "怀疑统计与案例真实性",
+		retainedAuditors: ["factual_integrity"],
+		retainedPatterns: ["数据", "统计", "来源", "出处"],
+	},
+	overhyped: {
+		id: "overhyped",
+		label: "过度包装审查",
+		category: "authenticity",
+		description: "反感'包装大于产品'",
+		retainedAuditors: ["legal_compliance", "social_risk"],
+		retainedPatterns: ["包装", "夸大", "绝对", "最"],
+	},
+};
+
+/** All trigger IDs as an array */
+export const ALL_TRIGGER_IDS: TriggerId[] = Object.keys(RST_TRIGGERS) as TriggerId[];
+
+// ── L3 Regional Pack ────────────────────────────────────────────────────────
+
+export type RegionalPackId =
+	| "china"
+	| "north_america"
+	| "japan"
+	| "korea"
+	| "southeast_asia";
+
+export interface RegionalPackDefinition {
+	id: RegionalPackId;
+	label: string;
+	/** Trigger ID → weight multiplier (only overrides >1.0 listed) */
+	triggerMultipliers: Partial<Record<TriggerId, number>>;
+}
+
+export const RST_REGIONAL_PACKS: Record<RegionalPackId, RegionalPackDefinition> = {
+	china: {
+		id: "china",
+		label: "中国大陆语境",
+		triggerMultipliers: {
+			preachy_tone: 2.0,
+			class_expression: 1.8,
+			gender_expression: 1.5,
+			overhyped: 1.3,
+			ai_writing: 1.2,
+			clickbait: 1.4,
+		},
+	},
+	north_america: {
+		id: "north_america",
+		label: "北美语境",
+		triggerMultipliers: {
+			identity_politics: 2.0,
+			corporate_responsibility: 1.5,
+			gender_expression: 1.5,
+			overhyped: 1.3,
+			pretentious: 1.2,
+			authenticity_check: 1.2,
+		},
+	},
+	japan: {
+		id: "japan",
+		label: "日本语境",
+		triggerMultipliers: {
+			pretentious: 1.5,
+			corporate_responsibility: 1.3,
+			preachy_tone: 1.4,
+			class_expression: 1.3,
+			slow_pacing: 1.2,
+		},
+	},
+	korea: {
+		id: "korea",
+		label: "韩国语境",
+		triggerMultipliers: {
+			class_expression: 2.0,
+			authenticity_check: 1.3,
+			pretentious: 1.4,
+			gender_expression: 1.3,
+			overhyped: 1.2,
+		},
+	},
+	southeast_asia: {
+		id: "southeast_asia",
+		label: "东南亚语境",
+		triggerMultipliers: {
+			identity_politics: 1.4,
+			corporate_responsibility: 1.3,
+			pretentious: 1.3,
+			class_expression: 1.2,
+		},
+	},
+};
+
+// ── L4 Platform Culture ─────────────────────────────────────────────────────
+
+export type PlatformCultureId =
+	| "hacker_news"
+	| "reddit"
+	| "twitter"
+	| "v2ex"
+	| "xiaohongshu"
+	| "zhihu"
+	| "douyin"
+	| "weibo"
+	| "bilibili"
+	| "wechat_official"
+	| "instagram"
+	| "youtube";
+
+export interface PlatformCultureDefinition {
+	id: PlatformCultureId;
+	label: string;
+	characteristics: string;
+	/** Behavioral constraints for the reviewer's output style */
+	outputConstraints: string[];
+	/** Trigger weight adjustments specific to this platform */
+	triggerAdjustments: Partial<Record<TriggerId, number>>;
+}
+
+export const RST_PLATFORM_CULTURES: Record<PlatformCultureId, PlatformCultureDefinition> = {
+	hacker_news: {
+		id: "hacker_news",
+		label: "Hacker News",
+		characteristics: "极度反营销、崇尚 technical honesty、讨厌 buzzword",
+		outputConstraints: [
+			"输出必须包含技术质疑",
+			"对'X for Y'式标题直接嘲讽",
+			"禁止公司公关口吻",
+			"偏好技术细节和架构讨论",
+		],
+		triggerAdjustments: {
+			ai_writing: 1.5,
+			overhyped: 1.5,
+			jargon_density: 1.3,
+			preachy_tone: 1.2,
+			pretentious: 1.3,
+		},
+	},
+	reddit: {
+		id: "reddit",
+		label: "Reddit",
+		characteristics: "情绪化社区、讨厌 corporate tone、亚文化浓厚",
+		outputConstraints: [
+			"输出情绪化，可使用社区梗",
+			"频繁引用 subreddit 文化",
+			"讨厌 corporate tone",
+			"可使用大写字母表达强烈情绪",
+		],
+		triggerAdjustments: {
+			pretentious: 1.3,
+			corporate_responsibility: 1.2,
+			ai_writing: 1.2,
+			preachy_tone: 1.1,
+		},
+	},
+	twitter: {
+		id: "twitter",
+		label: "X / Twitter",
+		characteristics: "极短注意力、情绪优先传播、标题决定生死",
+		outputConstraints: [
+			"输出限制在 280 字以内",
+			"结论前置",
+			"情绪烈度高于信息密度",
+			"可使用 thread 形式展开",
+		],
+		triggerAdjustments: {
+			slow_pacing: 1.5,
+			clickbait: 1.3,
+			ai_writing: 1.1,
+		},
+	},
+	v2ex: {
+		id: "v2ex",
+		label: "V2EX",
+		characteristics: "对'装'极度敏感、崇尚真实经历、反感营销黑话",
+		outputConstraints: [
+			"输出必须有'个人经历'支撑",
+			"装腔者直接 tag",
+			"偏好 OP 诚实陈述",
+			"技术话题优先",
+		],
+		triggerAdjustments: {
+			pretentious: 1.8,
+			overhyped: 1.5,
+			jargon_density: 1.3,
+			ai_writing: 1.4,
+			class_expression: 1.2,
+		},
+	},
+	xiaohongshu: {
+		id: "xiaohongshu",
+		label: "小红书",
+		characteristics: "情绪真实性优先、对'广告感'极其敏感、重视生活感与细节感",
+		outputConstraints: [
+			"输出必须有'真实体验感'",
+			"广告感内容一律差评",
+			"重视 emoji 和排版",
+			"偏好生活化场景描述",
+		],
+		triggerAdjustments: {
+			ai_writing: 1.5,
+			overhyped: 1.8,
+			preachy_tone: 1.3,
+			pretentious: 1.2,
+			clickbait: 1.3,
+		},
+	},
+	zhihu: {
+		id: "zhihu",
+		label: "知乎",
+		characteristics: "崇尚理性讨论、反感情感宣泄、偏好信息密度",
+		outputConstraints: [
+			"输出结构完整、逻辑自洽",
+			"反感情感宣泄",
+			"偏好数据论证",
+			"可引用专业来源",
+		],
+		triggerAdjustments: {
+			preachy_tone: 1.3,
+			ai_writing: 1.2,
+			pretentious: 1.3,
+			class_expression: 1.2,
+		},
+	},
+	douyin: {
+		id: "douyin",
+		label: "抖音",
+		characteristics: "短视频优先、娱乐化导向、算法推荐驱动、评论区梗文化盛行",
+		outputConstraints: [
+			"输出必须适配短视频场景",
+			"语言直白、口语化",
+			"重视'梗'和网络流行语",
+			"评论区互动感强",
+		],
+		triggerAdjustments: {
+			slow_pacing: 1.6,
+			ai_writing: 1.3,
+			overhyped: 1.4,
+			clickbait: 1.4,
+		},
+	},
+	weibo: {
+		id: "weibo",
+		label: "微博",
+		characteristics: "热搜驱动、情绪化传播、饭圈文化影响、公共议题发酵地",
+		outputConstraints: [
+			"输出适配碎片化阅读",
+			"可使用话题标签",
+			"情绪表达优先",
+			"重视转发和评论互动",
+		],
+		triggerAdjustments: {
+			clickbait: 1.4,
+			preachy_tone: 1.3,
+			identity_politics: 1.4,
+			gender_expression: 1.3,
+		},
+	},
+	bilibili: {
+		id: "bilibili",
+		label: "B站",
+		characteristics: "二次元文化根基、弹幕互动、UP主生态、技术宅聚集",
+		outputConstraints: [
+			"输出需理解弹幕文化",
+			"可使用二次元梗",
+			"技术内容受欢迎",
+			"真实体验优先于营销",
+		],
+		triggerAdjustments: {
+			ai_writing: 1.4,
+			pretentious: 1.5,
+			overhyped: 1.3,
+			jargon_density: 1.2,
+		},
+	},
+	wechat_official: {
+		id: "wechat_official",
+		label: "微信公众号",
+		characteristics: "深度阅读场景、订阅制分发、公众号品牌调性、朋友圈传播",
+		outputConstraints: [
+			"输出适配长文阅读",
+			"结构清晰有层次",
+			"避免过度标题党",
+			"重视内容深度",
+		],
+		triggerAdjustments: {
+			clickbait: 1.5,
+			slow_pacing: 1.3,
+			ai_writing: 1.2,
+			overhyped: 1.3,
+		},
+	},
+	instagram: {
+		id: "instagram",
+		label: "Instagram",
+		characteristics: "视觉优先、生活方式展示、影响者文化、品牌合作密集",
+		outputConstraints: [
+			"输出需考虑视觉搭配",
+			"语言简洁有格调",
+			"重视审美和生活感",
+			"可使用 emoji 和 hashtag",
+		],
+		triggerAdjustments: {
+			overhyped: 1.4,
+			ai_writing: 1.2,
+			preachy_tone: 1.3,
+		},
+	},
+	youtube: {
+		id: "youtube",
+		label: "YouTube",
+		characteristics: "长视频内容、订阅+算法双驱动、创作者生态、评论区文化",
+		outputConstraints: [
+			"输出适配视频评论场景",
+			"可引用视频时间戳",
+			"技术评测需具体",
+			"重视创作者互动",
+		],
+		triggerAdjustments: {
+			slow_pacing: 1.3,
+			ai_writing: 1.2,
+			overhyped: 1.3,
+			clickbait: 1.2,
+		},
+	},
+};
+
+// ── RST Config (composed persona) ───────────────────────────────────────────
+
+export interface RSTConfig {
+	archetypes: ArchetypeId[];
+	triggers: TriggerId[];
+	regionalPack: RegionalPackId;
+	platformCulture: PlatformCultureId;
+}
+
+/** Build DimensionBias from a full RSTConfig */
+export function buildDimensionBiasFromRST(rst: RSTConfig): DimensionBias {
+	return buildDimensionBiasFromArchetypes(rst.archetypes);
+}
+
+/** Get effective trigger weights after applying regional + platform multipliers */
+export function getEffectiveTriggerWeights(rst: RSTConfig): Record<TriggerId, number> {
+	const weights: Record<TriggerId, number> = {} as Record<TriggerId, number>;
+	for (const id of ALL_TRIGGER_IDS) weights[id] = 1.0;
+	const region = RST_REGIONAL_PACKS[rst.regionalPack];
+	const platform = RST_PLATFORM_CULTURES[rst.platformCulture];
+
+	for (const triggerId of ALL_TRIGGER_IDS) {
+		if (region?.triggerMultipliers[triggerId]) weights[triggerId] *= region.triggerMultipliers[triggerId]!;
+		if (platform?.triggerAdjustments[triggerId]) weights[triggerId] *= platform.triggerAdjustments[triggerId]!;
+	}
+	return weights;
+}

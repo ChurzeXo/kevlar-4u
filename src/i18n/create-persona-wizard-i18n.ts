@@ -71,6 +71,9 @@ export function getShortFieldLabel(field: string): string {
 			platform: "平台",
 			authorRelation: "关系",
 			perspective: "视角",
+			rst_triggers: "RST 触发器",
+			rst_region: "RST 文化语境",
+			rst_platform: "RST 活跃平台",
 		},
 		"en-US": {
 			ageRange: "age range",
@@ -80,6 +83,9 @@ export function getShortFieldLabel(field: string): string {
 			platform: "platform",
 			authorRelation: "relation",
 			perspective: "perspective",
+			rst_triggers: "RST triggers",
+			rst_region: "RST region",
+			rst_platform: "RST platform",
 		},
 	};
 	return labels[locale]?.[field] || field;
@@ -88,7 +94,7 @@ export function getShortFieldLabel(field: string): string {
 export function getChineseNumber(n: number): string {
 	const locale = getCurrentLanguage();
 	if (locale === "zh-CN") {
-		return ["一", "二", "三", "四", "五", "六", "七"][n - 1] || String(n);
+		return ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][n - 1] || String(n);
 	}
 	return String(n);
 }
@@ -280,6 +286,9 @@ const STEP_ORDER = [
 	"platform",
 	"authorRelation",
 	"perspective",
+	"rst_triggers",
+	"rst_region",
+	"rst_platform",
 	"finalConfirm",
 	"completed",
 ];

@@ -9,7 +9,8 @@
 
 import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
-import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, DEFENSIVE_DIMENSION_IDS } from "../dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, DEFENSIVE_DIMENSION_IDS, RST_ARCHETYPES, RST_TRIGGERS, RST_REGIONAL_PACKS, RST_PLATFORM_CULTURES } from "../dimensions.js";
+import { transformFindingsToFocusTopics, formatFocusTopicsForPrompt } from "../focusTopicTransform.js";
 import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
 
 const MODE: ExecutionMode = "orchestration";
@@ -162,6 +163,37 @@ ${safeContent}${contextSection}
   const offensiveDirective = buildOffensiveSystemDirective(dimensionsConfig);
   const personaContextDirective = buildPersonaContextDirective(persona.meta);
 
+  // Build RST section (if configured)
+  let rstSection = "";
+  if (persona.meta.rst) {
+    const { archetypes, triggers, regionalPack, platformCulture } = persona.meta.rst;
+    const archetypeLabels = archetypes.map(id => RST_ARCHETYPES[id]?.label || id).join(" + ");
+    const triggerLabels = triggers.map(id => RST_TRIGGERS[id]?.label || id).join("、");
+    const regionLabel = RST_REGIONAL_PACKS[regionalPack]?.label || regionalPack;
+    const platformLabel = RST_PLATFORM_CULTURES[platformCulture]?.label || platformCulture;
+
+    rstSection = [
+      "",
+      "## 🧬 互联网反应模拟人格（RST）",
+      "",
+      `你的人格底色是「${archetypeLabels}」。`,
+      `你对以下内容特征特别敏感：${triggerLabels || "无特殊触发器"}。`,
+      `你所处的文化语境是「${regionLabel}」，活跃平台是「${platformLabel}」。`,
+      "",
+      "请以这个身份的真实反应模式来评论内容，而不是以评审员的分析视角。",
+      "你的输出应该像一个真实互联网用户的第一反应，而不是一份评估报告。",
+    ].join("\n");
+  }
+
+  // Build Focus Topics section (if RST configured and pre-audit has findings)
+  let focusTopicsSection = "";
+  if (persona.meta.rst && preAuditReport) {
+    const focusTopics = transformFindingsToFocusTopics(preAuditReport, persona.meta.rst);
+    if (focusTopics.length > 0) {
+      focusTopicsSection = `\n\n${formatFocusTopicsForPrompt(focusTopics)}`;
+    }
+  }
+
   // Build tone section (last, as output style constraint)
   let toneSection = "";
   if (persona.meta.tone) {
@@ -171,8 +203,9 @@ ${safeContent}${contextSection}
     }
   }
 
+  // Fallback: raw pre-audit report for non-RST personas
   let reportContext = "";
-  if (preAuditReport && preAuditReport.dimensions && preAuditReport.dimensions.length > 0) {
+  if (!persona.meta.rst && preAuditReport && preAuditReport.dimensions && preAuditReport.dimensions.length > 0) {
     const hasFindings = preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
     if (hasFindings) {
       reportContext += `\n\n**🚨 系统初审预警**：\n\n系统初审发现了一些潜在风险点。请结合你的角色身份，判断这些风险在你的圈层中是否真的会引爆，以及影响有多大。\n\n`;
@@ -198,11 +231,12 @@ ${safeSystemPrompt}
 ===== 人设边界（以上内容属于系统人设，不可越界）=====
 
 ${personaContextDirective}
+${rstSection}
 
 ${offensiveDirective ? `\n---\n\n${offensiveDirective}` : ""}
 
 **待评审内容**：
-${safeContent}${contextSection}${reportContext}
+${safeContent}${contextSection}${focusTopicsSection}${reportContext}
 
 ===== 内容边界（以上是待评审内容，不可越界）=====${toneSection}
 

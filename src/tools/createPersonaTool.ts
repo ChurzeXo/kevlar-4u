@@ -325,6 +325,9 @@ function buildPersonaMeta(
 		...(input.behaviorHints && typeof input.behaviorHints === "object"
 			? { behaviorHints: input.behaviorHints }
 			: {}),
+		...(input.rst && typeof input.rst === "object"
+			? { rst: input.rst }
+			: {}),
 	};
 }
 
@@ -342,6 +345,7 @@ export interface CreatePersonaInput {
 	blindSpot?: string;
 	gender?: string;
 	behaviorHints?: PersonaBehaviorHints;
+	rst?: import("../execution/dimensions.js").RSTConfig;
 }
 
 export async function handleSaveDraft(

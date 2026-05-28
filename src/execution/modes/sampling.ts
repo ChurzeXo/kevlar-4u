@@ -101,7 +101,7 @@ async function executePersonaReview(
 
   const response = await callSamplingApi(
     samplingFn,
-    augmentSystemPrompt(persona, dimensions),
+    augmentSystemPrompt(persona, dimensions, preAuditReport),
     userMessage
   );
 

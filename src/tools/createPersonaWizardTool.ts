@@ -19,7 +19,18 @@ import {
   type OffensiveDimensionId,
   OFFENSIVE_DIMENSION_IDS,
   DIMENSIONS,
+  RST_ARCHETYPES,
+  RST_TRIGGERS,
+  RST_REGIONAL_PACKS,
+  RST_PLATFORM_CULTURES,
+  ALL_TRIGGER_IDS,
+  type ArchetypeId,
+  type RSTConfig,
+  type TriggerId,
+  type RegionalPackId,
+  type PlatformCultureId,
 } from "../execution/dimensions.js";
+import { parseNaturalLanguageRST, isNaturalLanguageRSTInput } from "../execution/rstParser.js";
 import type { PersonaBehaviorHints } from "../utils/parser.js";
 import { resolvePlatformFilename } from "../utils/parser.js";
 import { t, getCurrentLanguage } from "../i18n/index.js";
@@ -129,6 +140,9 @@ type WizardStep =
   | "platform"
   | "authorRelation"
   | "perspective"
+  | "rst_triggers"
+  | "rst_region"
+  | "rst_platform"
   | "finalConfirm"
   | "completed";
 
@@ -140,12 +154,38 @@ const STEP_ORDER: WizardStep[] = [
   "platform",
   "authorRelation",
   "perspective",
+  "rst_triggers",
+  "rst_region",
+  "rst_platform",
   "finalConfirm",
   "completed",
 ];
 
 const PERSPECTIVE_OPTION_LABELS = PERSPECTIVE_PRESETS.map(p => p.label);
 const CUSTOM_PERSPECTIVE_OPTION = getCustomPerspectiveOption();
+
+// ── RST Archetype options (appended after traditional presets + custom) ──
+const RST_ARCHETYPE_IDS: ArchetypeId[] = [
+  "pragmatic_consumer",
+  "technical_reviewer",
+  "low_attention_reader",
+  "anti_marketing_detector",
+  "emotional_reactor",
+  "logic_hunter",
+  "social_value_observer",
+  "subculture_gatekeeper",
+];
+const RST_ARCHETYPE_LABELS = RST_ARCHETYPE_IDS.map(id => RST_ARCHETYPES[id].label);
+
+/** Build the full perspective option list: traditional presets + custom + RST archetypes */
+function buildPerspectiveOptionList(): string[] {
+  const traditional = PERSPECTIVE_OPTION_LABELS;
+  const custom = [CUSTOM_PERSPECTIVE_OPTION];
+  const rst = RST_ARCHETYPE_LABELS.map((label, i) => `[RST] ${label}`);
+  return [...traditional, ...custom, ...rst];
+}
+
+const ALL_PERSPECTIVE_OPTIONS = buildPerspectiveOptionList();
 
 /** Fields that belong to each step (used for clearing on go-back). */
 const STEP_FIELDS: Record<string, (keyof WizardState["fields"])[]> = {
@@ -155,7 +195,10 @@ const STEP_FIELDS: Record<string, (keyof WizardState["fields"])[]> = {
   tone: ["tone"],
   platform: ["platform", "platformNote", "pendingPlatforms"],
   authorRelation: ["authorRelation"],
-  perspective: ["dimensionBias", "pendingPerspectiveCustom"],
+  perspective: ["dimensionBias", "pendingPerspectiveCustom", "rst"],
+  rst_triggers: ["rst"],
+  rst_region: ["rst"],
+  rst_platform: ["rst"],
   // Inferred fields are derived from all user inputs, so clear them when
   // rolling back to any step before finalConfirm.
   infer: ["culturalContext", "blindSpot", "personaName", "gender"],
@@ -193,9 +236,11 @@ interface WizardState {
     authorRelation?: string;
     dimensionBias?: DimensionBias;
     pendingPerspectiveCustom?: boolean;
-    /** Selected perspective preset IDs */
-    perspectivePresets?: string[];
-    blindSpot?: string | null;
+		/** Selected perspective preset IDs */
+		perspectivePresets?: string[];
+		/** RST v1 四层人格配置 */
+		rst?: import("../execution/dimensions.js").RSTConfig;
+		blindSpot?: string | null;
     personaName?: string | null;
     gender?: string | null;
     behaviorHints?: PersonaBehaviorHints | null;
@@ -438,6 +483,11 @@ async function handleAuthorRelationStep({
       ...PERSPECTIVE_OPTION_LABELS.map((opt, i) => `${i + 1}. ${opt}`),
       `${PERSPECTIVE_OPTION_LABELS.length + 1}. ${CUSTOM_PERSPECTIVE_OPTION}`,
       "",
+      "**互联网反应模拟人格（RST）—— 新增选项：**",
+      ...RST_ARCHETYPE_LABELS.map((label, i) => `${PERSPECTIVE_OPTION_LABELS.length + 2 + i}. [RST] ${label}`),
+      "",
+      "RST 人格将替代传统视角预设，通过四层架构模拟真实互联网用户的反应模式。",
+      "",
       getPerspectiveSelectionHint(),
       "",
       goBackHint("authorRelation"),
@@ -456,8 +506,14 @@ async function handlePerspectiveStep({
     return handlePerspectiveCustomInput(skillsDir, tmpDir, state, userMessage, samplingFn);
   }
 
-  const parsedPresets = resolvePerspectiveSelection(userMessage);
-  if (!parsedPresets || parsedPresets.length === 0) {
+  const parsedSelections = resolvePerspectiveSelection(userMessage);
+
+  // Try natural language RST parsing if no valid selection found
+  if (!parsedSelections || parsedSelections.length === 0) {
+    if (isNaturalLanguageRSTInput(userMessage)) {
+      return handleNaturalLanguageRST(skillsDir, tmpDir, state, userMessage, samplingFn);
+    }
+
     return toolResponse(
       state,
       [
@@ -465,12 +521,43 @@ async function handlePerspectiveStep({
         "",
         ...PERSPECTIVE_OPTION_LABELS.map((opt, i) => `${i + 1}. ${opt}`),
         `${PERSPECTIVE_OPTION_LABELS.length + 1}. ${CUSTOM_PERSPECTIVE_OPTION}`,
+        "",
+        "**互联网反应模拟人格（RST）—— 新增选项：**",
+        ...RST_ARCHETYPE_LABELS.map((label, i) => `${PERSPECTIVE_OPTION_LABELS.length + 2 + i}. [RST] ${label}`),
+        "",
+        "你也可以直接用自然语言描述你想要的评审员风格，例如：",
+        "「我想要一个对AI味很敏感的知乎用户」",
+        "「an anti-marketing HN reviewer who hates buzzwords」",
       ].join("\n")
     );
   }
 
-  const hasCustom = parsedPresets.includes("custom");
-  const selectedPresetIds = parsedPresets.filter(s => s !== "custom");
+  const hasCustom = parsedSelections.includes("custom");
+  const hasRST = parsedSelections.some(s => s.startsWith("rst:"));
+  const selectedPresetIds = parsedSelections.filter(s => s !== "custom" && !s.startsWith("rst:"));
+
+  // Handle RST archetype selection
+  if (hasRST) {
+    const rstSelections = parsedSelections.filter(s => s.startsWith("rst:"));
+    const archetypeIds = rstSelections.map(s => s.replace("rst:", "") as ArchetypeId);
+    // Take the first RST selection (user can only pick one archetype at a time for now)
+    const primaryArchetype = archetypeIds[0];
+
+    state.fields.rst = buildDefaultRSTConfig(primaryArchetype, state);
+    // Also build dimensionBias from the archetype's focus dimensions
+    state.fields.dimensionBias = buildDimensionBiasFromPresets([]);
+    const { buildDimensionBiasFromArchetypes } = await import("../execution/dimensions.js");
+    state.fields.dimensionBias = buildDimensionBiasFromArchetypes(archetypeIds);
+    state.fields.perspectivePresets = [];
+
+    // Enter RST sub-flow: triggers → region → platform → finalConfirm
+    return transitionStep(
+      tmpDir,
+      state,
+      "rst_triggers",
+      buildTriggerSelectionPrompt(primaryArchetype)
+    );
+  }
 
   if (hasCustom) {
     state.fields.perspectivePresets = selectedPresetIds;
@@ -480,7 +567,7 @@ async function handlePerspectiveStep({
     return toolResponse(state, getCustomPerspectivePrompt());
   }
 
-  // Build dimensionBias from selected presets
+  // Build dimensionBias from selected traditional presets
   state.fields.dimensionBias = buildDimensionBiasFromPresets(selectedPresetIds);
   state.fields.perspectivePresets = selectedPresetIds;
 
@@ -519,6 +606,282 @@ async function handlePerspectiveCustomInput(
     state,
     "finalConfirm",
     await buildFinalConfirmationMessage(state, skillsDir)
+  );
+}
+
+/**
+ * Handle natural language RST description input.
+ * Parses the description into an RSTConfig and proceeds to final confirmation.
+ */
+async function handleNaturalLanguageRST(
+  skillsDir: string,
+  tmpDir: string,
+  state: WizardState,
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  const result = parseNaturalLanguageRST(userMessage);
+
+  // Set RST config
+  state.fields.rst = result.config;
+
+  // Build dimensionBias from the parsed archetypes
+  const { buildDimensionBiasFromArchetypes } = await import("../execution/dimensions.js");
+  state.fields.dimensionBias = buildDimensionBiasFromArchetypes(result.config.archetypes);
+  state.fields.perspectivePresets = [];
+
+  // Build confirmation message showing what was parsed
+  const confirmationLines = [
+    "已从你的描述中解析出以下 RST 配置：",
+    "",
+    `  ${result.parsedDescription}`,
+    "",
+    "将使用此配置继续。",
+  ];
+
+  const inferred = await inferFinalFields(state, skillsDir, samplingFn);
+  state.fields = { ...state.fields, ...inferred };
+
+  return transitionStep(
+    tmpDir,
+    state,
+    "finalConfirm",
+    [
+      confirmationLines.join("\n"),
+      "",
+      await buildFinalConfirmationMessage(state, skillsDir),
+    ].join("\n")
+  );
+}
+
+// ── RST Sub-step Handlers ──────────────────────────────────────────
+// When user selects an RST archetype (L1), we enter a sub-flow:
+//   rst_triggers → rst_region → rst_platform → finalConfirm
+// Each step supports skipping (press Enter) to use default values.
+
+const TRIGGER_CATEGORIES: Record<string, { label: string; items: TriggerId[] }> = {
+  expression: {
+    label: "表达类",
+    items: ["jargon_density", "ai_writing", "preachy_tone", "pretentious"],
+  },
+  propagation: {
+    label: "传播类",
+    items: ["clickbait", "slow_pacing", "info_density_imbalance"],
+  },
+  social_issue: {
+    label: "社会议题",
+    items: ["gender_expression", "class_expression", "identity_politics", "corporate_responsibility"],
+  },
+  authenticity: {
+    label: "真实性",
+    items: ["authenticity_check", "data_credibility", "overhyped"],
+  },
+};
+
+function buildTriggerSelectionPrompt(archetypeId: ArchetypeId): string {
+  const archetype = RST_ARCHETYPES[archetypeId];
+  const lines = [
+    `已选择人格：「${archetype.label}」`,
+    "",
+    "请选择你最敏感的内容特征（回复编号，多个用逗号分隔，跳过使用默认值）：",
+    "",
+  ];
+
+  let idx = 1;
+  for (const [catKey, cat] of Object.entries(TRIGGER_CATEGORIES)) {
+    catKey; // ensure used
+    lines.push(`**${cat.label}：**`);
+    for (const triggerId of cat.items) {
+      const trigger = RST_TRIGGERS[triggerId];
+      lines.push(` ${idx}. ${trigger.label} — ${trigger.description}`);
+      idx++;
+    }
+    lines.push("");
+  }
+
+  lines.push("直接回车跳过，使用系统推荐的默认触发器。");
+  return lines.join("\n");
+}
+
+function parseTriggerSelection(input: string, currentTriggers: TriggerId[]): TriggerId[] {
+  const trimmed = input.trim();
+  if (!trimmed) return currentTriggers; // skip → keep current (defaults)
+
+  // Parse comma-separated numbers
+  const indices = trimmed.split(/[,，\s]+/).map(s => parseInt(s.trim(), 10)).filter(n => n >= 1 && n <= ALL_TRIGGER_IDS.length);
+  if (indices.length === 0) return currentTriggers; // invalid → keep defaults
+
+  // Map flat indices back to trigger IDs
+  const selected: TriggerId[] = [];
+  const flatList = Object.values(TRIGGER_CATEGORIES).flatMap(cat => cat.items);
+  for (const idx of indices) {
+    const triggerId = flatList[idx - 1];
+    if (triggerId && !selected.includes(triggerId)) {
+      selected.push(triggerId);
+    }
+  }
+
+  return selected.length > 0 ? selected : currentTriggers;
+}
+
+async function handleRSTTriggersStep({
+  skillsDir,
+  tmpDir,
+  state,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  const rst = state.fields.rst;
+  if (!rst) {
+    // Shouldn't happen, but fallback to perspective
+    state.step = "perspective";
+    await persistState(tmpDir, state);
+    return toolResponse(state, "请先选择一个 RST 人格。");
+  }
+
+  // Parse user's trigger selection
+  const newTriggers = parseTriggerSelection(userMessage, rst.triggers);
+  state.fields.rst = { ...rst, triggers: newTriggers };
+
+  const triggerLabels = newTriggers.map(id => RST_TRIGGERS[id]?.label || id).join("、");
+
+  // Build region selection prompt
+  const regionLines = [
+    `已记录。敏感触发器：${triggerLabels}`,
+    "",
+    "请选择你的文化语境（回复编号，跳过使用自动推断）：",
+    "",
+  ];
+  const regionIds: RegionalPackId[] = ["china", "north_america", "japan", "korea", "southeast_asia"];
+  for (let i = 0; i < regionIds.length; i++) {
+    const pack = RST_REGIONAL_PACKS[regionIds[i]];
+    regionLines.push(`${i + 1}. ${pack.label}`);
+  }
+  regionLines.push("");
+  regionLines.push("直接回车跳过，将根据你的常用平台自动推断文化语境。");
+
+  return transitionStep(
+    tmpDir,
+    state,
+    "rst_region",
+    regionLines.join("\n")
+  );
+}
+
+async function handleRSTRegionStep({
+  skillsDir,
+  tmpDir,
+  state,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  const rst = state.fields.rst;
+  if (!rst) {
+    state.step = "perspective";
+    await persistState(tmpDir, state);
+    return toolResponse(state, "请先选择一个 RST 人格。");
+  }
+
+  const trimmed = userMessage.trim();
+  const regionIds: RegionalPackId[] = ["china", "north_america", "japan", "korea", "southeast_asia"];
+
+  if (trimmed) {
+    const idx = parseInt(trimmed, 10);
+    if (idx >= 1 && idx <= regionIds.length) {
+      state.fields.rst = { ...rst, regionalPack: regionIds[idx - 1] };
+    }
+    // If invalid number, keep auto-detect (don't change)
+  }
+  // If empty → skip, keep auto-detect from buildDefaultRSTConfig
+
+  const currentRst = state.fields.rst!;
+  const regionLabel = RST_REGIONAL_PACKS[currentRst.regionalPack]?.label || currentRst.regionalPack;
+
+  // Build platform selection prompt
+  const platformLines = [
+    trimmed ? `已记录。文化语境：${regionLabel}` : "已跳过，将根据你的常用平台自动推断文化语境。",
+    "",
+    "请选择你的活跃平台（回复编号，跳过使用自动推断）：",
+    "",
+  ];
+
+  const platformIds: PlatformCultureId[] = [
+    "hacker_news", "reddit", "twitter", "v2ex",
+    "xiaohongshu", "zhihu", "douyin", "weibo",
+    "bilibili", "wechat_official", "instagram", "youtube",
+  ];
+  for (let i = 0; i < platformIds.length; i++) {
+    const platform = RST_PLATFORM_CULTURES[platformIds[i]];
+    platformLines.push(`${i + 1}. ${platform.label}`);
+  }
+  platformLines.push("");
+  platformLines.push("直接回车跳过，将使用你之前填写的平台。");
+
+  return transitionStep(
+    tmpDir,
+    state,
+    "rst_platform",
+    platformLines.join("\n")
+  );
+}
+
+async function handleRSTPlatformStep({
+  skillsDir,
+  tmpDir,
+  state,
+  userMessage,
+  samplingFn,
+}: StepHandlerParams): Promise<ToolResult> {
+  const rst = state.fields.rst;
+  if (!rst) {
+    state.step = "perspective";
+    await persistState(tmpDir, state);
+    return toolResponse(state, "请先选择一个 RST 人格。");
+  }
+
+  const trimmed = userMessage.trim();
+  const platformIds: PlatformCultureId[] = [
+    "hacker_news", "reddit", "twitter", "v2ex",
+    "xiaohongshu", "zhihu", "douyin", "weibo",
+    "bilibili", "wechat_official", "instagram", "youtube",
+  ];
+
+  if (trimmed) {
+    const idx = parseInt(trimmed, 10);
+    if (idx >= 1 && idx <= platformIds.length) {
+      state.fields.rst = { ...rst, platformCulture: platformIds[idx - 1] };
+    }
+    // If invalid number, keep auto-detected value
+  }
+  // If empty → skip, keep auto-detected value from buildDefaultRSTConfig
+
+  const currentRst = state.fields.rst!;
+  const platformLabel = RST_PLATFORM_CULTURES[currentRst.platformCulture]?.label || currentRst.platformCulture;
+  const regionLabel = RST_REGIONAL_PACKS[currentRst.regionalPack]?.label || currentRst.regionalPack;
+  const triggerLabels = currentRst.triggers.map(id => RST_TRIGGERS[id]?.label || id).join("、");
+
+  const confirmationLines = [
+    trimmed ? `已记录。活跃平台：${platformLabel}` : "已跳过，使用你之前填写的平台。",
+    "",
+    "RST 配置完成：",
+    `  人格：${RST_ARCHETYPES[currentRst.archetypes[0]]?.label || currentRst.archetypes[0]}`,
+    `  敏感触发器：${triggerLabels}`,
+    `  文化语境：${regionLabel}`,
+    `  活跃平台：${platformLabel}`,
+  ];
+
+  const inferred = await inferFinalFields(state, skillsDir, samplingFn);
+  state.fields = { ...state.fields, ...inferred };
+
+  return transitionStep(
+    tmpDir,
+    state,
+    "finalConfirm",
+    [
+      confirmationLines.join("\n"),
+      "",
+      await buildFinalConfirmationMessage(state, skillsDir),
+    ].join("\n")
   );
 }
 
@@ -562,6 +925,9 @@ const STEP_HANDLERS: Record<string, StepHandler> = {
   platform: handlePlatformStep,
   authorRelation: handleAuthorRelationStep,
   perspective: handlePerspectiveStep,
+  rst_triggers: handleRSTTriggersStep,
+  rst_region: handleRSTRegionStep,
+  rst_platform: handleRSTPlatformStep,
   finalConfirm: handleFinalConfirmStep,
   completed: handleCompletedStep,
 };
@@ -669,13 +1035,28 @@ async function applyFinalModification(
       // Try parsing as perspective option numbers/names first
       const parsed = resolvePerspectiveSelection(valueText);
       if (parsed && parsed.length > 0) {
-        state.fields.dimensionBias = buildDimensionBiasFromPresets(
-          parsed.filter(s => s !== "custom")
-        );
-        state.fields.perspectivePresets = parsed.filter(s => s !== "custom");
+        // Check for RST selections
+        const rstSelections = parsed.filter(s => s.startsWith("rst:"));
+        const presetSelections = parsed.filter(s => s !== "custom" && !s.startsWith("rst:"));
+
+        if (rstSelections.length > 0) {
+          const archetypeIds = rstSelections.map(s => s.replace("rst:", "") as ArchetypeId);
+          state.fields.rst = buildDefaultRSTConfig(archetypeIds[0], state);
+          const { buildDimensionBiasFromArchetypes } = await import("../execution/dimensions.js");
+          state.fields.dimensionBias = buildDimensionBiasFromArchetypes(archetypeIds);
+          state.fields.perspectivePresets = [];
+          // Enter RST sub-flow from finalConfirm modification
+          state.step = "rst_triggers";
+          return field;
+        } else {
+          state.fields.dimensionBias = buildDimensionBiasFromPresets(presetSelections);
+          state.fields.perspectivePresets = presetSelections;
+          delete state.fields.rst;
+        }
       } else {
         // Treat as custom perspective text
         state.fields.dimensionBias = buildDimensionBiasFromPresets([], valueText);
+        delete state.fields.rst;
       }
       delete state.fields.pendingPerspectiveCustom;
       break;
@@ -710,6 +1091,7 @@ async function completeWizard(
     blindSpot: state.fields.blindSpot ?? undefined,
     gender: state.fields.gender ?? undefined,
     behaviorHints: state.fields.behaviorHints ?? undefined,
+    rst: state.fields.rst,
   });
 
   if (!createResult.isError) {
@@ -1763,11 +2145,11 @@ function resolveAuthorRelation(input: string): string | null {
 /**
  * Parse user's perspective selection input.
  * Supports: "1,3,5" / "1、3、5" / "1 3 5" / text matching
- * Returns array of selected preset IDs (or "custom"), or null if nothing valid.
+ * Returns array of selected preset IDs (or "custom" or "rst:<archetypeId>"), or null if nothing valid.
  */
 function resolvePerspectiveSelection(input: string): string[] | null {
   const trimmed = input.trim();
-  const totalOptions = PERSPECTIVE_PRESETS.length + 1; // +1 for custom
+  const totalOptions = ALL_PERSPECTIVE_OPTIONS.length;
 
   // Try number-based selection first
   const nums = trimmed.split(/[，,、\s]+/).map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
@@ -1778,6 +2160,9 @@ function resolvePerspectiveSelection(input: string): string[] | null {
         results.push(PERSPECTIVE_PRESETS[n - 1].id);
       } else if (n === PERSPECTIVE_PRESETS.length + 1) {
         results.push("custom");
+      } else if (n >= PERSPECTIVE_PRESETS.length + 2 && n <= PERSPECTIVE_PRESETS.length + 1 + RST_ARCHETYPE_IDS.length) {
+        const rstIdx = n - (PERSPECTIVE_PRESETS.length + 2);
+        results.push(`rst:${RST_ARCHETYPE_IDS[rstIdx]}`);
       }
     }
     if (results.length > 0) return results;
@@ -1791,7 +2176,17 @@ function resolvePerspectiveSelection(input: string): string[] | null {
       results.push("custom");
       continue;
     }
-    // Check for match against preset IDs or labels
+    // Check for match against RST archetypes
+    const rstMatch = RST_ARCHETYPES[part as ArchetypeId]
+      || RST_ARCHETYPE_LABELS.findIndex(l => l.includes(part) || part.includes(l));
+    if (typeof rstMatch === "string") {
+      results.push(`rst:${rstMatch}`);
+      continue;
+    } else if (typeof rstMatch === "number" && rstMatch >= 0) {
+      results.push(`rst:${RST_ARCHETYPE_IDS[rstMatch]}`);
+      continue;
+    }
+    // Check for match against traditional preset IDs or labels
     const matched = PERSPECTIVE_PRESETS.find(p =>
       p.id === part || p.label.includes(part) || part.includes(p.label)
     );
@@ -1801,6 +2196,53 @@ function resolvePerspectiveSelection(input: string): string[] | null {
     }
   }
   return results.length > 0 ? results : null;
+}
+
+/** Build a default RSTConfig from an archetype ID + current wizard state */
+function buildDefaultRSTConfig(archetypeId: ArchetypeId, state: WizardState): RSTConfig {
+  const platform = state.fields.platform || "";
+  // Auto-detect regional pack from platform
+  let regionalPack: RSTConfig["regionalPack"] = "china";
+  if (/Instagram|Reddit|YouTube|Twitter|X\b|Reddit/i.test(platform)) {
+    regionalPack = "north_america";
+  } else if (/日本|Tokyo|JP/i.test(platform)) {
+    regionalPack = "japan";
+  } else if (/韩国|Korea|KR/i.test(platform)) {
+    regionalPack = "korea";
+  } else if (/东南亚|Thai|Vietnam|Malaysia|Singapore|ID/i.test(platform)) {
+    regionalPack = "southeast_asia";
+  }
+  // Auto-detect platform culture from platform name
+  let platformCulture: RSTConfig["platformCulture"] = "xiaohongshu";
+  if (/知乎|zhihu/i.test(platform)) platformCulture = "zhihu";
+  else if (/B站|bilibili/i.test(platform)) platformCulture = "bilibili";
+  else if (/Reddit/i.test(platform)) platformCulture = "reddit";
+  else if (/Twitter|X\b/i.test(platform)) platformCulture = "twitter";
+  else if (/HN|Hacker/i.test(platform)) platformCulture = "hacker_news";
+  else if (/抖音|douyin/i.test(platform)) platformCulture = "douyin";
+  else if (/微博|weibo/i.test(platform)) platformCulture = "weibo";
+  else if (/公众号|wechat_official/i.test(platform)) platformCulture = "wechat_official";
+  else if (/Instagram/i.test(platform)) platformCulture = "instagram";
+  else if (/YouTube/i.test(platform)) platformCulture = "youtube";
+
+  // Default triggers based on archetype
+  const defaultTriggers: Record<ArchetypeId, RSTConfig["triggers"]> = {
+    pragmatic_consumer: ["overhyped", "clickbait"],
+    technical_reviewer: ["jargon_density", "ai_writing", "overhyped"],
+    low_attention_reader: ["slow_pacing", "info_density_imbalance"],
+    anti_marketing_detector: ["ai_writing", "overhyped", "preachy_tone"],
+    emotional_reactor: ["preachy_tone", "pretentious", "gender_expression"],
+    logic_hunter: ["data_credibility", "authenticity_check", "slow_pacing"],
+    social_value_observer: ["gender_expression", "class_expression", "identity_politics"],
+    subculture_gatekeeper: ["jargon_density", "pretentious", "ai_writing"],
+  };
+
+  return {
+    archetypes: [archetypeId],
+    triggers: defaultTriggers[archetypeId] || [],
+    regionalPack,
+    platformCulture,
+  };
 }
 
 function inferCulturalContext(state: WizardState): string {
@@ -1906,7 +2348,7 @@ function detectGoBackTarget(input: string, currentStep: WizardStep): WizardStep 
   const stepNumMatch = trimmed.match(/(?:回到|返回|退回到?|重选|重新选|重新设置|重新填写)\s*第?\s*(\d+)\s*步/);
   if (stepNumMatch) {
     const num = parseInt(stepNumMatch[1], 10);
-    if (num >= 1 && num <= 7) {
+    if (num >= 1 && num <= STEP_ORDER.length) {
       const target = STEP_ORDER[num - 1];
       if (STEP_ORDER.indexOf(target) < currentIdx) return target;
     }
@@ -1993,8 +2435,51 @@ function buildStepPrompt(state: WizardState): string {
         ...PERSPECTIVE_OPTION_LABELS.map((opt, i) => `${i + 1}. ${opt}`),
         `${PERSPECTIVE_OPTION_LABELS.length + 1}. ${CUSTOM_PERSPECTIVE_OPTION}`,
         "",
+        "**互联网反应模拟人格（RST）—— 新增选项：**",
+        ...RST_ARCHETYPE_LABELS.map((label, i) => `${PERSPECTIVE_OPTION_LABELS.length + 2 + i}. [RST] ${label}`),
+        "",
         getPerspectiveSelectionHint(),
       ].join("\n");
+
+    case "rst_triggers": {
+      const rst = state.fields.rst;
+      const archId = rst?.archetypes?.[0] || "anti_marketing_detector";
+      return `${stepBackLabel(8)}${buildTriggerSelectionPrompt(archId)}`;
+    }
+
+    case "rst_region": {
+      const regionLines = [
+        `${stepBackLabel(9)}请选择你的文化语境（回复编号，跳过使用自动推断）：`,
+        "",
+      ];
+      const regionIds: RegionalPackId[] = ["china", "north_america", "japan", "korea", "southeast_asia"];
+      for (let i = 0; i < regionIds.length; i++) {
+        const pack = RST_REGIONAL_PACKS[regionIds[i]];
+        regionLines.push(`${i + 1}. ${pack.label}`);
+      }
+      regionLines.push("");
+      regionLines.push("直接回车跳过，将根据你的常用平台自动推断文化语境。");
+      return regionLines.join("\n");
+    }
+
+    case "rst_platform": {
+      const platformLines = [
+        `${stepBackLabel(10)}请选择你的活跃平台（回复编号，跳过使用自动推断）：`,
+        "",
+      ];
+      const platformIds: PlatformCultureId[] = [
+        "hacker_news", "reddit", "twitter", "v2ex",
+        "xiaohongshu", "zhihu", "douyin", "weibo",
+        "bilibili", "wechat_official", "instagram", "youtube",
+      ];
+      for (let i = 0; i < platformIds.length; i++) {
+        const platform = RST_PLATFORM_CULTURES[platformIds[i]];
+        platformLines.push(`${i + 1}. ${platform.label}`);
+      }
+      platformLines.push("");
+      platformLines.push("直接回车跳过，将使用你之前填写的平台。");
+      return platformLines.join("\n");
+    }
 
     default:
       return locale === "zh-CN" ? "请继续操作。" : "Please continue.";

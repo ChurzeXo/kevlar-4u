@@ -23,6 +23,8 @@ export interface PersonaMeta {
   tone?: string | string[];
   /** AI-generated behavior hints for each persona attribute */
   behaviorHints?: PersonaBehaviorHints;
+  /** RST v1 四层互联网反应模拟人格配置 */
+  rst?: import("../execution/dimensions.js").RSTConfig;
 }
 
 export interface PersonaBehaviorHints {

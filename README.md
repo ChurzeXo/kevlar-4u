@@ -35,15 +35,15 @@ And most platforms don't offer a real **A/B test**. Once content goes live, by t
 
 Break out of the single-AI perspective with comprehensive persona customization:
 
-- **Core attributes**: Age, interests, personality, stance.
+- **Core attributes**: Age, interests, personality, tone of voice.
+- **RST (Reaction Simulation Taxonomy)**: Four-layer internet reaction simulation — choose an archetype (e.g., "Anti-Marketing Detector"), content sensitivity triggers, regional cultural context, and platform culture. The system simulates how real internet users react, not just how reviewers evaluate.
 - **Cognition & relationship**: Define blind spots (e.g., domain-specific biases) and social relationship with the author (e.g., a strict mentor, a radical opponent).
-- **Cultural adaptation**: The system automatically detects the language of input content and infers a matching localized cultural context.
+- **Natural language creation**: Describe your ideal reviewer in plain text (e.g., "a cynical HN user who hates buzzwords"), and the system auto-parses it into a full RST configuration.
 
-### 2. Fully Automated Feedback Pipeline
+### 2. Two-Stage Review Pipeline
 
-- **Smart dispatch**: Paste your work and the AI dispatcher automatically analyzes the content's characteristics.
-- **Precise matching**: Dynamically filters and schedules the most relevant reviewers.
-- **Multi-dimensional collision**: Triggers differentiated comments and feedback from diverse stances and professional perspectives.
+- **Stage 1 — System Pre-audit**: Five specialized system auditors scan content for compliance, context distortion, network culture risks, factual errors, and social risk — producing a structured findings report.
+- **Stage 2 — RST Review**: User-created reviewers with RST personalities receive **Focus Topics** (filtered + translated from pre-audit findings) and produce authentic user reactions, not dimension-scored reports.
 
 ---
 
@@ -103,43 +103,45 @@ Low-level direct tools (suitable for automation scripts):
 
 ### Content Review Flow
 
-`review_content_wizard` chains "save content, select reviewers, confirm execution" into a stable flow.
+`review_content_wizard` chains "pre-audit, reviewer selection, Focus Topic transformation, RST review" into a stable flow.
 
 ```mermaid
 flowchart TD
-  A["Submit content for review"] --> B{"Any personas?"}
-  B -->|No| C["Prompt to create persona, save state"]
-  C -.->|"Same sessionId"| B
-  B -->|Yes| D["Collect target platform"]
-  D --> E["Filter personas by platform"]
-  E --> F{"Count matched"}
-  F -->|"≤2"| G["Show matched personas"]
-  F -->|"3+"| H["AI recommend 1-3 personas"]
-  G --> I["Confirm selection"]
-  H --> I
-  I --> J["Token cost estimate"]
-  J --> K{"Confirm?"}
-  K -->|Yes| L["Execute review"]
-  K -->|No| I
+  A["Submit content"] --> B["Stage 1: System Pre-audit"]
+  B --> C["5 system auditors scan in parallel"]
+  C --> D["Raw findings report"]
+  D --> E{"Any user personas?"}
+  E -->|No| F["Prompt to create persona, save state"]
+  F -.->|"Same sessionId"| E
+  E -->|Yes| G["Select reviewers (RST recommended or manual)"]
+  G --> H["Focus Topic transformation"]
+  H --> I["Filter findings by reviewer's RST triggers"]
+  I --> J["Translate to natural-language prompts"]
+  J --> K["Stage 2: RST Review"]
+  K --> L["Each reviewer produces authentic user reaction"]
+  L --> M["Aggregated report"]
 ```
 
 ### Creating a Reviewer Persona
 
-`create_persona_wizard` guides you through persona creation step by step.
+`create_persona_wizard` guides you through persona creation with RST support.
 
 ```mermaid
 flowchart LR
   A["Age range"] --> B["Interests"]
   B --> C["Personality traits"]
   C --> D["Tone of voice"]
-  D --> E["Platforms"]
+  D --> E["Platform"]
   E --> F["Author relation"]
-  F --> G["Final confirmation & preview"]
-  G -->|Confirm| H["Save persona"]
-  G -->|Edit| G
+  F --> G["Perspective / RST archetype"]
+  G --> H["Final confirmation & preview"]
+  H -->|Confirm| I["Save persona"]
+  H -->|Edit| G
 ```
 
-After creation, Kevlar-4u automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.json` (routed by platform tag — see [Architecture](#architecture-overview)).
+You can select a traditional perspective preset (9 options) or an **RST archetype** (8 options). RST archetypes auto-configure triggers, regional context, and platform culture. You can also describe your ideal reviewer in natural language (e.g., "a skeptical tech user on HN") and the system will parse it into a full RST config.
+
+After creation, Kevlar-4u automatically infers the cultural background, blind spots, and behavior hints, saving them to `skills/*.json` (routed by platform tag — see [Architecture](#architecture-overview)).
 
 ---
 
@@ -264,6 +266,10 @@ kevlar-4u/
 ├── config/
 │   └── mcp-config.json                    # MCP client config template
 ├── docs/                                  # Architecture decisions, ADRs, audit reports
+├── schedule/                              # RST design docs & phase logs
+│   ├── RST-ARCHITECTURE.md                # RST four-layer architecture
+│   ├── RST-需求文档.md                     # RST requirements
+│   └── RST-PHASE-LOG.md                   # RST implementation phase log
 ├── scripts/                               # Install & config scripts
 │   ├── cli.ts                             # Interactive install CLI
 │   ├── registry.ts                        # MCP client detection
@@ -288,7 +294,11 @@ kevlar-4u/
 │   │   ├── aggregator.ts                  # Review report aggregation
 │   │   ├── limiter.ts                     # Concurrency limiting & retry
 │   │   ├── lock.ts                        # Review lock
-│   │   ├── parallel.ts                    # Shared parallel execution
+│   │   ├── parallel.ts                    # Shared parallel execution + RST prompt builder
+│   │   ├── dimensions.ts                  # Review dimensions + RST four-layer definitions
+│   │   ├── focusTopicTransform.ts         # Focus Topic filter + translate pipeline
+│   │   ├── rstParser.ts                   # Natural language → RST config parser
+│   │   ├── rstRecommender.ts              # RST-based persona recommendation engine
 │   │   └── modes/
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
@@ -297,7 +307,7 @@ kevlar-4u/
 │   │   ├── index.ts                       # Tool registry
 │   │   ├── listPersonasTool.ts
 │   │   ├── createPersonaTool.ts           # Create persona + draft management
-│   │   ├── createPersonaWizardTool.ts
+│   │   ├── createPersonaWizardTool.ts     # Wizard with RST archetype selection
 │   │   ├── deletePersonaTool.ts
 │   │   ├── deletePersonaWizardTool.ts
 │   │   ├── reviewTool.ts
@@ -306,7 +316,7 @@ kevlar-4u/
 │   │   ├── configureWizardTool.ts
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
-│   ├── dao/                                # Data Access Layer
+│   ├── dao/                               # Data Access Layer
 │   │   ├── IRuleRepository.ts             # Rule repository interface
 │   │   ├── LocalJsonRuleRepository.ts     # Local JSON implementation
 │   │   ├── index.ts                       # DAO entry point
@@ -346,6 +356,12 @@ Personas are stored in **multi-file JSON** format under `skills/`. Each persona 
             { "dimension": "information_gap", "weight": "focus" },
             { "dimension": "differentiation", "weight": "focus" }
           ]
+        },
+        "rst": {
+          "archetypes": ["technical_reviewer"],
+          "triggers": ["ai_writing", "overhyped", "data_credibility"],
+          "regionalPack": "china",
+          "platformCulture": "zhihu"
         }
       },
       "systemPrompt": "你是一位活跃在知乎的用户..."
@@ -390,7 +406,7 @@ Semantic risk rules live in `skills/rules.json` and are accessed through the DAO
 
 ### Creating Personas
 
-Use the `create_persona_wizard` tool — it guides you through age, interests, traits, tone, platform, and author relation. The persona is automatically saved to the correct platform JSON file. No manual file editing is needed.
+Use the `create_persona_wizard` tool — it guides you through age, interests, traits, tone, platform, author relation, and **RST archetype selection**. You can also describe your ideal reviewer in natural language (e.g., "a sarcastic tech user on Hacker News who hates marketing fluff") and the system will auto-parse it into a full RST configuration. The persona is automatically saved to the correct platform JSON file. No manual file editing is needed.
 
 ---
 
