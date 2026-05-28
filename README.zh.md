@@ -130,7 +130,7 @@ flowchart LR
   E -->|修改字段| E
 ```
 
-创建完成后，Kevlar 会自动推断文化背景、与作者关系、立场和盲区，保存到 `skills/*.md`。
+创建完成后，Kevlar 会自动推断文化背景、与作者关系、立场和盲区，保存到对应平台的 `skills/*.json`。
 
 ---
 
@@ -237,7 +237,7 @@ flowchart TD
   Tools --> Wizards["服务端状态机向导"]
   Tools --> Execution["多模式执行层"]
   Wizards --> Tmp["skills/tmp 会话状态"]
-  Execution --> Personas["skills/*.md 评审员人设"]
+  Execution --> Personas["skills/*.json 评审员人设与规则"]
   Execution --> Report["结构化评审报告"]
 ```
 
@@ -254,13 +254,18 @@ flowchart TD
 kevlar/
 ├── config/
 │   └── mcp-config.json                    # MCP 客户端配置模板
-├── docs/                                  # 架构设计、审计报告
+├── docs/                                  # 架构决策、ADR、审计报告
 ├── scripts/                               # 安装与配置脚本
 │   ├── cli.ts                             # 交互式安装 CLI
 │   ├── registry.ts                        # MCP 客户端检测
 │   └── setup.ts                           # 零配置安装脚本
 ├── skills/                                # 评审员人设库
-│   ├── _template.md                       # 人设模板
+│   ├── auditors.json                      # 系统初审员
+│   ├── xiaohongshu.json                   # 平台：小红书
+│   ├── zhihu.json                         # 平台：知乎
+│   ├── wechat_official.json               # 平台：微信公众号
+│   ├── rules.json                         # 语义风险规则（DAO 层）
+│   ├── _template.md                       # （已废弃）人设参考模板
 │   └── tmp/                               # 运行时向导会话状态
 ├── src/
 │   ├── index.ts                           # stdio server 入口
@@ -292,12 +297,17 @@ kevlar/
 │   │   ├── configureWizardTool.ts
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
+│   ├── dao/                                # 数据访问层
+│   │   ├── IRuleRepository.ts             # 规则仓库接口
+│   │   ├── LocalJsonRuleRepository.ts     # 本地 JSON 实现
+│   │   ├── index.ts                       # DAO 入口
+│   │   └── types.ts                       # 规则数据类型
 │   ├── prompts/
 │   │   └── reviewDispatcherPrompt.ts      # 内部设计参考
 │   └── utils/
 │       ├── errors.ts                      # 错误码与格式化
 │       ├── logger.ts                      # 结构化日志
-│       ├── parser.ts                      # 人设文件解析与写入
+│       ├── parser.ts                      # 多文件 JSON 人设解析与写入
 │       ├── sanitize.ts                    # 凭据扫描、Prompt 边界处理
 │       └── ...
 └── package.json
@@ -305,36 +315,73 @@ kevlar/
 
 ---
 
-## 贡献评审员人设
+## 数据存储
 
-在 `skills/` 下按平台新增子目录及 `.md` 文件（或直接放在 `skills/` 根目录），自定义人设文件默认被 `.gitignore` 排除，不会提交到仓库。
+### 人设
 
-参考模板 `skills/_template.md`：
+人设采用**多文件 JSON** 格式存储在 `skills/` 下。每个文件包含 `version`、`last_updated` 和 `personas` 映射：
 
-```markdown
----
-id: your_persona_id
-name: 角色显示名称
-description: 一句话描述这个评审员关注什么问题
-tags:
-  - 平台
-  - 兴趣
-author: custom
----
-
-年龄段：
-兴趣方向：
-常用平台：
-性格特质：
-- 特质 → 行为
-
-文化背景：
-与作者的关系：
-立场：
-盲区：
+```json
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-28",
+  "personas": {
+    "analytical_zhihu": {
+      "meta": {
+        "id": "analytical_zhihu",
+        "name": "理性知乎人",
+        "tags": ["知乎", "理性分析"],
+        "tone": ["专业", "严谨"],
+        "dimensionBias": {
+          "entries": [
+            { "dimension": "information_gap", "weight": "focus" },
+            { "dimension": "differentiation", "weight": "focus" }
+          ]
+        }
+      },
+      "systemPrompt": "你是一位活跃在知乎的用户..."
+    }
+  }
+}
 ```
 
-自定义人设参与评审前会做字段完整性校验。至少要保证常用平台、性格特质、盲区等信息可被解析或出现在描述中。
+文件按标签（tag）自动路由：
+
+| 标签 | 目标文件 | 用途 |
+| --- | --- | --- |
+| `system_auditor` | `auditors.json` | 系统初审员 |
+| `"小红书"` | `xiaohongshu.json` | 平台用户评审员 |
+| `"知乎"` | `zhihu.json` | 平台用户评审员 |
+| *(未知)* | `fallback.json` | 未知平台兜底 |
+
+新的人设文件在启动时通过内容嗅探（检测 `personas` 键）自动发现。新增平台只需在 `skills/` 下放置一个 JSON 文件即可。
+
+### 规则
+
+语义风险规则存储在 `skills/rules.json`，通过 DAO 层（`src/dao/`）访问：
+
+```json
+{
+  "version": "1.0.0",
+  "categories": {
+    "food": {
+      "enabled": true,
+      "associative_map": [
+        {
+          "root": "不新鲜",
+          "variants": ["食材不新鲜", "东西不新鲜"],
+          "misinterpret_direction": "可能被误解为食品安全问题",
+          "severity": "medium"
+        }
+      ]
+    }
+  }
+}
+```
+
+### 创建人设
+
+使用 `create_persona_wizard` 工具——它会引导你逐步填写年龄、兴趣、性格、语气、平台和与作者关系。人设会自动保存到正确的平台 JSON 文件，无需手动编辑。
 
 ---
 

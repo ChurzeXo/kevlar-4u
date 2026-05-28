@@ -130,7 +130,7 @@ flowchart LR
   E -->|Edit fields| E
 ```
 
-作成後、Kevlarは自動的に文化的背景、作者との関係、立場、盲点を推論し、`skills/*.md` に保存します。
+作成後、Kevlarは自動的に文化的背景、作者との関係、立場、盲点を推論し、対応するプラットフォームの `skills/*.json` に保存します。
 
 ---
 
@@ -237,7 +237,7 @@ flowchart TD
   Tools --> Wizards["Server-side State Machine Wizards"]
   Tools --> Execution["Multi-mode Execution Layer"]
   Wizards --> Tmp["skills/tmp Session State"]
-  Execution --> Personas["skills/*.md Reviewer Personas"]
+  Execution --> Personas["skills/*.json Personas & Rules"]
   Execution --> Report["Structured Review Report"]
 ```
 
@@ -254,13 +254,18 @@ flowchart TD
 kevlar/
 ├── config/
 │   └── mcp-config.json                    # MCP client config template
-├── docs/                                  # Architecture design, audit reports
+├── docs/                                  # Architecture decisions, ADRs, audit reports
 ├── scripts/                               # Install & config scripts
 │   ├── cli.ts                             # Interactive install CLI
 │   ├── registry.ts                        # MCP client detection
 │   └── setup.ts                           # Zero-config setup script
 ├── skills/                                # Reviewer persona library
-│   ├── _template.md                       # Persona template
+│   ├── auditors.json                      # System auditors
+│   ├── xiaohongshu.json                   # Platform: 小红书
+│   ├── zhihu.json                         # Platform: 知乎
+│   ├── wechat_official.json               # Platform: 微信公众号
+│   ├── rules.json                         # Semantic risk rules (DAO layer)
+│   ├── _template.md                       # (Legacy) Persona reference template
 │   └── tmp/                               # Runtime wizard session state
 ├── src/
 │   ├── index.ts                           # stdio server entry
@@ -292,12 +297,17 @@ kevlar/
 │   │   ├── configureWizardTool.ts
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
+│   ├── dao/                                # Data Access Layer
+│   │   ├── IRuleRepository.ts             # Rule repository interface
+│   │   ├── LocalJsonRuleRepository.ts     # Local JSON implementation
+│   │   ├── index.ts                       # DAO entry point
+│   │   └── types.ts                       # Rule data types
 │   ├── prompts/
 │   │   └── reviewDispatcherPrompt.ts      # Internal design reference
 │   └── utils/
 │       ├── errors.ts                      # Error codes & formatting
 │       ├── logger.ts                      # Structured logging
-│       ├── parser.ts                      # Persona file parsing & writing
+│       ├── parser.ts                      # Multi-file JSON persona parsing & writing
 │       ├── sanitize.ts                    # Credential scanning, prompt boundary handling
 │       └── ...
 └── package.json
@@ -305,36 +315,73 @@ kevlar/
 
 ---
 
-## レビューペルソナのコントリビュート
+## データストレージ
 
-`skills/` 以下にプラットフォームごとにサブディレクトリと `.md` ファイルを追加するか、`skills/` 直下に配置してください。カスタムペルソナファイルはデフォルトで `.gitignore` により除外され、リポジトリにコミットされません。
+### ペルソナ
 
-テンプレート `skills/_template.md` を参照：
+ペルソナは**マルチファイル JSON** 形式で `skills/` 以下に保存されます。各ファイルには `version`、`last_updated`、`personas` マップが含まれます：
 
-```markdown
----
-id: your_persona_id
-name: Display name
-description: One-line description of what this reviewer focuses on
-tags:
-  - Platform
-  - Interest
-author: custom
----
-
-Age range:
-Interests:
-Platforms:
-Personality traits:
-- Trait → Behavior
-
-Cultural background:
-Relationship with author:
-Stance:
-Blind spots:
+```json
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-28",
+  "personas": {
+    "analytical_zhihu": {
+      "meta": {
+        "id": "analytical_zhihu",
+        "name": "理性知乎人",
+        "tags": ["知乎", "理性分析"],
+        "tone": ["专业", "严谨"],
+        "dimensionBias": {
+          "entries": [
+            { "dimension": "information_gap", "weight": "focus" },
+            { "dimension": "differentiation", "weight": "focus" }
+          ]
+        }
+      },
+      "systemPrompt": "あなたは知乎で活発に活動するユーザーです..."
+    }
+  }
+}
 ```
 
-カスタムペルソナはレビューに参加する前にフィールドの完全性バリデーションを受けます。最低でも、プラットフォーム、性格特性、盲点などの情報がパース可能であるか、descriptionに含まれている必要があります。
+ファイルはタグによって自動ルーティングされます：
+
+| タグ | 対象ファイル | 用途 |
+| --- | --- | --- |
+| `system_auditor` | `auditors.json` | システム監査人 |
+| `"小红书"` | `xiaohongshu.json` | プラットフォーム別ユーザーペルソナ |
+| `"知乎"` | `zhihu.json` | プラットフォーム別ユーザーペルソナ |
+| *(不明)* | `fallback.json` | 未認識プラットフォームのキャッチオール |
+
+新しいペルソナファイルは起動時にコンテンツスニッフィング（`personas` キーの存在）により自動検出されます。新しいプラットフォームの追加は `skills/` に JSON ファイルを配置するだけで完了します。
+
+### ルール
+
+意味的リスクルールは `skills/rules.json` に保存され、DAO レイヤー（`src/dao/`）を通じてアクセスされます：
+
+```json
+{
+  "version": "1.0.0",
+  "categories": {
+    "food": {
+      "enabled": true,
+      "associative_map": [
+        {
+          "root": "不新鲜",
+          "variants": ["食材不新鲜", "东西不新鲜"],
+          "misinterpret_direction": "食品安全問題と誤解される可能性あり",
+          "severity": "medium"
+        }
+      ]
+    }
+  }
+}
+```
+
+### ペルソナの作成
+
+`create_persona_wizard` ツールを使用してください — 年齢、興味、性格、口調、プラットフォーム、作者との関係を段階的にガイドします。ペルソナは自動的に正しいプラットフォーム JSON ファイルに保存されます。手動でのファイル編集は不要です。
 
 ---
 

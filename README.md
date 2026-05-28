@@ -139,7 +139,7 @@ flowchart LR
   G -->|Edit| G
 ```
 
-After creation, Kevlar-4u automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.md`.
+After creation, Kevlar-4u automatically infers the cultural background, relationship with author, stance, and blind spots, saving them to `skills/*.json` (routed by platform tag — see [Architecture](#architecture-overview)).
 
 ---
 
@@ -246,7 +246,7 @@ flowchart TD
   Tools --> Wizards["Server-side State Machine Wizards"]
   Tools --> Execution["Multi-mode Execution Layer"]
   Wizards --> Tmp["skills/tmp Session State"]
-  Execution --> Personas["skills/*.md Reviewer Personas"]
+  Execution --> Personas["skills/*.json Personas & Rules"]
   Execution --> Report["Structured Review Report"]
 ```
 
@@ -263,13 +263,18 @@ Design principles:
 kevlar-4u/
 ├── config/
 │   └── mcp-config.json                    # MCP client config template
-├── docs/                                  # Architecture design, audit reports
+├── docs/                                  # Architecture decisions, ADRs, audit reports
 ├── scripts/                               # Install & config scripts
 │   ├── cli.ts                             # Interactive install CLI
 │   ├── registry.ts                        # MCP client detection
 │   └── setup.ts                           # Zero-config setup script
 ├── skills/                                # Reviewer persona library
-│   ├── _template.md                       # Persona template
+│   ├── auditors.json                      # System auditors (pre-screening)
+│   ├── xiaohongshu.json                   # Platform: 小红书
+│   ├── zhihu.json                         # Platform: 知乎
+│   ├── wechat_official.json               # Platform: 微信公众号
+│   ├── rules.json                         # Semantic risk rules (DAO layer)
+│   ├── _template.md                       # (Legacy) Persona reference template
 │   └── tmp/                               # Runtime wizard session state
 ├── src/
 │   ├── index.ts                           # stdio server entry
@@ -301,12 +306,17 @@ kevlar-4u/
 │   │   ├── configureWizardTool.ts
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
+│   ├── dao/                                # Data Access Layer
+│   │   ├── IRuleRepository.ts             # Rule repository interface
+│   │   ├── LocalJsonRuleRepository.ts     # Local JSON implementation
+│   │   ├── index.ts                       # DAO entry point
+│   │   └── types.ts                       # Rule data types
 │   ├── prompts/
 │   │   └── reviewDispatcherPrompt.ts      # Internal design reference
 │   └── utils/
 │       ├── errors.ts                      # Error codes & formatting
 │       ├── logger.ts                      # Structured logging
-│       ├── parser.ts                      # Persona file parsing & writing
+│       ├── parser.ts                      # Multi-file JSON persona parsing & writing
 │       ├── sanitize.ts                    # Credential scanning, prompt boundary handling
 │       └── ...
 └── package.json
@@ -314,36 +324,73 @@ kevlar-4u/
 
 ---
 
-## Contributing Reviewer Personas
+## Data Storage
 
-Add a subdirectory and `.md` file under `skills/` by platform (or place it directly in the `skills/` root). Custom persona files are excluded by `.gitignore` by default and will not be committed to the repository.
+### Personas
 
-Refer to the template `skills/_template.md`:
+Personas are stored in **multi-file JSON** format under `skills/`. Each persona file contains a `version`, `last_updated`, and `personas` map:
 
-```markdown
----
-id: your_persona_id
-name: Display name
-description: One-line description of what this reviewer focuses on
-tags:
-  - Platform
-  - Interest
-author: custom
----
-
-Age range:
-Interests:
-Platforms:
-Personality traits:
-- Trait → Behavior
-
-Cultural background:
-Relationship with author:
-Stance:
-Blind spots:
+```json
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-28",
+  "personas": {
+    "analytical_zhihu": {
+      "meta": {
+        "id": "analytical_zhihu",
+        "name": "理性知乎人",
+        "tags": ["知乎", "理性分析"],
+        "tone": ["专业", "严谨"],
+        "dimensionBias": {
+          "entries": [
+            { "dimension": "information_gap", "weight": "focus" },
+            { "dimension": "differentiation", "weight": "focus" }
+          ]
+        }
+      },
+      "systemPrompt": "你是一位活跃在知乎的用户..."
+    }
+  }
+}
 ```
 
-Custom personas undergo field completeness validation before participating in reviews. At minimum, platforms, personality traits, blind spots, and similar information must be parseable or present in the description.
+Files are routed by tag:
+
+| Tag | Target File | Purpose |
+| --- | --- | --- |
+| `system_auditor` | `auditors.json` | System pre-screening auditors |
+| `"小红书"` | `xiaohongshu.json` | Platform-specific user personas |
+| `"知乎"` | `zhihu.json` | Platform-specific user personas |
+| *(unknown)* | `fallback.json` | Catch-all for unrecognised platforms |
+
+New persona files are auto-detected at startup via content sniffing (presence of a `personas` key). Adding a new platform requires only placing a JSON file in `skills/`.
+
+### Rules
+
+Semantic risk rules live in `skills/rules.json` and are accessed through the DAO layer (`src/dao/`):
+
+```json
+{
+  "version": "1.0.0",
+  "categories": {
+    "food": {
+      "enabled": true,
+      "associative_map": [
+        {
+          "root": "不新鲜",
+          "variants": ["食材不新鲜", "东西不新鲜"],
+          "misinterpret_direction": "可能被误解为食品安全问题",
+          "severity": "medium"
+        }
+      ]
+    }
+  }
+}
+```
+
+### Creating Personas
+
+Use the `create_persona_wizard` tool — it guides you through age, interests, traits, tone, platform, and author relation. The persona is automatically saved to the correct platform JSON file. No manual file editing is needed.
 
 ---
 

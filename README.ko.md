@@ -130,7 +130,7 @@ flowchart LR
   E -->|Edit fields| E
 ```
 
-생성 후 Kevlar는 문화적 배경, 저자와의 관계, 입장, 블라인드 스팟을 자동으로 추론하여 `skills/*.md`에 저장합니다.
+생성 후 Kevlar는 문화적 배경, 저자와의 관계, 입장, 블라인드 스팟을 자동으로 추론하여 해당 플랫폼의 `skills/*.json`에 저장합니다.
 
 ---
 
@@ -237,7 +237,7 @@ flowchart TD
   Tools --> Wizards["Server-side State Machine Wizards"]
   Tools --> Execution["Multi-mode Execution Layer"]
   Wizards --> Tmp["skills/tmp Session State"]
-  Execution --> Personas["skills/*.md Reviewer Personas"]
+  Execution --> Personas["skills/*.json Personas & Rules"]
   Execution --> Report["Structured Review Report"]
 ```
 
@@ -254,13 +254,18 @@ flowchart TD
 kevlar/
 ├── config/
 │   └── mcp-config.json                    # MCP 클라이언트 설정 템플릿
-├── docs/                                  # 아키텍처 설계, 감사 리포트
+├── docs/                                  # 아키텍처 결정, ADR, 감사 리포트
 ├── scripts/                               # 설치 및 설정 스크립트
 │   ├── cli.ts                             # 인터랙티브 설치 CLI
 │   ├── registry.ts                        # MCP 클라이언트 감지
 │   └── setup.ts                           # 제로-설정 셋업 스크립트
 ├── skills/                                # 리뷰어 페르소나 라이브러리
-│   ├── _template.md                       # 페르소나 템플릿
+│   ├── auditors.json                      # 시스템 감사자
+│   ├── xiaohongshu.json                   # 플랫폼: 小红书
+│   ├── zhihu.json                         # 플랫폼: 知乎
+│   ├── wechat_official.json               # 플랫폼: 微信公众号
+│   ├── rules.json                         # 의미적 위험 규칙 (DAO 레이어)
+│   ├── _template.md                       # (레거시) 페르소나 참조 템플릿
 │   └── tmp/                               # 런타임 Wizard 세션 상태
 ├── src/
 │   ├── index.ts                           # stdio 서버 진입점
@@ -292,12 +297,17 @@ kevlar/
 │   │   ├── configureWizardTool.ts
 │   │   ├── getModesTool.ts
 │   │   └── helpTool.ts
+│   ├── dao/                                # 데이터 접근 계층
+│   │   ├── IRuleRepository.ts             # 규칙 저장소 인터페이스
+│   │   ├── LocalJsonRuleRepository.ts     # 로컬 JSON 구현
+│   │   ├── index.ts                       # DAO 진입점
+│   │   └── types.ts                       # 규칙 데이터 타입
 │   ├── prompts/
 │   │   └── reviewDispatcherPrompt.ts      # 내부 설계 참조
 │   └── utils/
 │       ├── errors.ts                      # 에러 코드 및 포맷팅
 │       ├── logger.ts                      # 구조화된 로깅
-│       ├── parser.ts                      # 페르소나 파일 파싱 및 쓰기
+│       ├── parser.ts                      # 다중 파일 JSON 페르소나 파싱 및 쓰기
 │       ├── sanitize.ts                    # 자격증명 스캐닝, 프롬프트 경계 처리
 │       └── ...
 └── package.json
@@ -305,36 +315,73 @@ kevlar/
 
 ---
 
-## 리뷰어 페르소나 기여하기
+## 데이터 저장소
 
-`skills/` 아래에 플랫폼별로 서브디렉토리와 `.md` 파일을 추가하거나 (또는 `skills/` 루트에 직접 배치하세요). 커스텀 페르소나 파일은 기본적으로 `.gitignore`에 의해 제외되며 저장소에 커밋되지 않습니다.
+### 페르소나
 
-템플릿 `skills/_template.md`를 참조하세요:
+페르소나는 **멀티파일 JSON** 형식으로 `skills/` 아래에 저장됩니다. 각 파일에는 `version`, `last_updated`, `personas` 맵이 포함됩니다:
 
-```markdown
----
-id: your_persona_id
-name: Display name
-description: One-line description of what this reviewer focuses on
-tags:
-  - Platform
-  - Interest
-author: custom
----
-
-Age range:
-Interests:
-Platforms:
-Personality traits:
-- Trait → Behavior
-
-Cultural background:
-Relationship with author:
-Stance:
-Blind spots:
+```json
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-28",
+  "personas": {
+    "analytical_zhihu": {
+      "meta": {
+        "id": "analytical_zhihu",
+        "name": "理性知乎人",
+        "tags": ["知乎", "理性分析"],
+        "tone": ["专业", "严谨"],
+        "dimensionBias": {
+          "entries": [
+            { "dimension": "information_gap", "weight": "focus" },
+            { "dimension": "differentiation", "weight": "focus" }
+          ]
+        }
+      },
+      "systemPrompt": "당신은 知乎에서 활발히 활동하는 사용자입니다..."
+    }
+  }
+}
 ```
 
-커스텀 페르소나는 리뷰에 참여하기 전에 필드 완전성 검증을 거칩니다. 최소한 플랫폼, 성격 특성, 블라인드 스팟 등 유사한 정보가 파싱 가능하거나 설명에 포함되어 있어야 합니다.
+파일은 태그에 따라 자동 라우팅됩니다:
+
+| 태그 | 대상 파일 | 용도 |
+| --- | --- | --- |
+| `system_auditor` | `auditors.json` | 시스템 감사자 |
+| `"小红书"` | `xiaohongshu.json` | 플랫폼별 사용자 페르소나 |
+| `"知乎"` | `zhihu.json` | 플랫폼별 사용자 페르소나 |
+| *(알 수 없음)* | `fallback.json` | 미인식 플랫폼 catch-all |
+
+새로운 페르소나 파일은 시작 시 콘텐츠 스니핑(`personas` 키 존재 여부)을 통해 자동 감지됩니다. 새 플랫폼 추가는 `skills/`에 JSON 파일을 배치하기만 하면 됩니다.
+
+### 규칙
+
+의미적 위험 규칙은 `skills/rules.json`에 저장되며 DAO 레이어(`src/dao/`)를 통해 접근됩니다:
+
+```json
+{
+  "version": "1.0.0",
+  "categories": {
+    "food": {
+      "enabled": true,
+      "associative_map": [
+        {
+          "root": "不新鲜",
+          "variants": ["食材不新鲜", "东西不新鲜"],
+          "misinterpret_direction": "식품 안전 문제로 오해될 수 있음",
+          "severity": "medium"
+        }
+      ]
+    }
+  }
+}
+```
+
+### 페르소나 생성
+
+`create_persona_wizard` 도구를 사용하세요 — 나이, 관심사, 성격, 말투, 플랫폼, 작성자와의 관계를 단계별로 안내합니다. 페르소나는 자동으로 올바른 플랫폼 JSON 파일에 저장됩니다. 수동 파일 편집은 필요하지 않습니다.
 
 ---
 
