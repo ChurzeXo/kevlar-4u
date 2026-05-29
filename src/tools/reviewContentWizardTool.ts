@@ -342,12 +342,9 @@ async function handleSystemAudit(
     samplingFn,
   );
 
-  const allFindings = crossValidatedResults.flatMap((r) => r.findings || []);
-  const publicReaction = await generatePublicReaction(state.content, allFindings, samplingFn);
-
   state.preAuditReport = {
     dimensions: crossValidatedResults,
-    summary: summarizePreAuditResults(crossValidatedResults, publicReaction),
+    summary: summarizePreAuditResults(crossValidatedResults),
   };
   state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
   state.step = "checkPersonaInventory";
@@ -737,57 +734,28 @@ async function crossValidateRiskyDimensions(
   return results;
 }
 
-const ENGLISH_DIMENSION_NAMES: Record<string, string> = {
-  legal_compliance: "Legal Compliance",
-  context_distortion: "Context Distortion",
-  network_culture_risk: "Network Culture",
-  factual_integrity: "Factual Integrity",
-  social_risk: "Social Ethics",
-  local_rule_engine: "Local Rule Engine",
+const CHINESE_DIMENSION_NAMES: Record<string, string> = {
+  legal_compliance: "合规",
+  context_distortion: "语境脱嵌",
+  network_culture_risk: "网络文化",
+  factual_integrity: "事实",
+  social_risk: "社会风险",
+  local_rule_engine: "本地规则",
 };
 
-async function generatePublicReaction(
-  content: string,
-  findings: any[],
-  samplingFn: MultiTurnSamplingFunction,
-): Promise<string | undefined> {
-  if (findings.length === 0) return undefined;
+function formatRiskyAuditorName(result: { id?: string; name: string }): string {
+  const dimensionName = result.id ? CHINESE_DIMENSION_NAMES[result.id] : undefined;
+  return dimensionName ? `${result.name}（${dimensionName}）` : result.name;
+}
 
-  const findingsList = findings
-    .map((f, i) => {
-      const parts = [f.keyword, f.trigger, f.riskDescription].filter(Boolean);
-      return `${i + 1}. ${parts.join("；")}`;
-    })
-    .join("\n");
-
-  const systemPrompt = [
-    "你是一名舆情风险分析师。根据以下内容审查发现，描述潜在的舆论反应。",
-    "",
-    "## 规则",
-    "- 只描述「风险在哪」「网友可能怎么反应」，不给任何解决方案",
-    "- 用客观、冷静的语气，像在给作者发出预警",
-    "- 2-3 句话，简洁有力",
-    "- 直接输出预警文字，不要加前缀或标题",
-  ].join("\n");
-
-  const userMessage = ["待审内容：", content, "", "风险发现：", findingsList].join("\n");
-
-  try {
-    const response = await samplingFn({
-      systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-      maxTokens: 256,
-    });
-    const text = response.content.trim();
-    return text.length > 0 ? text : undefined;
-  } catch {
-    return undefined;
-  }
+function formatFindingBlockquote(finding: any): string {
+  const subject = finding.keyword ? `"${finding.keyword}"` : finding.dimension || "该内容";
+  const detail = finding.riskDescription || finding.description || finding.trigger || "存在潜在语义或传播风险，建议进入复审确认。";
+  return `> ${subject} ${detail}`;
 }
 
 function summarizePreAuditResults(
   results: Array<{ id?: string; name: string; findings: any[]; level?: string }>,
-  publicReaction?: string,
 ): string {
   if (results.length === 0) return "本地规则与系统审查员均未命中风险点";
 
@@ -804,25 +772,21 @@ function summarizePreAuditResults(
   }
 
   const lines: string[] = [];
+  const totalFindings = risky.reduce((sum, r) => sum + (r.findings?.length || 0), 0);
 
   if (risky.length > 0) {
-    const riskyNames = risky.map((r) => {
-      const en = r.id ? ENGLISH_DIMENSION_NAMES[r.id] || r.id : r.name;
-      return `${r.name}（${en}）`;
-    });
-    lines.push(`⚠️ 风险预警（ ${risky.length} ）：${riskyNames.join("、")}`);
+    lines.push(`⚠️ 风险预警（${totalFindings}项）：${risky.map(formatRiskyAuditorName).join("、")}`);
+    lines.push("");
 
-    if (publicReaction) {
-      lines.push(`潜在舆论反应：${publicReaction}`);
-    }
+    const findingLines = risky.flatMap((r) =>
+      (r.findings || []).map((finding) => formatFindingBlockquote(finding)),
+    );
+    lines.push(...findingLines);
   }
 
   if (clean.length > 0) {
-    const cleanNames = clean.map((r) => {
-      const en = r.id ? ENGLISH_DIMENSION_NAMES[r.id] || r.id : r.name;
-      return `${r.name}（${en}）`;
-    });
-    lines.push(`✅ 合规：${cleanNames.join("、")}`);
+    if (lines.length > 0) lines.push("");
+    lines.push(`✅ 合规通过：${clean.map((r) => r.name).join(" · ")}`);
   }
 
   return lines.join("\n");
@@ -851,8 +815,8 @@ async function handleInventoryCheck(
 ): Promise<ToolResult> {
   // 初审结果摘要提示
   const preAuditSummary = state.preAuditReport?.summary
-    ? `【初审结果】\n${state.preAuditReport.summary}`
-    : "【初审结果】未找到系统审查员，跳过初审";
+    ? `初审结果\n\n${state.preAuditReport.summary}`
+    : "初审结果\n\n未找到系统审查员，跳过初审";
 
   if (personas.length === 0) {
     state.step = "waitingForPersonaCreation";

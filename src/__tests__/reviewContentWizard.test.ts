@@ -199,7 +199,8 @@ describe("handleReviewContentWizard state machine", () => {
     const text = textOf(started);
     assert.ok(text.includes("⚠️ 风险预警"));
     assert.ok(text.includes("本地规则引擎"));
-    assert.ok(text.includes("Local Rule Engine"));
+    assert.ok(text.includes("本地规则引擎（本地规则）"));
+    assert.ok(text.includes('> "粉耳"'));
 
     const sessionId = extractSessionId(text);
     const state = JSON.parse(
@@ -225,7 +226,8 @@ describe("handleReviewContentWizard state machine", () => {
     const text = textOf(started);
     assert.ok(text.includes("⚠️ 风险预警"));
     assert.ok(text.includes("暗语破译"));
-    assert.ok(text.includes("Network Culture"));
+    assert.ok(text.includes("暗语破译（网络文化）"));
+    assert.ok(text.includes('> "粉耳"'));
 
     const sessionId = extractSessionId(text);
     const state = JSON.parse(
