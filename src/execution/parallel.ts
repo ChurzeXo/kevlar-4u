@@ -16,6 +16,7 @@ import { ResultAggregator, checkBudget, generateAggregatedReport } from "./aggre
 import { logger } from "../utils/logger.js";
 import { getErrorInfo } from "../utils/observability.js";
 import { wrapContent } from "../utils/sanitize.js";
+import { buildKevlarRiskDirective } from "./riskPrompt.js";
 
 interface ParallelExecutionOptions {
   mode: ExecutionMode;
@@ -155,7 +156,10 @@ export function augmentSystemPrompt(
     parts.push(offensiveDirective);
   }
 
-  // ⑥ Tone constraint (last — constrains output style)
+  // ⑥ PRD red-team association method
+  parts.push(buildKevlarRiskDirective());
+
+  // ⑦ Tone constraint (last — constrains output style)
   if (persona.meta.tone) {
     const toneDirective = buildToneDirective(persona.meta.tone);
     if (toneDirective) {

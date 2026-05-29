@@ -5,7 +5,7 @@ import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
-import { DEFAULT_DIMENSIONS_CONFIG, type DimensionsConfig } from "../execution/dimensions.js";
+import { DEFAULT_DIMENSIONS_CONFIG, DEFENSIVE_DIMENSION_IDS, type DimensionsConfig } from "../execution/dimensions.js";
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
@@ -834,7 +834,7 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
           `targetPlatforms: ${state.targetPlatforms.join(", ") || "none"}`,
           `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
           `remainingPersonaIds: ${state.remainingPersonaIds.join(", ") || "none"}`,
-          `dimensions: defensive=4(system), offensive=${state.dimensions.offensive.length}`,
+          `dimensions: defensive=${DEFENSIVE_DIMENSION_IDS.length}(system), offensive=${state.dimensions.offensive.length}`,
           "```",
         ].join("\n"),
       },

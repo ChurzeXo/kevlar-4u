@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { IRuleRepository } from "./IRuleRepository.js";
-import type { AssociativeRule, RuleMeta, RulesData, RulesIndex } from "./types.js";
+import type { AssociationPattern, AssociativeRule, RuleCategory, RuleMeta, RulesData, RulesIndex } from "./types.js";
 import { logger } from "../utils/observability.js";
 
 /**
@@ -38,16 +38,12 @@ export class LocalJsonRuleRepository implements IRuleRepository {
 
       const exactBlacklist = new Set<string>();
       const associativeMap = new Map<string, { category: string; rule: AssociativeRule }>();
+      const variantMap = new Map<string, { category: string; rule: AssociativeRule }>();
+      const associationPatterns = data.core_rules?.association_patterns ?? [];
+      const evolutionStrategies = data.core_rules?.evolution_strategies ?? [];
 
-      for (const [categoryName, category] of Object.entries(data.categories)) {
-        if (!category.enabled) continue;
-        for (const rule of category.associative_map) {
-          associativeMap.set(`${categoryName}::${rule.root}`, { category: categoryName, rule });
-          for (const variant of rule.variants) {
-            exactBlacklist.add(variant);
-          }
-          exactBlacklist.add(rule.root);
-        }
+      for (const [categoryName, category] of Object.entries(normalizeRulesData(data))) {
+        indexCategory(categoryName, category, exactBlacklist, associativeMap, variantMap);
       }
 
       // Phase 2: if an encrypted remote feed file exists, decrypt and merge
@@ -58,13 +54,8 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         if (decrypted) {
           try {
             const remoteData: RulesData = JSON.parse(decrypted);
-            for (const [catName, cat] of Object.entries(remoteData.categories)) {
-              if (!cat.enabled) continue;
-              for (const rule of cat.associative_map) {
-                associativeMap.set(`${catName}::${rule.root}`, { category: catName, rule });
-                for (const variant of rule.variants) exactBlacklist.add(variant);
-                exactBlacklist.add(rule.root);
-              }
+            for (const [catName, cat] of Object.entries(normalizeRulesData(remoteData))) {
+              indexCategory(catName, cat, exactBlacklist, associativeMap, variantMap);
             }
             logger.info("Rules enriched from remote feed", { event: "rules_remote_merged" });
           } catch {
@@ -76,10 +67,13 @@ export class LocalJsonRuleRepository implements IRuleRepository {
       this.index = {
         exactBlacklist,
         associativeMap,
+        variantMap,
+        associationPatterns,
+        evolutionStrategies,
         meta: {
-          version: data.version,
-          last_updated: data.last_updated,
-          categories: Object.keys(data.categories),
+          version: data.version ?? "1.0.0",
+          last_updated: data.last_updated ?? "",
+          categories: Object.keys(normalizeRulesData(data)),
         },
         loadedAt: Date.now(),
       };
@@ -112,13 +106,16 @@ export class LocalJsonRuleRepository implements IRuleRepository {
 
   resolveVariant(variant: string): Array<{ category: string; rule: AssociativeRule }> {
     if (!this.index) return [];
-    const results: Array<{ category: string; rule: AssociativeRule }> = [];
-    for (const [, entry] of this.index.associativeMap) {
-      if (entry.rule.variants.includes(variant) || entry.rule.root === variant) {
-        results.push(entry);
-      }
+    const exact = this.index.variantMap.get(variant);
+    if (exact) return [exact];
+
+    const normalized = normalizeConfusableVariant(variant);
+    if (normalized !== variant) {
+      const fuzzy = this.index.variantMap.get(normalized);
+      if (fuzzy) return [fuzzy];
     }
-    return results;
+
+    return [];
   }
 
   async getMeta(): Promise<RuleMeta> {
@@ -141,4 +138,83 @@ export class LocalJsonRuleRepository implements IRuleRepository {
     });
     return false;
   }
+}
+
+function normalizeRulesData(data: RulesData): Record<string, RuleCategory> {
+  if (data.categories) return data.categories;
+  if (!data.core_rules) return {};
+
+  const patternRiskType = new Map(
+    data.core_rules.association_patterns.map((p) => [p.pattern, p.risk_type])
+  );
+  const defaultRiskType = data.core_rules.association_patterns[0]?.risk_type ?? "网络文化误读";
+
+  return {
+    core: {
+      enabled: true,
+      weight: 1,
+      associative_map: data.core_rules.risk_roots.map((root) => {
+        const variants = expandVariants(root.word, root.variants_check);
+        const riskType = root.risk_type ?? inferRiskType(root.word, patternRiskType, defaultRiskType);
+        return {
+          root: root.word,
+          variants,
+          misinterpret_direction: riskType,
+          severity: riskType.includes("涉黄") ? "HIGH" : "MEDIUM",
+          base_score: riskType.includes("涉黄") ? 0.85 : 0.65,
+          suggestion: root.suggestion ?? "保留正常语境限定；如用于食材、花草等正常表达，补充品类说明以降低误读。",
+        };
+      }),
+    },
+  };
+}
+
+function expandVariants(root: string, modifiers: string[]): string[] {
+  const variants = new Set<string>([root]);
+  const suffix = root.slice(1);
+
+  for (const modifier of modifiers) {
+    if (!modifier) continue;
+    variants.add(`${modifier}${root}`);
+    if (suffix) variants.add(`${modifier}${suffix}`);
+  }
+
+  return [...variants];
+}
+
+function inferRiskType(
+  word: string,
+  patternRiskType: Map<string, string>,
+  fallback: string
+): string {
+  if (["木耳", "菊花"].includes(word)) return "涉黄风险";
+  return patternRiskType.get("食材+异常修饰") ?? fallback;
+}
+
+function indexCategory(
+  categoryName: string,
+  category: RuleCategory,
+  exactBlacklist: Set<string>,
+  associativeMap: Map<string, { category: string; rule: AssociativeRule }>,
+  variantMap: Map<string, { category: string; rule: AssociativeRule }>
+): void {
+  if (!category.enabled) return;
+  for (const rule of category.associative_map) {
+    const entry = { category: categoryName, rule };
+    associativeMap.set(`${categoryName}::${rule.root}`, entry);
+    variantMap.set(rule.root, entry);
+    exactBlacklist.add(rule.root);
+    for (const variant of rule.variants) {
+      exactBlacklist.add(variant);
+      variantMap.set(variant, entry);
+    }
+  }
+}
+
+function normalizeConfusableVariant(variant: string): string {
+  const confusables: Record<string, string> = {
+    局: "菊",
+  };
+
+  return [...variant].map((ch) => confusables[ch] ?? ch).join("");
 }

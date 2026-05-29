@@ -12,6 +12,7 @@ import type { Persona } from "../../utils/parser.js";
 import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, DEFENSIVE_DIMENSION_IDS, RST_ARCHETYPES, RST_TRIGGERS, RST_REGIONAL_PACKS, RST_PLATFORM_CULTURES } from "../dimensions.js";
 import { transformFindingsToFocusTopics, formatFocusTopicsForPrompt } from "../focusTopicTransform.js";
 import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
+import { buildKevlarRiskDirective, buildPseudoParallelDirective } from "../riskPrompt.js";
 
 const MODE: ExecutionMode = "orchestration";
 
@@ -61,6 +62,8 @@ function buildOrchestrationPrompt(
   const dimensionCriteria = buildDimensionCriteriaInstructions(dimensionsConfig);
   const defensiveCount = DEFENSIVE_DIMENSION_IDS.length;
   const offensiveCount = dimensionsConfig.offensive.length;
+  const riskDirective = buildKevlarRiskDirective();
+  const pseudoParallelDirective = buildPseudoParallelDirective(personas);
 
   let reportContext = "";
   if (preAuditReport && preAuditReport.dimensions && preAuditReport.dimensions.length > 0) {
@@ -88,6 +91,14 @@ ${reportContext}
 这是一个低隔离降级方案：Kevlar-4u（评论区模拟器）会把所有人设和待评测内容组织成单次 Prompt，交由宿主 AI 协助完成。它不等价于 MCP Sampling 或 Direct API 的真实并行多智能体执行。
 
 请尽力按以下 **${personas.length} 个评审员** 分段模拟评测，并避免人格串味。每个人设必须只用自己的视角阅读内容，不受其他人设影响。
+
+---
+
+${riskDirective}
+
+---
+
+${pseudoParallelDirective}
 
 ---
 
@@ -234,6 +245,10 @@ ${personaContextDirective}
 ${rstSection}
 
 ${offensiveDirective ? `\n---\n\n${offensiveDirective}` : ""}
+
+---
+
+${buildKevlarRiskDirective()}
 
 **待评审内容**：
 ${safeContent}${contextSection}${focusTopicsSection}${reportContext}

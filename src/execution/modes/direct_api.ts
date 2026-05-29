@@ -284,7 +284,7 @@ async function executePersonaReview(
 
   const response = await callApi(keyInfo, {
     model: process.env.KEVLAR_MODEL || "",
-    system: augmentSystemPrompt(persona, dimensions),
+    system: augmentSystemPrompt(persona, dimensions, preAuditReport),
     messages: [{ role: "user", content: userMessage }],
     maxTokens: 4096,
     temperature: 0.7,

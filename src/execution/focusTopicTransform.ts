@@ -29,6 +29,32 @@ export interface FocusTopic {
 // and returns a natural-language Focus Topic prompt.
 
 type TranslationFn = (keyword: string, riskDescription: string) => string;
+type MatrixTranslationFn = (paragraph: string, finding: any) => string;
+
+const AUDITOR_ID_ALIASES: Record<string, string> = {
+	social_risk_ethics: "social_risk",
+};
+
+const SYSTEM_AUDITOR_LABELS: Record<string, string> = {
+	social_risk: "社会风险与群体伦理",
+	legal_compliance: "合规与法律红线",
+	context_distortion: "语境脱嵌与恶意曲解",
+	factual_integrity: "事实硬伤与常识背离",
+	network_culture_risk: "网络文化风险",
+};
+
+const MATRIX_TRANSLATION_MAP: Record<string, MatrixTranslationFn> = {
+	social_risk: (paragraph) =>
+		`该文本在初审中被检测出在第 ${paragraph} 段可能存在“因谐音、擦边表达或群体措辞引发特定群体反感”的隐患。请根据你的立场，严厉审视该段落是否让你感到被冒犯或不适。`,
+	legal_compliance: (paragraph) =>
+		`该文本在初审中被检测出在第 ${paragraph} 段存在“过度包装、吹嘘功能”的嫌疑。请以你刻薄、理性的视角，死磕该段落是否在“画饼”或缺乏事实依据。`,
+	context_distortion: (paragraph) =>
+		`该文本在第 ${paragraph} 段的表达极易被脱离上下文单独截图。请模拟恶意网友的放大镜思维，测试能否将该段话歪曲为“精英阶层的傲慢说教”。`,
+	factual_integrity: (paragraph) =>
+		`该文本在第 ${paragraph} 段的推论存在逻辑漏洞。请发挥你找茬的本能，把这个逻辑死角揪出来，并用最直接的语言进行尖锐吐槽。`,
+	network_culture_risk: (paragraph) =>
+		`该文本在第 ${paragraph} 段疑似使用了未脱敏的网络黑话或烂梗。请站在你的圈层视角，审查作者是否在“盲目蹭热度”，并给出你的排斥性评论。`,
+};
 
 const TRANSLATION_MAP: Record<string, TranslationFn> = {
 	// legal_compliance + overhyped
@@ -122,34 +148,26 @@ export function transformFindingsToFocusTopics(
 	for (const dimension of preAuditReport.dimensions) {
 		if (!dimension.findings?.length) continue;
 
-		const auditorId = dimension.id || dimension.auditorId || "";
+		const auditorId = normalizeAuditorId(dimension.id || dimension.auditorId || "");
 		const auditorName = dimension.name || auditorId;
 
-		for (const finding of dimension.findings) {
+		for (let index = 0; index < dimension.findings.length; index++) {
+			const finding = dimension.findings[index];
 			// Step 1: Filter — check if any of the reviewer's triggers match this finding
 			const matchedTrigger = findMatchingTrigger(auditorId, finding, activeTriggers);
 			if (!matchedTrigger) continue;
 
 			// Step 2: Translate — convert to natural language
-			const triggerDef = RST_TRIGGERS[matchedTrigger];
-			const templateKey = `${auditorId}:${matchedTrigger}`;
-			const template = TRANSLATION_MAP[templateKey];
-
-			let prompt: string;
-			if (template) {
-				prompt = template(finding.keyword || finding.dimension || "", finding.riskDescription || finding.description || "");
-			} else {
-				prompt = fallbackTemplate(auditorName, finding.keyword || finding.dimension || "");
-			}
+			const prompt = translateFinding(auditorId, auditorName, finding, index, matchedTrigger);
 
 			// Step 3: Persona Adapt — adjust tone based on archetype
-			prompt = adaptToneToArchetype(prompt, rst);
+			const adaptedPrompt = adaptToneToArchetype(prompt, rst);
 
 			focusTopics.push({
 				sourceAuditor: auditorName,
 				sourceKeyword: finding.keyword || finding.dimension || "",
 				matchedTrigger,
-				prompt,
+				prompt: adaptedPrompt,
 			});
 		}
 	}
@@ -183,6 +201,54 @@ function findMatchingTrigger(
 		return triggerId;
 	}
 	return undefined;
+}
+
+function normalizeAuditorId(auditorId: string): string {
+	return AUDITOR_ID_ALIASES[auditorId] || auditorId;
+}
+
+function translateFinding(
+	auditorId: string,
+	auditorName: string,
+	finding: any,
+	findingIndex: number,
+	matchedTrigger: TriggerId,
+): string {
+	const paragraph = resolveParagraphLabel(finding, findingIndex);
+	const matrixTemplate = MATRIX_TRANSLATION_MAP[auditorId];
+	if (matrixTemplate) {
+		return matrixTemplate(paragraph, finding);
+	}
+
+	const templateKey = `${auditorId}:${matchedTrigger}`;
+	const template = TRANSLATION_MAP[templateKey];
+	if (template) {
+		return template(finding.keyword || finding.dimension || "", finding.riskDescription || finding.description || "");
+	}
+
+	return fallbackTemplate(SYSTEM_AUDITOR_LABELS[auditorId] || auditorName, finding.keyword || finding.dimension || "");
+}
+
+function resolveParagraphLabel(finding: any, findingIndex: number): string {
+	const candidates = [
+		finding.paragraph,
+		finding.paragraphNo,
+		finding.paragraphNumber,
+		finding.paragraphIndex,
+		finding.section,
+	];
+
+	for (const candidate of candidates) {
+		if (candidate === undefined || candidate === null || candidate === "") continue;
+		const numeric = Number(candidate);
+		if (Number.isFinite(numeric)) {
+			const value = String(Math.max(1, Math.trunc(numeric)));
+			return value;
+		}
+		return String(candidate);
+	}
+
+	return String(findingIndex + 1);
 }
 
 /**
@@ -219,18 +285,19 @@ export function formatFocusTopicsForPrompt(topics: FocusTopic[]): string {
 	if (!topics.length) return "";
 
 	const lines = [
-		"## 🎯 复审焦点（来自初审）",
+		"# 🎯 狙击手定点复审焦点（核心优化注入点）",
 		"",
-		"以下是初审中发现的、可能与你的视角相关的要点，请在评论时关注这些方面：",
+		"系统在文本雷达扫描中发现了以下可疑点，请你作为狙击手，执行定向抗压测试：",
 		"",
 	];
 
 	for (let i = 0; i < topics.length; i++) {
-		lines.push(`${i + 1}. ${topics[i].prompt}`);
+		lines.push(`> 旁白提示 ${i + 1}：${topics[i].prompt}`);
 	}
 
 	lines.push("");
-	lines.push("以上仅为参考提示，你可以根据自己的判断决定是否深入评论。");
+	lines.push("# 专项执行指令");
+	lines.push("请你重点审视上述【旁白提示】中提及的段落。如果它触动了你的神经，请不要客气，直接一针见血地指出创作者的“装腔作势”或“盲点”，并给出你最真实的吐槽。");
 
 	return lines.join("\n");
 }

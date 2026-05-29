@@ -14,7 +14,8 @@ export type DefensiveDimensionId =
 	| "social_risk_ethics"
 	| "legal_compliance"
 	| "context_distortion"
-	| "factual_integrity";
+	| "factual_integrity"
+	| "network_culture_risk";
 
 export type OffensiveDimensionId =
 	| "hook_retention"
@@ -133,6 +134,24 @@ export const DIMENSIONS: Record<DimensionId, DimensionDefinition> = {
 			green: "事实论据可验证、数据有出处、因果推理逻辑成立；无非专业领域常识错误",
 			yellow: "存在可修正的事实问题——数据未更新但非核心论点；个别用词不精确但可推断真实意图；因果推理存在跳跃但不构成逻辑硬伤",
 			red: "存在根本性事实错误——数据造假或严重失实；常识性错误；伪科普伪功效；因果谬误构成内容核心论点的基础",
+		},
+	},
+
+	network_culture_risk: {
+		id: "network_culture_risk",
+		layer: "defensive",
+		label: "网络文化风险",
+		description: "审查内容是否存在黑话撞车、圈层烂梗、粉圈冲突暗语或跨平台语境误读",
+		sentinelPoints: [
+			"黑话撞车与亚文化用语滥用",
+			"谐音、缩写、数字暗语、Emoji 组合等隐晦表达",
+			"粉圈冲突与圈层排斥性暗语",
+			"跨平台语境差异导致的误读或嘲讽风险",
+		],
+		criteria: {
+			green: "内容未使用高风险网络黑话或圈层暗语；表达在主流平台语境下清晰、稳定，不易被误读为蹭梗或冒犯",
+			yellow: "存在网络流行语、圈层梗或缩写表达，可能被部分用户解读为跟风、蹭热度或语境不稳，但尚可通过改写脱敏",
+			red: "明确命中特定圈层黑话、侮辱性谐音/缩写、粉圈冲突暗语或高风险烂梗，容易引发群体嘲讽、抵制或平台风险",
 		},
 	},
 
@@ -266,6 +285,7 @@ export const DEFENSIVE_DIMENSION_IDS: DefensiveDimensionId[] = [
 	"legal_compliance",
 	"context_distortion",
 	"factual_integrity",
+	"network_culture_risk",
 ];
 
 // ── Offensive dimension IDs (all, user-selectable) ──────────────────────────
@@ -416,7 +436,7 @@ export function buildDefensiveSystemDirective(): string {
 	const defensiveDefs = DEFENSIVE_DIMENSION_IDS.map(id => DIMENSIONS[id]);
 
 	let directive = "## 🛡️ 防御性风险评估（系统强制指令——必须执行）\n\n";
-	directive += "以下四项防御性维度是系统强制要求的审查项，不论你的角色定位如何，都必须对内容进行这四项评估，不可跳过：\n\n";
+	directive += `以下 ${defensiveDefs.length} 项防御性维度是系统强制要求的审查项，不论你的角色定位如何，都必须对内容进行这些评估，不可跳过：\n\n`;
 
 	for (const dim of defensiveDefs) {
 		directive += `### ${dim.label}\n\n`;
@@ -437,7 +457,7 @@ export function buildDefensiveSystemDirective(): string {
 		directive += `- 🔴 ${dim.criteria.red}\n\n`;
 	}
 
-	directive += "请在你的评审结果中明确包含上述四项防御性评估的结论。\n";
+	directive += `请在你的评审结果中明确包含上述 ${defensiveDefs.length} 项防御性评估的结论。\n`;
 
 	return directive;
 }

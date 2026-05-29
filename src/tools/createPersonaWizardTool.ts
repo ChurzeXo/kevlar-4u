@@ -1198,9 +1198,9 @@ const EXTRACTION_CONFIG: Record<string, ExtractFieldConfig> = {
 输出：
 {"traits":["挑剔 → 因此当内容有明显瑕疵时，会毫不留情地指出","毒舌 → 因此当内容平庸时会用讽刺语气回应","真诚 → 因此当内容确实优秀时，会给出发自内心的赞美"],"assistantMessage":"已总结为3条性格特质。"}
 
-输入：「#拒绝黑话 #注意力极短 #实用主义 #寻找舆论雷区」
+输入：「#拒绝黑话 #注意力极短 #实用主义 #放大争议点」
 输出：
-{"traits":["拒绝黑话 → 因此当遇到术语堆砌或含糊其辞时会直接质疑","注意力极短 → 因此当内容冗长或铺垫过多时会迅速跳过","实用主义 → 因此当内容缺乏可操作信息时会表达不满","寻找舆论雷区 → 因此当触碰敏感话题时会主动追击并放大争议"],"assistantMessage":"已从标签中提取4条性格特质。"}`,
+{"traits":["拒绝黑话 → 因此当遇到术语堆砌或含糊其辞时会直接质疑","注意力极短 → 因此当内容冗长或铺垫过多时会迅速跳过","实用主义 → 因此当内容缺乏可操作信息时会表达不满","放大争议点 → 因此当触碰敏感话题时会主动追击并放大争议"],"assistantMessage":"已从标签中提取4条性格特质。"}`,
     emptyLabel: "性格特质",
     fallbackLabel: "性格特质",
     formatFallbackItems: (items: string[]) => `我帮你总结为以下性格特质：\n${items.map((t) => `- ${t}`).join("\n")}`,
@@ -1347,7 +1347,7 @@ async function inferFinalFields(
         `输出：`,
         `{"personaName":"赛博咸鱼","gender":"男","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略非技术用户的使用体验和情感诉求，对感性表达缺乏共鸣","behaviorHints":{"ageRange":"你会以30-35岁的职场经验审视内容的实用性，对空洞鸡汤类内容天然免疫","gender":"你会从男性视角关注内容中是否有过度简化性别议题的倾向","tags":"你对科技和AI领域有专业判断力，能识别伪技术噱头和过度包装","culturalContext":"你习惯大陆互联网语境，对海外视角的内容会自动做本地化映射","perspective":"这是你的核心审视角度，会让你对所有涉及逻辑和事实的内容更严格","blindSpot":"遇到需要情感共鸣而非逻辑论证的内容时你应坦诚标注盲区","authorRelation":"你会以这说法经不经得起推敲的标准审视内容的可信度"}}`,
         ``,
-        `已确认字段：{"ageRange":"25-30岁","platform":"小红书","interests":["科技","理财","游戏"],"traits":["拒绝黑话 → 因此当遇到术语堆砌时会直接质疑","注意力极短 → 因此当内容冗长时会迅速跳过","实用主义 → 因此当内容缺乏可操作信息时会表达不满","政治正确 → 因此当触碰敏感话题时会主动追击","寻找舆论雷区 → 因此当发现争议点时会放大讨论"],"tone":["语速快、没耐心、大白话、直戳痛点"],"dimensionBias":{"perspective":"关注商业表达、营销语言与消费真实性的商业观察视角；同时具备强调个体表达、价值一致性与真实感受的独立思考视角"}}`,
+        `已确认字段：{"ageRange":"25-30岁","platform":"小红书","interests":["科技","理财","游戏"],"traits":["拒绝黑话 → 因此当遇到术语堆砌时会直接质疑","注意力极短 → 因此当内容冗长时会迅速跳过","实用主义 → 因此当内容缺乏可操作信息时会表达不满","政治正确 → 因此当触碰敏感话题时会主动追击","放大争议点 → 因此当发现争议点时会放大讨论"],"tone":["语速快、没耐心、大白话、直戳痛点"],"dimensionBias":{"perspective":"关注商业表达、营销语言与消费真实性的商业观察视角；同时具备强调个体表达、价值一致性与真实感受的独立思考视角"}}`,
         `输出：`,
         `{"personaName":"暴躁韭菜","gender":"男","culturalContext":"中国大陆互联网文化语境","blindSpot":"可能忽略需要长期投入才能见效的内容，对情感共鸣类内容缺乏耐心，容易因追求爽感而错过深度价值","behaviorHints":{"ageRange":"你会以25-30岁的消费经验审视内容的实用价值，对画饼类内容天然反感","gender":"你会从男性视角关注内容中是否有消费主义陷阱和虚假承诺","tags":"你对科技理财游戏领域有实操经验，能识别伪专业和纸上谈兵","culturalContext":"你习惯大陆互联网语境，对需要文化背景转换的内容会有距离感","perspective":"这是你的核心审视角度，会让你对所有涉及商业话术和消费诱导的内容更警觉","blindSpot":"遇到需要情感共鸣而非实用信息的内容时你应坦诚标注盲区","authorRelation":"你会以这东西值不值得我花时间看的标准审视内容的可信度"}}`,
         ``,
@@ -1967,7 +1967,7 @@ async function buildFinalConfirmationMessage(state: WizardState, skillsDir: stri
     `- ${t("wizard.platform", { ns: "wizard", defaultValue: "常用平台" })}：${fields.platform || ""}（${t("wizard.userInput", { ns: "wizard", defaultValue: "用户输入" })}）`,
     `- ${t("wizard.culturalContext", { ns: "wizard", defaultValue: "文化背景" })}：${culturalContext}（${t("wizard.aiInferred", { ns: "wizard", defaultValue: "AI 推断" })}）`,
     `- ${t("wizard.perspective", { ns: "wizard", defaultValue: "审视视角" })}：${perspectiveLabel}（${t("wizard.userSelected", { ns: "wizard", defaultValue: "用户选择" })}）${focusDimLabel}`,
-    `- ${t("wizard.blindSpot", { ns: "wizard", defaultValue: "盲区" })}：${blindSpotLabel}（${t("wizard.aiInferred", { ns: "wizard", defaultValue: "AI 推断" })}）`,
+    `- 视角边界：${blindSpotLabel}（${t("wizard.aiInferred", { ns: "wizard", defaultValue: "AI 推断" })}）`,
     "",
     `${t("wizard.personalityTraits", { ns: "wizard", defaultValue: "性格特质：" })}`,
   );
@@ -1987,8 +1987,19 @@ async function buildFinalConfirmationMessage(state: WizardState, skillsDir: stri
   if (locale === "zh-CN") {
     lines.push(
       "",
+      "💡 填写提示：您可以输入或调整该评审员所代表的具体特定群体、消费观念或视角风格，以便 AI 在接下来的复审中进行精准的定点舆论模拟。",
+      "示例：注重传统文化认同、关注国货发展与民族自豪感的本土消费者视角",
+      "示例：看重平等沟通、倡导务实坦诚、拒绝高高在上说教的职场人视角",
+      "示例：倡导现代独立视角、对社会议题与文本措辞高度敏感的女性群体视角",
+      "示例：重视逻辑严密性、对文本细节与群体刻板印象高度敏感的男性群体视角",
+      "示例：立场保持中立，容易受到公共舆论与评论区环境影响的大众路人视角",
+      "示例：追求独立思考与社会公义，崇尚个性表达，反感盲从的理想主义者视角",
+      "示例：熟悉商业营销套路、消费观念极其理性、看重产品核心价值的硬核观察者视角",
+      "示例：推崇传统家庭观念、注重代际和谐与稳健务实的传统文化守望者视角",
+      "示例：专注于特定兴趣圈层、对垂直小众生态与粉丝文化了如指掌的核心玩家视角",
+      "",
       "------------------------",
-      "如需修改，请直接说：名字改成... / 性别改成... / 年龄段改成... / 兴趣方向改成... / 性格特质改成... / 讲话语气改成... / 平台改成... / 关系改成... / 视角改成... / 盲区改成... / 文化背景改成...",
+      "如需修改，请直接说：名字改成... / 性别改成... / 年龄段改成... / 兴趣方向改成... / 性格特质改成... / 讲话语气改成... / 平台改成... / 关系改成... / 视角改成... / 视角边界改成... / 文化背景改成...",
       "确认无误请回复：确认创建",
     );
   } else {
@@ -2015,7 +2026,7 @@ function detectModifiedField(input: string): DraftField | undefined {
   }
   if (/关系|关注|作者/.test(input)) return "authorRelation";
   if (/视角|立场|态度/.test(input)) return "perspective";
-  if (/盲区|盲点/.test(input)) return "blindSpot";
+  if (/视角边界|盲区|盲点/.test(input)) return "blindSpot";
   if (/文化背景|文化/.test(input)) return "culturalContext";
   return undefined;
 }
@@ -2035,7 +2046,7 @@ function extractModificationValue(input: string, field: DraftField): string {
     platform: /常用平台|平台|渠道/g,
     authorRelation: /与作者的关系|关系|关注/g,
     perspective: /审视视角|视角|立场|态度/g,
-    blindSpot: /盲区|盲点/g,
+    blindSpot: /视角边界|盲区|盲点/g,
     culturalContext: /文化背景|文化/g,
   };
   const cleaned = trimmed
@@ -2058,7 +2069,7 @@ function fieldLabel(field: DraftField): string {
     platform: "常用平台",
     authorRelation: "与作者的关系",
     perspective: "审视视角",
-    blindSpot: "盲区",
+    blindSpot: "视角边界",
     culturalContext: "文化背景",
   };
   return labels[field];
