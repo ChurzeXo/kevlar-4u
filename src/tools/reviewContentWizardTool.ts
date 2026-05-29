@@ -326,14 +326,17 @@ async function handleSystemAudit(
     (r as any).level = dimLevel;
   }
 
-  const allFindings = mergedResults.flatMap(r => r.findings || []);
-  const publicReaction = samplingFn
-    ? await generatePublicReaction(state.content, allFindings, samplingFn)
-    : undefined;
+  // Phase 2: Cross-validate risky dimensions (silent, no user-facing output)
+  const crossValidatedResults = await crossValidateRiskyDimensions(
+    state.content, mergedResults, systemAuditors, samplingFn
+  );
+
+  const allFindings = crossValidatedResults.flatMap(r => r.findings || []);
+  const publicReaction = await generatePublicReaction(state.content, allFindings, samplingFn);
 
   state.preAuditReport = {
-    dimensions: mergedResults,
-    summary: summarizePreAuditResults(mergedResults, publicReaction),
+    dimensions: crossValidatedResults,
+    summary: summarizePreAuditResults(crossValidatedResults, publicReaction),
   };
   state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
   state.step = "checkPersonaInventory";
@@ -535,6 +538,97 @@ function getFindingsLevel(findings: any[]): string {
     if (finding.suggestedLevel === "🟡") level = "🟡";
   }
   return level;
+}
+
+// ── Phase 2: Cross-validation for risky dimensions ──
+
+interface CrossValidationPair {
+  source: string;      // auditor that found the risk
+  validator: string;   // auditor that validates it
+  question: string;    // what to ask the validator
+}
+
+const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
+  {
+    source: "network_culture_risk",
+    validator: "context_distortion",
+    question: "以下内容被「暗语破译」标记为网络文化风险。请从「语境脱嵌」角度验证：这些风险点脱离原始语境后，是否真的容易被断章取义或恶意曲解？请只输出 JSON。",
+  },
+  {
+    source: "context_distortion",
+    validator: "network_culture_risk",
+    question: "以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度验证：这些风险点是否确实在特定网络社区有恶意含义？请只输出 JSON。",
+  },
+];
+
+async function crossValidateRiskyDimensions(
+  content: string,
+  phase1Results: Array<{ id: string; name: string; findings: any[]; level?: string }>,
+  auditors: Persona[],
+  samplingFn: MultiTurnSamplingFunction
+): Promise<Array<{ id: string; name: string; findings: any[]; level?: string }>> {
+  const riskyDimensions = phase1Results.filter(r => r.findings && r.findings.length > 0);
+  if (riskyDimensions.length === 0) return phase1Results;
+
+  const validatorMap = new Map(auditors.map(a => [a.meta.id, a]));
+  const results = [...phase1Results.map(r => ({ ...r, findings: [...r.findings] }))];
+
+  for (const pair of CROSS_VALIDATION_PAIRS) {
+    const sourceDim = riskyDimensions.find(r => r.id === pair.source);
+    if (!sourceDim || sourceDim.findings.length === 0) continue;
+
+    const validatorAuditor = validatorMap.get(pair.validator);
+    if (!validatorAuditor) continue;
+
+    const findingsSummary = sourceDim.findings.map((f, i) =>
+      `${i + 1}. [${f.suggestedLevel}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`
+    ).join("\n");
+
+    try {
+      const response = await samplingFn({
+        systemPrompt: validatorAuditor.systemPrompt,
+        messages: [{
+          role: "user",
+          content: [
+            pair.question,
+            "",
+            `原始内容：${content}`,
+            "",
+            `「${sourceDim.name}」的发现：`,
+            findingsSummary,
+          ].join("\n"),
+        }],
+        maxTokens: 1024,
+      });
+
+      const parsed = JSON.parse(stripCodeFence(response.content.trim()));
+      const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
+
+      // Merge validated findings into the validator's dimension
+      const validatorDim = results.find(r => r.id === pair.validator);
+      if (validatorDim && validatedFindings.length > 0) {
+        for (const vf of validatedFindings) {
+          // Only add if not already present (dedup by keyword)
+          const exists = validatorDim.findings.some(
+            (existing: any) => existing.keyword === vf.keyword
+          );
+          if (!exists) {
+            validatorDim.findings.push(vf);
+          }
+        }
+        validatorDim.level = getFindingsLevel(validatorDim.findings);
+      }
+    } catch (err) {
+      logger.warn("Cross-validation failed", {
+        event: "cross_validation_failed",
+        source: pair.source,
+        validator: pair.validator,
+        error: getErrorInfo(err).message,
+      });
+    }
+  }
+
+  return results;
 }
 
 const ENGLISH_DIMENSION_NAMES: Record<string, string> = {
