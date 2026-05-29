@@ -297,12 +297,15 @@ async function handleSystemAudit(
   if (!caller) {
     if (process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK === "1") {
       const results = normalizePreAuditDimensions(
-        mergeLocalFindingsIntoAudits(systemAuditors.map((auditor) => ({
-          id: auditor.meta.id,
-          name: auditor.meta.name,
-          findings: [],
-          level: "🟢",
-        })), localFindings),
+        mergeLocalFindingsIntoAudits(
+          systemAuditors.map((auditor) => ({
+            id: auditor.meta.id,
+            name: auditor.meta.name,
+            findings: [],
+            level: "🟢",
+          })),
+          localFindings,
+        ),
         systemAuditors,
       );
       state.preAuditReport = { dimensions: results, summary: summarizePreAuditResults(results) };
@@ -314,10 +317,7 @@ async function handleSystemAudit(
 
     state.step = "waitingForOrchestrationAudit";
     await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      buildSystemAuditOrchestrationPrompt(state.content, systemAuditors, localFindings),
-    );
+    return toolResponse(state, buildSystemAuditOrchestrationPrompt(state.content, systemAuditors, localFindings));
   }
 
   try {
@@ -334,10 +334,7 @@ async function handleSystemAudit(
     });
     state.step = "waitingForOrchestrationAudit";
     await saveState(tmpDir, state);
-    return toolResponse(
-      state,
-      buildSystemAuditOrchestrationPrompt(state.content, systemAuditors, localFindings),
-    );
+    return toolResponse(state, buildSystemAuditOrchestrationPrompt(state.content, systemAuditors, localFindings));
   }
 }
 
@@ -421,9 +418,10 @@ async function handleOrchestrationAuditResult(
     const dimensions = normalizePreAuditDimensions(parsed.dimensions, []);
     state.preAuditReport = {
       dimensions,
-      summary: typeof parsed.summary === "string" && parsed.summary.trim()
-        ? parsed.summary.trim()
-        : summarizePreAuditResults(dimensions),
+      summary:
+        typeof parsed.summary === "string" && parsed.summary.trim()
+          ? parsed.summary.trim()
+          : summarizePreAuditResults(dimensions),
     };
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
@@ -459,10 +457,9 @@ function normalizePreAuditDimensions(raw: unknown, systemAuditors: Persona[]): P
   for (const item of source) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
-    const id = typeof record.id === "string" && record.id.trim() ? record.id.trim() : `dimension_${normalized.length + 1}`;
-    const name = typeof record.name === "string" && record.name.trim()
-      ? record.name.trim()
-      : auditorMeta.get(id) || id;
+    const id =
+      typeof record.id === "string" && record.id.trim() ? record.id.trim() : `dimension_${normalized.length + 1}`;
+    const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : auditorMeta.get(id) || id;
     const findings = Array.isArray(record.findings) ? record.findings : [];
     const cleanedFindings = findings
       .filter((finding) => finding && typeof finding === "object")
@@ -518,9 +515,10 @@ async function finalizePreAuditReport(
     const dimensions = normalizePreAuditDimensions(parsed.dimensions, systemAuditors);
     return {
       dimensions,
-      summary: typeof parsed.summary === "string" && parsed.summary.trim()
-        ? parsed.summary.trim()
-        : summarizePreAuditResults(dimensions),
+      summary:
+        typeof parsed.summary === "string" && parsed.summary.trim()
+          ? parsed.summary.trim()
+          : summarizePreAuditResults(dimensions),
     };
   } catch (err) {
     logger.warn("Pre-audit finalizer failed, using deterministic summary", {
@@ -537,27 +535,26 @@ function buildPreAuditFinalizerPrompt(systemAuditors: Persona[]): string {
     "你将收到：本地规则结果、5 个 system_auditor 的初审结果、交叉复核后的结果。",
     "你的任务是合并重复风险、保留最高风险等级、补齐缺失审查维度，并输出标准 JSON。",
     "不得输出 Markdown、解释或思考过程，只能输出合法 JSON。",
-    "summary 只能描述发现的风险，不得包含任何修改建议、优化方案或操作指引。",
     "每个 finding 必须保留或生成 keyword、trigger、riskDescription、propagationRisk、suggestedLevel 字段。suggestedLevel 只能是 🔴 或 🟡。",
     "每个 dimension 必须包含 id、name、findings、level。level 必须是 🔴/🟡/🟢。",
     "必须包含以下系统审查员维度：",
     ...systemAuditors.map((auditor) => `- ${auditor.meta.id} / ${auditor.meta.name}`),
     "输出格式：",
-    '{"dimensions":[{"id":"legal_compliance","name":"合规哨兵","findings":[],"level":"🟢"}],"summary":"面向用户展示的中文初审摘要"}',
+    '{"dimensions":[{"id":"legal_compliance","name":"合规哨兵","findings":[],"level":"🟢"}],"summary":"面向用户展示的初审摘要"}',
   ].join("\n");
 }
 
-function buildSystemAuditOrchestrationPrompt(
-  content: string,
-  systemAuditors: Persona[],
-  localFindings: any[],
-): string {
-  const auditorMatrix = systemAuditors.map((auditor, index) => [
-    `### ${index + 1}. ${auditor.meta.id} / ${auditor.meta.name}`,
-    `职责摘要：${auditor.meta.description}`,
-    "核心技能：",
-    stripAuditorPromptForOrchestration(auditor.systemPrompt),
-  ].join("\n")).join("\n\n");
+function buildSystemAuditOrchestrationPrompt(content: string, systemAuditors: Persona[], localFindings: any[]): string {
+  const auditorMatrix = systemAuditors
+    .map((auditor, index) =>
+      [
+        `### ${index + 1}. ${auditor.meta.id} / ${auditor.meta.name}`,
+        `职责摘要：${auditor.meta.description}`,
+        "核心技能：",
+        stripAuditorPromptForOrchestration(auditor.systemPrompt),
+      ].join("\n"),
+    )
+    .join("\n\n");
 
   return [
     "# Kevlar-4u 系统初审内生编排任务",
@@ -571,7 +568,6 @@ function buildSystemAuditOrchestrationPrompt(
     "3. 执行交叉复核：暗语破译发现的网络文化风险由语境猎手复核；语境猎手发现的语境脱嵌风险由暗语破译复核。",
     "4. 最终由总调度器合并：本地规则结果 + 5 个 system_auditor 结果 + 交叉复核结果。",
     "5. 只输出合法 JSON，不要 Markdown，不要解释，不要思考过程。",
-    "6. summary 只能描述风险发现，不得包含任何修改建议、优化方案或操作指引。",
     "",
     "## 风险定级",
     "- 🔴：可能触发法律/平台/舆情/群体冲突的高风险点。",
@@ -585,7 +581,7 @@ function buildSystemAuditOrchestrationPrompt(
     auditorMatrix,
     "",
     "## 输出 JSON Schema",
-    '{"dimensions":[{"id":"legal_compliance","name":"合规哨兵","findings":[{"keyword":"风险词汇或原句","trigger":"触发原因，需说明来自本地规则/系统审查/交叉复核中的哪一类证据","riskDescription":"风险说明","propagationRisk":"传播、处罚或被曲解风险","suggestedLevel":"🔴/🟡"}],"level":"🔴/🟡/🟢"}],"summary":"面向用户展示的中文初审摘要"}',
+    '{"dimensions":[{"id":"legal_compliance","name":"合规哨兵","findings":[{"keyword":"风险词汇或原句","trigger":"触发原因，需说明来自本地规则/系统审查/交叉复核中的哪一类证据","riskDescription":"风险说明","propagationRisk":"传播、处罚或被曲解风险","suggestedLevel":"🔴/🟡"}],"level":"🔴/🟡/🟢"}],"summary":"面向用户展示的初审摘要"}',
     "",
     "## 待审内容",
     wrapContent(content, "system_audit_content"),
@@ -821,7 +817,11 @@ function formatPreAuditTable(clean: Array<{ name: string; id?: string }>): strin
 }
 
 function formatFindingRiskLine(finding: any): string {
-  const keyword = finding.keyword ? `「${finding.keyword}」` : finding.dimension ? `「${finding.dimension}」` : "该内容";
+  const keyword = finding.keyword
+    ? `「${finding.keyword}」`
+    : finding.dimension
+      ? `「${finding.dimension}」`
+      : "该内容";
   const parts = [
     finding.root ? `词根为“${finding.root}”` : undefined,
     finding.trigger,
@@ -865,10 +865,12 @@ function summarizePreAuditResults(
 
   if (risky.length > 0) {
     if (lines.length > 0) lines.push("");
-    lines.push(...risky.flatMap((r, index) => {
-      const section = formatRiskSection(r);
-      return index === 0 ? section : ["", ...section];
-    }));
+    lines.push(
+      ...risky.flatMap((r, index) => {
+        const section = formatRiskSection(r);
+        return index === 0 ? section : ["", ...section];
+      }),
+    );
   }
 
   if (risky.length === 0 && clean.length > 0) {
