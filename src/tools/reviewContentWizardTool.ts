@@ -14,8 +14,7 @@ import { buildKevlarRiskDirective } from "../execution/riskPrompt.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
-  description:
-    `用于对用户提交的文本内容进行多维度社会语义风险评测。
+  description: `用于对用户提交的文本内容进行多维度社会语义风险评测。
 
 当用户请求以下内容时调用本工具：
 - 审稿
@@ -39,7 +38,7 @@ export const reviewContentWizardToolDefinition: Tool = {
    - 社会语义风险
 3. 初审结束后，必须同时展示：
    - 初审结果
-   - 根据初稿推荐的 1-3 位用户创建的复审评审员
+   - 根据初审结果推荐的 1-3 位用户创建的复审评审员
 4. 展示完成后，必须暂停并等待用户操作
 
 用户交互规则：
@@ -181,7 +180,7 @@ export const reviewContentWizardModule: ToolModule = {
 export async function handleReviewContentWizard(
   skillsDir: string,
   tmpDir: string,
-  input: ReviewWizardInput
+  input: ReviewWizardInput,
 ): Promise<ToolResult> {
   if (!input.userMessage || typeof input.userMessage !== "string") {
     return {
@@ -194,12 +193,24 @@ export async function handleReviewContentWizard(
     await fs.promises.mkdir(tmpDir, { recursive: true });
     const state = await loadOrCreateState(tmpDir, input);
     const allPersonas = await loadAllPersonas(skillsDir);
-    const userPersonas = allPersonas.filter(p => !p.meta.tags.includes("system_auditor"));
-    const systemAuditors = allPersonas.filter(p => p.meta.tags.includes("system_auditor"));
-    return await advanceWizard(skillsDir, tmpDir, state, userPersonas, systemAuditors, input.userMessage, input.samplingFn);
+    const userPersonas = allPersonas.filter((p) => !p.meta.tags.includes("system_auditor"));
+    const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+    return await advanceWizard(
+      skillsDir,
+      tmpDir,
+      state,
+      userPersonas,
+      systemAuditors,
+      input.userMessage,
+      input.samplingFn,
+    );
   } catch (err) {
     const info = getErrorInfo(err);
-    logger.error("Review content wizard failed", { event: "review_wizard_error", error: info.code, message: info.message });
+    logger.error("Review content wizard failed", {
+      event: "review_wizard_error",
+      error: info.code,
+      message: info.message,
+    });
     return {
       content: [{ type: "text", text: `❌ 内容评测向导失败：${info.message}` }],
       isError: true,
@@ -214,7 +225,7 @@ async function advanceWizard(
   personas: Persona[], // user personas
   systemAuditors: Persona[],
   userMessage: string,
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   switch (state.step) {
     case "systemAudit":
@@ -243,24 +254,26 @@ async function handleSystemAudit(
   state: ReviewWizardState,
   userPersonas: Persona[],
   systemAuditors: Persona[],
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const localFindings = await buildLocalRuleFindings(skillsDir, state.content);
 
   if (systemAuditors.length === 0) {
-    const dimensions = localFindings.length > 0
-      ? [{
-          id: "local_rule_engine",
-          name: "本地规则引擎",
-          findings: localFindings,
-          level: getFindingsLevel(localFindings),
-        }]
-      : [];
+    const dimensions =
+      localFindings.length > 0
+        ? [
+            {
+              id: "local_rule_engine",
+              name: "本地规则引擎",
+              findings: localFindings,
+              level: getFindingsLevel(localFindings),
+            },
+          ]
+        : [];
     state.preAuditReport = {
       dimensions,
-      summary: dimensions.length > 0
-        ? summarizePreAuditResults(dimensions)
-        : "未找到系统审查员，且本地规则未命中风险点",
+      summary:
+        dimensions.length > 0 ? summarizePreAuditResults(dimensions) : "未找到系统审查员，且本地规则未命中风险点",
     };
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
@@ -269,12 +282,9 @@ async function handleSystemAudit(
 
   // 规则模式降级（MCP Sampling 不可用时）
   if (!samplingFn) {
-    const results = mergeLocalFindingsIntoAudits(
-      ruleBasedPreAudit(state.content, systemAuditors),
-      localFindings
-    );
+    const results = mergeLocalFindingsIntoAudits(ruleBasedPreAudit(state.content, systemAuditors), localFindings);
     state.preAuditReport = { dimensions: results, summary: summarizePreAuditResults(results) };
-    state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
+    state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
@@ -285,22 +295,13 @@ async function handleSystemAudit(
       try {
         const localContext = formatLocalFindingsForPrompt(localFindings);
         const response = await samplingFn({
-          systemPrompt: [
-            auditor.systemPrompt,
-            "",
-            "---",
-            "",
-            buildKevlarRiskDirective(),
-          ].join("\n"),
-          messages: [{
-            role: "user",
-            content: [
-              localContext,
-              "请审查以下内容：",
-              "",
-              state.content,
-            ].filter(Boolean).join("\n"),
-          }],
+          systemPrompt: [auditor.systemPrompt, "", "---", "", buildKevlarRiskDirective()].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: [localContext, "请审查以下内容：", "", state.content].filter(Boolean).join("\n"),
+            },
+          ],
           maxTokens: 2048,
         });
         const parsed = JSON.parse(stripCodeFence(response.content.trim()));
@@ -310,17 +311,24 @@ async function handleSystemAudit(
           findings: Array.isArray(parsed.findings) ? parsed.findings : [],
         };
       } catch (err) {
-        logger.warn("System auditor failed", { event: "system_auditor_failed", auditorId: auditor.meta.id, error: getErrorInfo(err).message });
+        logger.warn("System auditor failed", {
+          event: "system_auditor_failed",
+          auditorId: auditor.meta.id,
+          error: getErrorInfo(err).message,
+        });
         return { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
       }
-    })
+    }),
   );
 
   const mergedResults = mergeLocalFindingsIntoAudits(results, localFindings);
   for (const r of mergedResults) {
     let dimLevel: string = "🟢";
     for (const f of r.findings) {
-      if (f.suggestedLevel === "🔴") { dimLevel = "🔴"; break; }
+      if (f.suggestedLevel === "🔴") {
+        dimLevel = "🔴";
+        break;
+      }
       if (f.suggestedLevel === "🟡") dimLevel = "🟡";
     }
     (r as any).level = dimLevel;
@@ -328,17 +336,20 @@ async function handleSystemAudit(
 
   // Phase 2: Cross-validate risky dimensions (silent, no user-facing output)
   const crossValidatedResults = await crossValidateRiskyDimensions(
-    state.content, mergedResults, systemAuditors, samplingFn
+    state.content,
+    mergedResults,
+    systemAuditors,
+    samplingFn,
   );
 
-  const allFindings = crossValidatedResults.flatMap(r => r.findings || []);
+  const allFindings = crossValidatedResults.flatMap((r) => r.findings || []);
   const publicReaction = await generatePublicReaction(state.content, allFindings, samplingFn);
 
   state.preAuditReport = {
     dimensions: crossValidatedResults,
     summary: summarizePreAuditResults(crossValidatedResults, publicReaction),
   };
-  state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
+  state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
   state.step = "checkPersonaInventory";
   await saveState(tmpDir, state);
 
@@ -364,30 +375,126 @@ interface PreAuditDimensionResult {
 
 const PRE_AUDIT_RULES: Record<string, RuleGroup[]> = {
   legal_compliance: [
-    { dimension: "合规风险", keywords: ["最", "第一", "唯一", "全网", "绝对", "100%", "百分百", "顶级", "极致", "首创", "独家", "首款"], description: "内容包含疑似绝对化用语或极限词", yellowThreshold: 2, redThreshold: 5 },
-    { dimension: "合规风险", keywords: ["根治", "治愈", "永不复发", "保证效果", "疗效", "药到病除", "神效"], description: "内容包含可能的虚假医疗/功效宣称", yellowThreshold: 1, redThreshold: 3 },
-    { dimension: "合规风险", keywords: ["保本", "稳赚", "稳赚不赔", "承诺收益", "无风险", "收益率", "翻倍"], description: "内容包含可能的违规金融承诺", yellowThreshold: 1, redThreshold: 3 },
-    { dimension: "合规风险", keywords: ["点击领取", "限时优惠", "错过今天", "仅限今日", "立即购买", "马上抢"], description: "内容包含诱导性营销话术", yellowThreshold: 3, redThreshold: 5 },
+    {
+      dimension: "合规风险",
+      keywords: ["最", "第一", "唯一", "全网", "绝对", "100%", "百分百", "顶级", "极致", "首创", "独家", "首款"],
+      description: "内容包含疑似绝对化用语或极限词",
+      yellowThreshold: 2,
+      redThreshold: 5,
+    },
+    {
+      dimension: "合规风险",
+      keywords: ["根治", "治愈", "永不复发", "保证效果", "疗效", "药到病除", "神效"],
+      description: "内容包含可能的虚假医疗/功效宣称",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
+    {
+      dimension: "合规风险",
+      keywords: ["保本", "稳赚", "稳赚不赔", "承诺收益", "无风险", "收益率", "翻倍"],
+      description: "内容包含可能的违规金融承诺",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
+    {
+      dimension: "合规风险",
+      keywords: ["点击领取", "限时优惠", "错过今天", "仅限今日", "立即购买", "马上抢"],
+      description: "内容包含诱导性营销话术",
+      yellowThreshold: 3,
+      redThreshold: 5,
+    },
   ],
   context_distortion: [
-    { dimension: "语境脱嵌风险", keywords: ["懂的自然懂", "你懂的", "懂得都懂", "不多说"], description: "内容包含模糊暗示表述，容易被脱离语境放大", yellowThreshold: 1, redThreshold: 3 },
-    { dimension: "语境脱嵌风险", keywords: ["据说", "网传", "网曝", "大家说", "有人说", "某专家", "业内人士透露"], description: "内容包含缺乏明确来源的转述", yellowThreshold: 2, redThreshold: 4 },
-    { dimension: "语境脱嵌风险", keywords: ["截图", "聊天记录", "录音", "曝光", "实锤"], description: "内容引用非公开/片段化信息", yellowThreshold: 1, redThreshold: 3 },
+    {
+      dimension: "语境脱嵌风险",
+      keywords: ["懂的自然懂", "你懂的", "懂得都懂", "不多说"],
+      description: "内容包含模糊暗示表述，容易被脱离语境放大",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
+    {
+      dimension: "语境脱嵌风险",
+      keywords: ["据说", "网传", "网曝", "大家说", "有人说", "某专家", "业内人士透露"],
+      description: "内容包含缺乏明确来源的转述",
+      yellowThreshold: 2,
+      redThreshold: 4,
+    },
+    {
+      dimension: "语境脱嵌风险",
+      keywords: ["截图", "聊天记录", "录音", "曝光", "实锤"],
+      description: "内容引用非公开/片段化信息",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
   ],
   network_culture_risk: [
-    { dimension: "网络文化误读", keywords: ["yygq", "yyds", "awsl", "xswl", "nbcs", "u1s1"], description: "内容包含网络缩写/黑话", yellowThreshold: 2, redThreshold: 5 },
-    { dimension: "网络文化误读", keywords: ["冲", "带节奏", "引流", "水军", "控评", "举报", "网暴"], description: "内容包含特定社区行为用语", yellowThreshold: 2, redThreshold: 4 },
-    { dimension: "网络文化误读", keywords: ["绷不住了", "破防", "麻了", "急了", "典", "孝", "乐"], description: "内容包含梗文化/抽象话表达", yellowThreshold: 3, redThreshold: 5 },
+    {
+      dimension: "网络文化误读",
+      keywords: ["yygq", "yyds", "awsl", "xswl", "nbcs", "u1s1"],
+      description: "内容包含网络缩写/黑话",
+      yellowThreshold: 2,
+      redThreshold: 5,
+    },
+    {
+      dimension: "网络文化误读",
+      keywords: ["冲", "带节奏", "引流", "水军", "控评", "举报", "网暴"],
+      description: "内容包含特定社区行为用语",
+      yellowThreshold: 2,
+      redThreshold: 4,
+    },
+    {
+      dimension: "网络文化误读",
+      keywords: ["绷不住了", "破防", "麻了", "急了", "典", "孝", "乐"],
+      description: "内容包含梗文化/抽象话表达",
+      yellowThreshold: 3,
+      redThreshold: 5,
+    },
   ],
   factual_integrity: [
-    { dimension: "事实硬伤", keywords: ["研究表明", "调查显示", "据统计", "据调查", "报告指出"], description: "内容引用统计/研究但未提供具体来源", yellowThreshold: 1, redThreshold: 3 },
-    { dimension: "事实硬伤", keywords: ["一直", "永远", "从来", "所有", "每个", "大家", "全世界", "全国"], description: "内容包含可能过度概括的全称判断", yellowThreshold: 2, redThreshold: 4 },
-    { dimension: "事实硬伤", keywords: ["颠覆", "革命性", "前所未有", "史无前例", "划时代", "突破", "重大突破"], description: "内容包含可能夸大的事实性宣称", yellowThreshold: 1, redThreshold: 3 },
+    {
+      dimension: "事实硬伤",
+      keywords: ["研究表明", "调查显示", "据统计", "据调查", "报告指出"],
+      description: "内容引用统计/研究但未提供具体来源",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
+    {
+      dimension: "事实硬伤",
+      keywords: ["一直", "永远", "从来", "所有", "每个", "大家", "全世界", "全国"],
+      description: "内容包含可能过度概括的全称判断",
+      yellowThreshold: 2,
+      redThreshold: 4,
+    },
+    {
+      dimension: "事实硬伤",
+      keywords: ["颠覆", "革命性", "前所未有", "史无前例", "划时代", "突破", "重大突破"],
+      description: "内容包含可能夸大的事实性宣称",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
   ],
   social_risk: [
-    { dimension: "社会语义风险", keywords: ["女司机", "女拳", "男拳", "小仙女", "田园"], description: "内容包含可能引发性别对立的表述", yellowThreshold: 1, redThreshold: 3 },
-    { dimension: "社会语义风险", keywords: ["地域黑", "地图炮", "歧视", "看不起", "low"], description: "内容包含可能的歧视性表述", yellowThreshold: 1, redThreshold: 3 },
-    { dimension: "社会语义风险", keywords: ["智商税", "割韭菜", "收智商税", "坑"], description: "内容包含可能的群体贬低或对立煽动", yellowThreshold: 1, redThreshold: 3 },
+    {
+      dimension: "社会语义风险",
+      keywords: ["女司机", "女拳", "男拳", "小仙女", "田园"],
+      description: "内容包含可能引发性别对立的表述",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
+    {
+      dimension: "社会语义风险",
+      keywords: ["地域黑", "地图炮", "歧视", "看不起", "low"],
+      description: "内容包含可能的歧视性表述",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
+    {
+      dimension: "社会语义风险",
+      keywords: ["智商税", "割韭菜", "收智商税", "坑"],
+      description: "内容包含可能的群体贬低或对立煽动",
+      yellowThreshold: 1,
+      redThreshold: 3,
+    },
   ],
 };
 
@@ -397,10 +504,7 @@ function countOccurrences(text: string, keyword: string): number {
   return matches ? matches.length : 0;
 }
 
-function ruleBasedPreAudit(
-  content: string,
-  auditors: Persona[]
-): PreAuditDimensionResult[] {
+function ruleBasedPreAudit(content: string, auditors: Persona[]): PreAuditDimensionResult[] {
   const results: PreAuditDimensionResult[] = [];
   const lower = content.toLowerCase();
 
@@ -414,12 +518,10 @@ function ruleBasedPreAudit(
     const findings: any[] = [];
 
     for (const group of rules) {
-      const matchedKeywords = group.keywords.filter(kw => lower.includes(kw));
+      const matchedKeywords = group.keywords.filter((kw) => lower.includes(kw));
       if (matchedKeywords.length === 0) continue;
 
-      const totalOccurrences = group.keywords.reduce(
-        (sum, kw) => sum + countOccurrences(lower, kw), 0
-      );
+      const totalOccurrences = group.keywords.reduce((sum, kw) => sum + countOccurrences(lower, kw), 0);
 
       let suggestedLevel = "🟢";
       if (totalOccurrences >= group.redThreshold) suggestedLevel = "🔴";
@@ -434,7 +536,10 @@ function ruleBasedPreAudit(
 
     let level = "🟢";
     for (const f of findings) {
-      if (f.suggestedLevel === "🔴") { level = "🔴"; break; }
+      if (f.suggestedLevel === "🔴") {
+        level = "🔴";
+        break;
+      }
       if (f.suggestedLevel === "🟡") level = "🟡";
     }
 
@@ -499,15 +604,14 @@ function extractAuditCandidates(content: string): string[] {
 function findContextRiskTerms(content: string, keyword: string): string[] {
   const riskTerms = ["贵妇", "粉嫩", "粉", "肥厚", "柔软", "嫩", "鲜嫩", "爆", "黑", "白", "红"];
   const keywordIndex = content.indexOf(keyword);
-  const context = keywordIndex >= 0
-    ? content.slice(Math.max(0, keywordIndex - 12), keywordIndex + keyword.length + 24)
-    : content;
+  const context =
+    keywordIndex >= 0 ? content.slice(Math.max(0, keywordIndex - 12), keywordIndex + keyword.length + 24) : content;
   return riskTerms.filter((term) => context.includes(term));
 }
 
 function mergeLocalFindingsIntoAudits(
   audits: PreAuditDimensionResult[],
-  localFindings: any[]
+  localFindings: any[],
 ): PreAuditDimensionResult[] {
   const merged = audits.map((audit) => ({ ...audit, findings: [...(audit.findings || [])] }));
   if (localFindings.length === 0) return merged;
@@ -543,21 +647,23 @@ function getFindingsLevel(findings: any[]): string {
 // ── Phase 2: Cross-validation for risky dimensions ──
 
 interface CrossValidationPair {
-  source: string;      // auditor that found the risk
-  validator: string;   // auditor that validates it
-  question: string;    // what to ask the validator
+  source: string; // auditor that found the risk
+  validator: string; // auditor that validates it
+  question: string; // what to ask the validator
 }
 
 const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
   {
     source: "network_culture_risk",
     validator: "context_distortion",
-    question: "以下内容被「暗语破译」标记为网络文化风险。请从「语境脱嵌」角度验证：这些风险点脱离原始语境后，是否真的容易被断章取义或恶意曲解？请只输出 JSON。",
+    question:
+      "以下内容被「暗语破译」标记为网络文化风险。请从「语境脱嵌」角度验证：这些风险点脱离原始语境后，是否真的容易被断章取义或恶意曲解？请只输出 JSON。",
   },
   {
     source: "context_distortion",
     validator: "network_culture_risk",
-    question: "以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度验证：这些风险点是否确实在特定网络社区有恶意含义？请只输出 JSON。",
+    question:
+      "以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度验证：这些风险点是否确实在特定网络社区有恶意含义？请只输出 JSON。",
   },
 ];
 
@@ -565,39 +671,41 @@ async function crossValidateRiskyDimensions(
   content: string,
   phase1Results: Array<{ id: string; name: string; findings: any[]; level?: string }>,
   auditors: Persona[],
-  samplingFn: MultiTurnSamplingFunction
+  samplingFn: MultiTurnSamplingFunction,
 ): Promise<Array<{ id: string; name: string; findings: any[]; level?: string }>> {
-  const riskyDimensions = phase1Results.filter(r => r.findings && r.findings.length > 0);
+  const riskyDimensions = phase1Results.filter((r) => r.findings && r.findings.length > 0);
   if (riskyDimensions.length === 0) return phase1Results;
 
-  const validatorMap = new Map(auditors.map(a => [a.meta.id, a]));
-  const results = [...phase1Results.map(r => ({ ...r, findings: [...r.findings] }))];
+  const validatorMap = new Map(auditors.map((a) => [a.meta.id, a]));
+  const results = [...phase1Results.map((r) => ({ ...r, findings: [...r.findings] }))];
 
   for (const pair of CROSS_VALIDATION_PAIRS) {
-    const sourceDim = riskyDimensions.find(r => r.id === pair.source);
+    const sourceDim = riskyDimensions.find((r) => r.id === pair.source);
     if (!sourceDim || sourceDim.findings.length === 0) continue;
 
     const validatorAuditor = validatorMap.get(pair.validator);
     if (!validatorAuditor) continue;
 
-    const findingsSummary = sourceDim.findings.map((f, i) =>
-      `${i + 1}. [${f.suggestedLevel}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`
-    ).join("\n");
+    const findingsSummary = sourceDim.findings
+      .map((f, i) => `${i + 1}. [${f.suggestedLevel}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`)
+      .join("\n");
 
     try {
       const response = await samplingFn({
         systemPrompt: validatorAuditor.systemPrompt,
-        messages: [{
-          role: "user",
-          content: [
-            pair.question,
-            "",
-            `原始内容：${content}`,
-            "",
-            `「${sourceDim.name}」的发现：`,
-            findingsSummary,
-          ].join("\n"),
-        }],
+        messages: [
+          {
+            role: "user",
+            content: [
+              pair.question,
+              "",
+              `原始内容：${content}`,
+              "",
+              `「${sourceDim.name}」的发现：`,
+              findingsSummary,
+            ].join("\n"),
+          },
+        ],
         maxTokens: 1024,
       });
 
@@ -605,13 +713,11 @@ async function crossValidateRiskyDimensions(
       const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
 
       // Merge validated findings into the validator's dimension
-      const validatorDim = results.find(r => r.id === pair.validator);
+      const validatorDim = results.find((r) => r.id === pair.validator);
       if (validatorDim && validatedFindings.length > 0) {
         for (const vf of validatedFindings) {
           // Only add if not already present (dedup by keyword)
-          const exists = validatorDim.findings.some(
-            (existing: any) => existing.keyword === vf.keyword
-          );
+          const exists = validatorDim.findings.some((existing: any) => existing.keyword === vf.keyword);
           if (!exists) {
             validatorDim.findings.push(vf);
           }
@@ -643,14 +749,16 @@ const ENGLISH_DIMENSION_NAMES: Record<string, string> = {
 async function generatePublicReaction(
   content: string,
   findings: any[],
-  samplingFn: MultiTurnSamplingFunction
+  samplingFn: MultiTurnSamplingFunction,
 ): Promise<string | undefined> {
   if (findings.length === 0) return undefined;
 
-  const findingsList = findings.map((f, i) => {
-    const parts = [f.keyword, f.trigger, f.riskDescription].filter(Boolean);
-    return `${i + 1}. ${parts.join("；")}`;
-  }).join("\n");
+  const findingsList = findings
+    .map((f, i) => {
+      const parts = [f.keyword, f.trigger, f.riskDescription].filter(Boolean);
+      return `${i + 1}. ${parts.join("；")}`;
+    })
+    .join("\n");
 
   const systemPrompt = [
     "你是一名舆情风险分析师。根据以下内容审查发现，描述潜在的舆论反应。",
@@ -662,13 +770,7 @@ async function generatePublicReaction(
     "- 直接输出预警文字，不要加前缀或标题",
   ].join("\n");
 
-  const userMessage = [
-    "待审内容：",
-    content,
-    "",
-    "风险发现：",
-    findingsList,
-  ].join("\n");
+  const userMessage = ["待审内容：", content, "", "风险发现：", findingsList].join("\n");
 
   try {
     const response = await samplingFn({
@@ -685,7 +787,7 @@ async function generatePublicReaction(
 
 function summarizePreAuditResults(
   results: Array<{ id?: string; name: string; findings: any[]; level?: string }>,
-  publicReaction?: string
+  publicReaction?: string,
 ): string {
   if (results.length === 0) return "本地规则与系统审查员均未命中风险点";
 
@@ -704,11 +806,11 @@ function summarizePreAuditResults(
   const lines: string[] = [];
 
   if (risky.length > 0) {
-    const riskyNames = risky.map(r => {
+    const riskyNames = risky.map((r) => {
       const en = r.id ? ENGLISH_DIMENSION_NAMES[r.id] || r.id : r.name;
-      return `${r.name}（${en}，${r.findings.length}项）`;
+      return `${r.name}（${en}）`;
     });
-    lines.push(`⚠️ 风险预警：${riskyNames.join("、")}`);
+    lines.push(`⚠️ 风险预警（ ${risky.length} ）：${riskyNames.join("、")}`);
 
     if (publicReaction) {
       lines.push(`潜在舆论反应：${publicReaction}`);
@@ -716,7 +818,7 @@ function summarizePreAuditResults(
   }
 
   if (clean.length > 0) {
-    const cleanNames = clean.map(r => {
+    const cleanNames = clean.map((r) => {
       const en = r.id ? ENGLISH_DIMENSION_NAMES[r.id] || r.id : r.name;
       return `${r.name}（${en}）`;
     });
@@ -730,11 +832,13 @@ function formatLocalFindingsForPrompt(localFindings: any[]): string {
   if (localFindings.length === 0) return "";
   return [
     "【本地规则初审命中】",
-    ...localFindings.map((f) => [
-      `- ${f.suggestedLevel || "⚪"} ${f.keyword} -> ${f.root || "未知词根"}`,
-      `  - 触发原因：${f.trigger}`,
-      `  - 风险描述：${f.riskDescription}`,
-    ].join("\n")),
+    ...localFindings.map((f) =>
+      [
+        `- ${f.suggestedLevel || "⚪"} ${f.keyword} -> ${f.root || "未知词根"}`,
+        `  - 触发原因：${f.trigger}`,
+        `  - 风险描述：${f.riskDescription}`,
+      ].join("\n"),
+    ),
     "",
   ].join("\n");
 }
@@ -743,7 +847,7 @@ async function handleInventoryCheck(
   tmpDir: string,
   state: ReviewWizardState,
   personas: Persona[],
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   // 初审结果摘要提示
   const preAuditSummary = state.preAuditReport?.summary
@@ -763,7 +867,9 @@ async function handleInventoryCheck(
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
         "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
-      ].filter(Boolean).join("\n")
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
   }
 
@@ -780,10 +886,14 @@ async function handleInventoryCheck(
         "",
         `当前共有 ${personas.length} 位评审员，已全部选中：`,
         "",
-        ...personas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`),
+        ...personas.map(
+          (p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`,
+        ),
         "",
         "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
-      ].filter(Boolean).join("\n")
+      ]
+        .filter(Boolean)
+        .join("\n"),
     );
   }
 
@@ -792,9 +902,7 @@ async function handleInventoryCheck(
   const recommendedIds = new Set(recommendation.personaIds);
 
   state.selectedPersonaIds = [...recommendation.personaIds];
-  state.remainingPersonaIds = personas
-    .filter((p) => !recommendedIds.has(p.meta.id))
-    .map((p) => p.meta.id);
+  state.remainingPersonaIds = personas.filter((p) => !recommendedIds.has(p.meta.id)).map((p) => p.meta.id);
   state.step = "waitingForReviewerConfirmation";
   await saveState(tmpDir, state);
 
@@ -814,7 +922,9 @@ async function handleInventoryCheck(
         : []),
       "",
       "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
-    ].filter(Boolean).join("\n")
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
 }
 
@@ -824,7 +934,7 @@ async function handleReviewerConfirmation(
   state: ReviewWizardState,
   personas: Persona[],
   userMessage: string,
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const normalized = userMessage.trim();
 
@@ -845,10 +955,8 @@ async function handleReviewerConfirmation(
 
   // 未识别 → 重新展示当前评审员状态
   await saveState(tmpDir, state);
-  const selectedUserPersonas = personas.filter(
-    p => state.selectedPersonaIds.includes(p.meta.id)
-  );
-  const remaining = personas.filter(p => state.remainingPersonaIds.includes(p.meta.id));
+  const selectedUserPersonas = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
   return toolResponse(
     state,
     [
@@ -860,7 +968,7 @@ async function handleReviewerConfirmation(
         : []),
       "",
       "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员。",
-    ].join("\n")
+    ].join("\n"),
   );
 }
 
@@ -869,12 +977,10 @@ async function handleSwapReviewer(
   state: ReviewWizardState,
   personas: Persona[],
   position: number,
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   if (position < 1 || position > state.selectedPersonaIds.length) {
-    const selected = personas.filter(
-      p => state.selectedPersonaIds.includes(p.meta.id)
-    );
+    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
     return toolResponse(
       state,
       [
@@ -882,15 +988,13 @@ async function handleSwapReviewer(
         ...selected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
         "",
         "请重新输入正确的编号。",
-      ].join("\n")
+      ].join("\n"),
     );
   }
 
   // 备选池为空，告知用户并询问是否开始评审
   if (state.remainingPersonaIds.length === 0) {
-    const selected = personas.filter(
-      p => state.selectedPersonaIds.includes(p.meta.id)
-    );
+    const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
     return toolResponse(
       state,
       [
@@ -900,47 +1004,44 @@ async function handleSwapReviewer(
         ...selected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
         "",
         "请回复「开始复审」确认执行。",
-      ].join("\n")
+      ].join("\n"),
     );
   }
 
   const removedId = state.selectedPersonaIds[position - 1];
-  const removedPersona = personas.find(p => p.meta.id === removedId);
+  const removedPersona = personas.find((p) => p.meta.id === removedId);
 
   // 从备选池取第一位加入已选，被换下的回到备选池末尾
   const addedId = state.remainingPersonaIds.shift()!;
-  state.selectedPersonaIds = state.selectedPersonaIds.filter(id => id !== removedId);
+  state.selectedPersonaIds = state.selectedPersonaIds.filter((id) => id !== removedId);
   state.selectedPersonaIds.push(addedId);
   state.remainingPersonaIds.push(removedId);
 
   state.step = "waitingForReviewerConfirmation";
   await saveState(tmpDir, state);
 
-  const updatedSelected = personas.filter(
-    p => state.selectedPersonaIds.includes(p.meta.id)
+  const updatedSelected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
+  const remaining = personas.filter((p) => state.remainingPersonaIds.includes(p.meta.id));
+  const addedPersona = personas.find((p) => p.meta.id === addedId);
+
+  return toolResponse(
+    state,
+    [
+      `✅ 已替换：${removedPersona?.meta.name || "未知"} → ${addedPersona?.meta.name || "未知"}`,
+      "",
+      "当前已选复审评审员：",
+      ...updatedSelected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
+      "",
+      ...(remaining.length > 0 ? [`备选评审员（共 ${remaining.length} 位）`] : []),
+      "请回复「开始复审」确认执行，或回复「X 换一位」继续替换。",
+    ].join("\n"),
   );
-  const remaining = personas.filter(p => state.remainingPersonaIds.includes(p.meta.id));
-  const addedPersona = personas.find(p => p.meta.id === addedId);
-
-  return toolResponse(state, [
-    `✅ 已替换：${removedPersona?.meta.name || "未知"} → ${addedPersona?.meta.name || "未知"}`,
-    "",
-    "当前已选复审评审员：",
-    ...updatedSelected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
-    "",
-    ...(remaining.length > 0
-      ? [`备选评审员（共 ${remaining.length} 位）`]
-      : []),
-    "请回复「开始复审」确认执行，或回复「X 换一位」继续替换。",
-  ].join("\n"));
 }
-
-
 
 async function recommendPersonas(
   state: ReviewWizardState,
   personas: Persona[],
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<Recommendation> {
   // First try RST-based recommendation for RST-configured personas
   const rstRecommendation = recommendRSTPersonas(
@@ -974,7 +1075,7 @@ async function recommendPersonas(
       }
       const response = await samplingFn({
         systemPrompt:
-          "你是评审员推荐助手。根据待评测内容和系统初审报告推荐 1-3 个最匹配的评审员，输出 JSON：{\"personaIds\":[\"id\"],\"assistantMessage\":\"推荐理由\"}。assistantMessage 应包含「根据内容特色和初审发现的风险点，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。",
+          '你是评审员推荐助手。根据待评测内容和系统初审报告推荐 1-3 个最匹配的评审员，输出 JSON：{"personaIds":["id"],"assistantMessage":"推荐理由"}。assistantMessage 应包含「根据内容特色和初审发现的风险点，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。',
         messages: [
           {
             role: "user",
@@ -986,7 +1087,10 @@ async function recommendPersonas(
       const parsed = JSON.parse(stripCodeFence(response.content.trim())) as Record<string, unknown>;
       const validIds = new Set(personas.map((p) => p.meta.id));
       const personaIds = Array.isArray(parsed.personaIds)
-        ? parsed.personaIds.map(String).filter((id) => validIds.has(id)).slice(0, 3)
+        ? parsed.personaIds
+            .map(String)
+            .filter((id) => validIds.has(id))
+            .slice(0, 3)
         : [];
       if (personaIds.length > 0 && typeof parsed.assistantMessage === "string") {
         return { personaIds, assistantMessage: parsed.assistantMessage };
@@ -1009,9 +1113,7 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
   const terms = `${state.content}\n${state.context || ""}`.toLowerCase();
   const scored = personas
     .map((p) => {
-      const haystack = [p.meta.name, p.meta.description, ...p.meta.tags, p.systemPrompt]
-        .join("\n")
-        .toLowerCase();
+      const haystack = [p.meta.name, p.meta.description, ...p.meta.tags, p.systemPrompt].join("\n").toLowerCase();
       const score =
         p.meta.tags.reduce((sum, tag) => sum + (terms.includes(tag.toLowerCase()) ? 2 : 0), 0) +
         (terms.includes(p.meta.name.toLowerCase()) ? 3 : 0);
@@ -1032,13 +1134,11 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
   };
 }
 
-
-
 async function executeReview(
   skillsDir: string,
   tmpDir: string,
   state: ReviewWizardState,
-  samplingFn?: MultiTurnSamplingFunction
+  samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const reviewResult = await handleReviewContent(skillsDir, {
     content: state.content,
@@ -1173,5 +1273,9 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
 
 function stripCodeFence(text: string): string {
   if (!text.startsWith("```")) return text;
-  return text.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
+  return text
+    .replace(/^```json\s*/, "")
+    .replace(/^```\s*/, "")
+    .replace(/\s*```$/, "")
+    .trim();
 }
