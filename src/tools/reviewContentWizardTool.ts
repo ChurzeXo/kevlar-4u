@@ -39,7 +39,8 @@ export const reviewContentWizardToolDefinition: Tool = {
 3. 初审结束后，必须同时展示：
    - 初审结果
    - 根据初审结果推荐的 1-3 位用户创建的复审评审员
-4. 展示完成后，必须暂停并等待用户操作
+4. 工具返回的「初审结果」区块已由代码确定性生成，调用方必须原样展示，不得总结、改写、重排或转换格式
+5. 展示完成后，必须暂停并等待用户操作
 
 用户交互规则：
 
@@ -748,10 +749,40 @@ function formatRiskyAuditorName(result: { id?: string; name: string }): string {
   return dimensionName ? `${result.name}（${dimensionName}）` : result.name;
 }
 
-function formatFindingBlockquote(finding: any): string {
-  const subject = finding.keyword ? `"${finding.keyword}"` : finding.dimension || "该内容";
-  const detail = finding.riskDescription || finding.description || finding.trigger || "存在潜在语义或传播风险，建议进入复审确认。";
-  return `> ${subject} ${detail}`;
+function escapeMarkdownTableCell(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\|/g, "\\|")
+    .replace(/\r?\n/g, " ")
+    .trim();
+}
+
+function formatPreAuditTable(clean: Array<{ name: string; id?: string }>): string[] {
+  if (clean.length === 0) return [];
+
+  return [
+    "| 审查维度 | 结果 |",
+    "| --- | --- |",
+    ...clean.map((r) => `| ${escapeMarkdownTableCell(r.name)} | ✅ 通过 |`),
+  ];
+}
+
+function formatFindingRiskLine(finding: any): string {
+  const keyword = finding.keyword ? `「${finding.keyword}」` : finding.dimension ? `「${finding.dimension}」` : "该内容";
+  const parts = [
+    finding.root ? `词根为“${finding.root}”` : undefined,
+    finding.trigger,
+    finding.riskDescription || finding.description,
+    finding.propagationRisk,
+  ].filter(Boolean);
+  const detail = parts.length > 0 ? parts.join("；") : "存在潜在语义或传播风险，建议进入复审确认。";
+  return `发现 1 项潜在风险：${keyword} ${detail}`;
+}
+
+function formatRiskSection(result: { id?: string; name: string; findings: any[] }): string[] {
+  return [
+    `⚠️ 风险预警（${formatRiskyAuditorName(result)}）`,
+    ...(result.findings || []).map((finding) => formatFindingRiskLine(finding)),
+  ];
 }
 
 function summarizePreAuditResults(
@@ -772,20 +803,22 @@ function summarizePreAuditResults(
   }
 
   const lines: string[] = [];
-  const totalFindings = risky.reduce((sum, r) => sum + (r.findings?.length || 0), 0);
 
-  if (risky.length > 0) {
-    lines.push(`⚠️ 风险预警（${totalFindings}项）：${risky.map(formatRiskyAuditorName).join("、")}`);
-    lines.push("");
-
-    const findingLines = risky.flatMap((r) =>
-      (r.findings || []).map((finding) => formatFindingBlockquote(finding)),
-    );
-    lines.push(...findingLines);
+  const tableLines = formatPreAuditTable(clean);
+  if (tableLines.length > 0) {
+    lines.push(...tableLines);
   }
 
-  if (clean.length > 0) {
+  if (risky.length > 0) {
     if (lines.length > 0) lines.push("");
+    lines.push(...risky.flatMap((r, index) => {
+      const section = formatRiskSection(r);
+      return index === 0 ? section : ["", ...section];
+    }));
+  }
+
+  if (risky.length === 0 && clean.length > 0) {
+    lines.push("");
     lines.push(`✅ 合规通过：${clean.map((r) => r.name).join(" · ")}`);
   }
 
@@ -815,8 +848,16 @@ async function handleInventoryCheck(
 ): Promise<ToolResult> {
   // 初审结果摘要提示
   const preAuditSummary = state.preAuditReport?.summary
-    ? `初审结果\n\n${state.preAuditReport.summary}`
-    : "初审结果\n\n未找到系统审查员，跳过初审";
+    ? [
+        "<!-- kevlar:verbatim-pre-audit:start -->",
+        `初审结果\n\n${state.preAuditReport.summary}`,
+        "<!-- kevlar:verbatim-pre-audit:end -->",
+      ].join("\n")
+    : [
+        "<!-- kevlar:verbatim-pre-audit:start -->",
+        "初审结果\n\n未找到系统审查员，跳过初审",
+        "<!-- kevlar:verbatim-pre-audit:end -->",
+      ].join("\n");
 
   if (personas.length === 0) {
     state.step = "waitingForPersonaCreation";

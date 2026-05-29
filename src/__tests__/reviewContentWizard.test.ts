@@ -189,6 +189,25 @@ describe("handleReviewContentWizard state machine", () => {
     );
   });
 
+  it("renders clean system auditors as a deterministic pre-audit table", async () => {
+    await writePersona("legal_compliance", "合规哨兵", ["system_auditor", "合规"]);
+    await writePersona("context_distortion", "语境猎手", ["system_auditor", "语境"]);
+    await writePersona("factual_integrity", "事实判官", ["system_auditor", "事实"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "请评测这篇内容：这是一篇新品发布文案。",
+    });
+
+    const text = textOf(started);
+    assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
+    assert.ok(text.includes("| 审查维度 | 结果 |"));
+    assert.ok(text.includes("| 合规哨兵 | ✅ 通过 |"));
+    assert.ok(text.includes("| 语境猎手 | ✅ 通过 |"));
+    assert.ok(text.includes("| 事实判官 | ✅ 通过 |"));
+    assert.ok(!text.includes("审 查 维 度"));
+  });
+
   it("runs local DAO pre-audit even when no system auditors exist", async () => {
     writePrdRules();
 
@@ -199,8 +218,9 @@ describe("handleReviewContentWizard state machine", () => {
     const text = textOf(started);
     assert.ok(text.includes("⚠️ 风险预警"));
     assert.ok(text.includes("本地规则引擎"));
-    assert.ok(text.includes("本地规则引擎（本地规则）"));
-    assert.ok(text.includes('> "粉耳"'));
+    assert.ok(text.includes("⚠️ 风险预警（本地规则引擎（本地规则））"));
+    assert.ok(text.includes("发现 1 项潜在风险：「粉耳」"));
+    assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
 
     const sessionId = extractSessionId(text);
     const state = JSON.parse(
@@ -226,8 +246,8 @@ describe("handleReviewContentWizard state machine", () => {
     const text = textOf(started);
     assert.ok(text.includes("⚠️ 风险预警"));
     assert.ok(text.includes("暗语破译"));
-    assert.ok(text.includes("暗语破译（网络文化）"));
-    assert.ok(text.includes('> "粉耳"'));
+    assert.ok(text.includes("⚠️ 风险预警（暗语破译（网络文化））"));
+    assert.ok(text.includes("发现 1 项潜在风险：「粉耳」"));
 
     const sessionId = extractSessionId(text);
     const state = JSON.parse(
