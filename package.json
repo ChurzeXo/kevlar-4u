@@ -12,8 +12,8 @@
     "start": "node dist/index.js",
     "setup": "tsx scripts/setup.ts",
     "kevlar-4u": "tsx scripts/cli.ts",
-    "test": "tsx --test src/__tests__/**/*.test.ts",
-    "test:watch": "tsx --test --watch src/__tests__/**/*.test.ts",
+    "test": "tsx --test src/__tests__/*.test.ts",
+    "test:watch": "tsx --test --watch src/__tests__/*.test.ts",
     "prepublishOnly": "if [ -z \"$CI\" ]; then echo '⚠️  请通过 CI 发布：git tag vX.X.X && git push origin vX.X.X'; exit 1; fi"
   },
   "files": [

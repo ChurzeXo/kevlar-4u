@@ -13,6 +13,7 @@ let tmpDir: string;
 let previousApiKey: string | undefined;
 let previousOpenAiKey: string | undefined;
 let previousAnthropicKey: string | undefined;
+let previousLocalFallback: string | undefined;
 
 beforeEach(() => {
   skillsDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-review-wizard-"));
@@ -20,9 +21,11 @@ beforeEach(() => {
   previousApiKey = process.env.KEVLAR_API_KEY;
   previousOpenAiKey = process.env.OPENAI_API_KEY;
   previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  previousLocalFallback = process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK;
   delete process.env.KEVLAR_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK;
   invalidatePersonasCache();
 });
 
@@ -34,6 +37,8 @@ afterEach(() => {
   else process.env.OPENAI_API_KEY = previousOpenAiKey;
   if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
   else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+  if (previousLocalFallback === undefined) delete process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK;
+  else process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK = previousLocalFallback;
   invalidatePersonasCache();
 });
 
@@ -190,6 +195,7 @@ describe("handleReviewContentWizard state machine", () => {
   });
 
   it("renders clean system auditors as a deterministic pre-audit table", async () => {
+    process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK = "1";
     await writePersona("legal_compliance", "合规哨兵", ["system_auditor", "合规"]);
     await writePersona("context_distortion", "语境猎手", ["system_auditor", "语境"]);
     await writePersona("factual_integrity", "事实判官", ["system_auditor", "事实"]);
@@ -235,6 +241,7 @@ describe("handleReviewContentWizard state machine", () => {
   });
 
   it("adds local DAO findings to rule fallback findings with detailed fields", async () => {
+    process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK = "1";
     writePrdRules();
     await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
     await writePersona("foodie", "美食达人", ["小红书", "美食"]);
@@ -259,6 +266,45 @@ describe("handleReviewContentWizard state machine", () => {
     assert.equal(finding.trigger, "本地规则命中：粉耳 -> 木耳");
     assert.ok(finding.riskDescription.includes("贵妇"));
     assert.equal(finding.suggestedLevel, "🔴");
+  });
+
+
+  it("uses host orchestration prompt when system auditors exist but no LLM caller is available", async () => {
+    writePrdRules();
+    await writePersona("legal_compliance", "合规哨兵", ["system_auditor", "合规"]);
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳，颜值粉嫩",
+    });
+
+    const text = textOf(started);
+    assert.ok(text.includes("Kevlar-4u 系统初审内生编排任务"));
+    assert.ok(text.includes("本地规则结果"));
+    assert.ok(text.includes("五角色审查矩阵"));
+    assert.ok(text.includes("currentStep: waitingForOrchestrationAudit"));
+
+    const sessionId = extractSessionId(text);
+    const parsed = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        dimensions: [
+          { id: "legal_compliance", name: "合规哨兵", findings: [], level: "🟢" },
+          {
+            id: "network_culture_risk",
+            name: "暗语破译",
+            findings: [{ keyword: "粉耳", trigger: "宿主编排确认", riskDescription: "存在黑话误读", propagationRisk: "评论区联想", suggestedLevel: "🟡" }],
+            level: "🟡",
+          },
+        ],
+        summary: "宿主编排初审完成",
+      }),
+    });
+
+    const parsedText = textOf(parsed);
+    assert.ok(parsedText.includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(parsedText.includes("宿主编排初审完成"));
   });
 
   it("passes local DAO findings into sampling system-auditor prompts", async () => {

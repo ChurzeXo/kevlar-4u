@@ -58,6 +58,14 @@ export function hasApiKey(): boolean {
   return !!getApiKey();
 }
 
+export async function callConfiguredDirectApi(request: LlmRequest): Promise<LlmResponse> {
+  const keyInfo = getApiKey();
+  if (!keyInfo) {
+    throw new Error("API key not configured. Please set KEVLAR_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or Ollama env variables.");
+  }
+  return callApi(keyInfo, request);
+}
+
 export function maskApiKey(key: string, visible = 4): string {
   if (key.length <= visible * 2) return "*".repeat(key.length);
   return key.slice(0, visible) + "*".repeat(8) + key.slice(-visible);
@@ -65,7 +73,7 @@ export function maskApiKey(key: string, visible = 4): string {
 
 // ── API Client ────────────────────────────────────────────────────────────────
 
-interface LlmRequest {
+export interface LlmRequest {
   model: string;
   system: string;
   messages: Array<{ role: "user"; content: string }>;
@@ -73,7 +81,7 @@ interface LlmRequest {
   temperature?: number;
 }
 
-interface LlmResponse {
+export interface LlmResponse {
   content: string;
   usage?: {
     inputTokens: number;
@@ -189,7 +197,7 @@ async function callOpenAi(apiKey: string, request: LlmRequest): Promise<LlmRespo
   };
 }
 
-async function callOllama(apiKey: string, request: LlmRequest): Promise<LlmResponse> {
+async function callOllama(_apiKey: string, request: LlmRequest): Promise<LlmResponse> {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 
   const response = await fetch(`${baseUrl}/api/chat`, {
