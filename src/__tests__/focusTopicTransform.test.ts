@@ -21,7 +21,7 @@ describe("Focus Topic transformation", () => {
         dimensions: [
           {
             id: "legal_compliance",
-            name: "内容审查员-合规",
+            name: "合规哨兵",
             findings: [
               {
                 keyword: "全网第一",
@@ -46,7 +46,7 @@ describe("Focus Topic transformation", () => {
   it("formats focus topics as sniper review hints without raw audit codes", () => {
     const section = formatFocusTopicsForPrompt([
       {
-        sourceAuditor: "内容审查员-合规",
+        sourceAuditor: "合规哨兵",
         sourceKeyword: "全网第一",
         matchedTrigger: "overhyped",
         prompt: "该文本在初审中被检测出在第 1 段存在“过度包装、吹嘘功能”的嫌疑。请以你刻薄、理性的视角，死磕该段落是否在“画饼”或缺乏事实依据。",

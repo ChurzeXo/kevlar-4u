@@ -56,6 +56,29 @@ async function writePersona(id: string, name: string, tags: string[]): Promise<v
   invalidatePersonasCache();
 }
 
+function writePrdRules(): void {
+  fs.writeFileSync(
+    path.join(skillsDir, "rules.json"),
+    JSON.stringify({
+      version: "2.0.0",
+      last_updated: "2026-05-28",
+      core_rules: {
+        association_patterns: [
+          { pattern: "颜色+身体部位", risk_type: "涉黄风险" },
+          { pattern: "食材+异常修饰", risk_type: "黑话暗语" },
+          { pattern: "人名+负面标签", risk_type: "人身攻击" },
+        ],
+        evolution_strategies: ["缩写演化", "谐音演化", "拆字演化", "Emoji嵌入"],
+        risk_roots: [
+          { word: "木耳", variants_check: ["粉", "黑", "白", "红"] },
+          { word: "菊花", variants_check: ["XX", "爆"] },
+        ],
+      },
+    }),
+    "utf-8"
+  );
+}
+
 describe("handleReviewContentWizard state machine", () => {
   it("stores content and asks for persona creation when no personas exist without dumping dispatcher prompt", async () => {
     const result = await handleReviewContentWizard(skillsDir, tmpDir, {
@@ -164,5 +187,81 @@ describe("handleReviewContentWizard state machine", () => {
       reviewerText.includes("评测完成") ||
       reviewerText.includes("评测执行失败")
     );
+  });
+
+  it("runs local DAO pre-audit even when no system auditors exist", async () => {
+    writePrdRules();
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳，颜值粉嫩，耳片肥厚，质地柔软，鲜香清脆",
+    });
+
+    const text = textOf(started);
+    assert.ok(text.includes("⚠️ 风险预警"));
+    assert.ok(text.includes("本地规则引擎"));
+    assert.ok(text.includes("Local Rule Engine"));
+
+    const sessionId = extractSessionId(text);
+    const state = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, `${sessionId}_review_wizard.json`), "utf-8")
+    );
+    const localRuleAudit = state.preAuditReport.dimensions.find((d: any) => d.id === "local_rule_engine");
+    assert.ok(localRuleAudit);
+    assert.ok(localRuleAudit.findings.length > 0);
+    const finding = localRuleAudit.findings.find((f: any) => f.keyword === "粉耳");
+    assert.ok(finding);
+    assert.ok(finding.riskDescription.includes("木耳"));
+  });
+
+  it("adds local DAO findings to rule fallback findings with detailed fields", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳，颜值粉嫩，耳片肥厚，质地柔软，鲜香清脆",
+    });
+
+    const text = textOf(started);
+    assert.ok(text.includes("⚠️ 风险预警"));
+    assert.ok(text.includes("暗语破译"));
+    assert.ok(text.includes("Network Culture"));
+
+    const sessionId = extractSessionId(text);
+    const state = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, `${sessionId}_review_wizard.json`), "utf-8")
+    );
+    const networkAudit = state.preAuditReport.dimensions.find((d: any) => d.id === "network_culture_risk");
+    assert.ok(networkAudit);
+    const finding = networkAudit.findings.find((f: any) => f.keyword === "粉耳");
+    assert.equal(finding.trigger, "本地规则命中：粉耳 -> 木耳");
+    assert.ok(finding.riskDescription.includes("贵妇"));
+    assert.equal(finding.suggestedLevel, "🔴");
+  });
+
+  it("passes local DAO findings into sampling system-auditor prompts", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const calls: Array<{ systemPrompt: string; messages: Array<{ role: "user" | "assistant"; content: string }> }> = [];
+    const samplingFn = async (params: {
+      systemPrompt: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+      maxTokens?: number;
+    }) => {
+      calls.push({ systemPrompt: params.systemPrompt, messages: params.messages });
+      return { content: JSON.stringify({ findings: [] }), stopReason: "endTurn" };
+    };
+
+    await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳，颜值粉嫩，耳片肥厚，质地柔软，鲜香清脆",
+      samplingFn,
+    });
+
+    assert.ok(calls.length >= 1);
+    assert.ok(calls[0].systemPrompt.includes("联想四步法"));
+    assert.ok(calls[0].messages[0].content.includes("本地规则初审命中"));
+    assert.ok(calls[0].messages[0].content.includes("粉耳 -> 木耳"));
   });
 });

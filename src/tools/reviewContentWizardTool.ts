@@ -9,6 +9,8 @@ import { DEFAULT_DIMENSIONS_CONFIG, DEFENSIVE_DIMENSION_IDS, type DimensionsConf
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
+import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
+import { buildKevlarRiskDirective } from "../execution/riskPrompt.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
@@ -243,8 +245,23 @@ async function handleSystemAudit(
   systemAuditors: Persona[],
   samplingFn?: MultiTurnSamplingFunction
 ): Promise<ToolResult> {
+  const localFindings = await buildLocalRuleFindings(skillsDir, state.content);
+
   if (systemAuditors.length === 0) {
-    state.preAuditReport = { dimensions: [], summary: "未找到系统审查员，跳过初审" };
+    const dimensions = localFindings.length > 0
+      ? [{
+          id: "local_rule_engine",
+          name: "本地规则引擎",
+          findings: localFindings,
+          level: getFindingsLevel(localFindings),
+        }]
+      : [];
+    state.preAuditReport = {
+      dimensions,
+      summary: dimensions.length > 0
+        ? summarizePreAuditResults(dimensions)
+        : "未找到系统审查员，且本地规则未命中风险点",
+    };
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
@@ -252,16 +269,11 @@ async function handleSystemAudit(
 
   // 规则模式降级（MCP Sampling 不可用时）
   if (!samplingFn) {
-    const results = ruleBasedPreAudit(state.content, systemAuditors);
-    const summaryLines: string[] = [];
-    for (const r of results) {
-      const levelIcon = r.level || "🟢";
-      summaryLines.push(`${levelIcon} ${r.name}`);
-      for (const f of (r.findings || [])) {
-        summaryLines.push(`  ${f.suggestedLevel || "⚪"} ${f.dimension || f.description || ""}`);
-      }
-    }
-    state.preAuditReport = { dimensions: results, summary: summaryLines.join("\n") };
+    const results = mergeLocalFindingsIntoAudits(
+      ruleBasedPreAudit(state.content, systemAuditors),
+      localFindings
+    );
+    state.preAuditReport = { dimensions: results, summary: summarizePreAuditResults(results) };
     state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
@@ -271,9 +283,24 @@ async function handleSystemAudit(
   const results = await Promise.all(
     systemAuditors.map(async (auditor) => {
       try {
+        const localContext = formatLocalFindingsForPrompt(localFindings);
         const response = await samplingFn({
-          systemPrompt: auditor.systemPrompt,
-          messages: [{ role: "user", content: `请审查以下内容：\n\n${state.content}` }],
+          systemPrompt: [
+            auditor.systemPrompt,
+            "",
+            "---",
+            "",
+            buildKevlarRiskDirective(),
+          ].join("\n"),
+          messages: [{
+            role: "user",
+            content: [
+              localContext,
+              "请审查以下内容：",
+              "",
+              state.content,
+            ].filter(Boolean).join("\n"),
+          }],
           maxTokens: 2048,
         });
         const parsed = JSON.parse(stripCodeFence(response.content.trim()));
@@ -289,7 +316,8 @@ async function handleSystemAudit(
     })
   );
 
-  for (const r of results) {
+  const mergedResults = mergeLocalFindingsIntoAudits(results, localFindings);
+  for (const r of mergedResults) {
     let dimLevel: string = "🟢";
     for (const f of r.findings) {
       if (f.suggestedLevel === "🔴") { dimLevel = "🔴"; break; }
@@ -298,18 +326,14 @@ async function handleSystemAudit(
     (r as any).level = dimLevel;
   }
 
-  const summaryLines: string[] = [];
-  for (const r of results) {
-    const levelIcon = (r as any).level || "🟢";
-    summaryLines.push(`${levelIcon} ${r.name}`);
-    for (const f of (r.findings || [])) {
-      summaryLines.push(`  ${f.suggestedLevel || "⚪"} ${f.dimension || f.description || ""}`);
-    }
-  }
+  const allFindings = mergedResults.flatMap(r => r.findings || []);
+  const publicReaction = samplingFn
+    ? await generatePublicReaction(state.content, allFindings, samplingFn)
+    : undefined;
 
   state.preAuditReport = {
-    dimensions: results,
-    summary: summaryLines.join("\n"),
+    dimensions: mergedResults,
+    summary: summarizePreAuditResults(mergedResults, publicReaction),
   };
   state.systemAuditorIds = systemAuditors.map(a => a.meta.id);
   state.step = "checkPersonaInventory";
@@ -326,6 +350,13 @@ interface RuleGroup {
   description: string;
   yellowThreshold: number;
   redThreshold: number;
+}
+
+interface PreAuditDimensionResult {
+  id: string;
+  name: string;
+  findings: any[];
+  level?: string;
 }
 
 const PRE_AUDIT_RULES: Record<string, RuleGroup[]> = {
@@ -366,8 +397,8 @@ function countOccurrences(text: string, keyword: string): number {
 function ruleBasedPreAudit(
   content: string,
   auditors: Persona[]
-): Array<{ id: string; name: string; findings: any[]; level: string }> {
-  const results: Array<{ id: string; name: string; findings: any[]; level: string }> = [];
+): PreAuditDimensionResult[] {
+  const results: PreAuditDimensionResult[] = [];
   const lower = content.toLowerCase();
 
   for (const auditor of auditors) {
@@ -408,6 +439,210 @@ function ruleBasedPreAudit(
   }
 
   return results;
+}
+
+async function buildLocalRuleFindings(skillsDir: string, content: string): Promise<any[]> {
+  const repo = new LocalJsonRuleRepository(skillsDir);
+  const loaded = await repo.loadRules();
+  if (!loaded) return [];
+
+  const findings: any[] = [];
+  const seen = new Set<string>();
+  const candidates = extractAuditCandidates(content);
+
+  for (const candidate of candidates) {
+    const matches = repo.resolveVariant(candidate);
+    for (const match of matches) {
+      const key = `${candidate}::${match.rule.root}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const contextTerms = findContextRiskTerms(content, candidate);
+      const level = contextTerms.length >= 2 || match.rule.severity === "HIGH" ? "🔴" : "🟡";
+      findings.push({
+        dimension: "网络文化误读",
+        keyword: candidate,
+        trigger: `本地规则命中：${candidate} -> ${match.rule.root}`,
+        riskDescription: [
+          `词根：${match.rule.root}`,
+          `风险方向：${match.rule.misinterpret_direction}`,
+          contextTerms.length > 0
+            ? `邻近高风险修饰：${contextTerms.join("、")}`
+            : "未发现明显邻近修饰，但仍需检查语境是否为正常食材/花草表达",
+        ].join("；"),
+        propagationRisk: "容易被截取为颜色/身体化暗示或低俗黑话，造成评论区恶意联想。",
+        suggestedLevel: level,
+        suggestion: match.rule.suggestion,
+        source: "local_rule_engine",
+        root: match.rule.root,
+      });
+    }
+  }
+
+  return findings;
+}
+
+function extractAuditCandidates(content: string): string[] {
+  const normalized = content.replace(/[\s,，。！？；;：:、"'“”‘’()[\]{}<>《》|/\\-]+/g, "");
+  const candidates = new Set<string>();
+  for (let size = 2; size <= 4; size++) {
+    for (let i = 0; i <= normalized.length - size; i++) {
+      candidates.add(normalized.slice(i, i + size));
+    }
+  }
+  return [...candidates];
+}
+
+function findContextRiskTerms(content: string, keyword: string): string[] {
+  const riskTerms = ["贵妇", "粉嫩", "粉", "肥厚", "柔软", "嫩", "鲜嫩", "爆", "黑", "白", "红"];
+  const keywordIndex = content.indexOf(keyword);
+  const context = keywordIndex >= 0
+    ? content.slice(Math.max(0, keywordIndex - 12), keywordIndex + keyword.length + 24)
+    : content;
+  return riskTerms.filter((term) => context.includes(term));
+}
+
+function mergeLocalFindingsIntoAudits(
+  audits: PreAuditDimensionResult[],
+  localFindings: any[]
+): PreAuditDimensionResult[] {
+  const merged = audits.map((audit) => ({ ...audit, findings: [...(audit.findings || [])] }));
+  if (localFindings.length === 0) return merged;
+
+  const networkAudit = merged.find((audit) => audit.id === "network_culture_risk");
+  if (networkAudit) {
+    networkAudit.findings.push(...localFindings);
+  } else {
+    merged.unshift({
+      id: "local_rule_engine",
+      name: "本地规则引擎",
+      findings: localFindings,
+      level: getFindingsLevel(localFindings),
+    });
+  }
+
+  for (const audit of merged) {
+    audit.level = getFindingsLevel(audit.findings || []);
+  }
+
+  return merged;
+}
+
+function getFindingsLevel(findings: any[]): string {
+  let level = "🟢";
+  for (const finding of findings) {
+    if (finding.suggestedLevel === "🔴") return "🔴";
+    if (finding.suggestedLevel === "🟡") level = "🟡";
+  }
+  return level;
+}
+
+const ENGLISH_DIMENSION_NAMES: Record<string, string> = {
+  legal_compliance: "Legal Compliance",
+  context_distortion: "Context Distortion",
+  network_culture_risk: "Network Culture",
+  factual_integrity: "Factual Integrity",
+  social_risk: "Social Ethics",
+  local_rule_engine: "Local Rule Engine",
+};
+
+async function generatePublicReaction(
+  content: string,
+  findings: any[],
+  samplingFn: MultiTurnSamplingFunction
+): Promise<string | undefined> {
+  if (findings.length === 0) return undefined;
+
+  const findingsList = findings.map((f, i) => {
+    const parts = [f.keyword, f.trigger, f.riskDescription].filter(Boolean);
+    return `${i + 1}. ${parts.join("；")}`;
+  }).join("\n");
+
+  const systemPrompt = [
+    "你是一名舆情风险分析师。根据以下内容审查发现，描述潜在的舆论反应。",
+    "",
+    "## 规则",
+    "- 只描述「风险在哪」「网友可能怎么反应」，不给任何解决方案",
+    "- 用客观、冷静的语气，像在给作者发出预警",
+    "- 2-3 句话，简洁有力",
+    "- 直接输出预警文字，不要加前缀或标题",
+  ].join("\n");
+
+  const userMessage = [
+    "待审内容：",
+    content,
+    "",
+    "风险发现：",
+    findingsList,
+  ].join("\n");
+
+  try {
+    const response = await samplingFn({
+      systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+      maxTokens: 256,
+    });
+    const text = response.content.trim();
+    return text.length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function summarizePreAuditResults(
+  results: Array<{ id?: string; name: string; findings: any[]; level?: string }>,
+  publicReaction?: string
+): string {
+  if (results.length === 0) return "本地规则与系统审查员均未命中风险点";
+
+  const risky: Array<{ name: string; findings: any[]; id?: string }> = [];
+  const clean: Array<{ name: string; id?: string }> = [];
+
+  for (const r of results) {
+    const hasFindings = r.findings && r.findings.length > 0;
+    if (hasFindings) {
+      risky.push(r);
+    } else {
+      clean.push(r);
+    }
+  }
+
+  const lines: string[] = [];
+
+  if (risky.length > 0) {
+    const riskyNames = risky.map(r => {
+      const en = r.id ? ENGLISH_DIMENSION_NAMES[r.id] || r.id : r.name;
+      return `${r.name}（${en}，${r.findings.length}项）`;
+    });
+    lines.push(`⚠️ 风险预警：${riskyNames.join("、")}`);
+
+    if (publicReaction) {
+      lines.push(`潜在舆论反应：${publicReaction}`);
+    }
+  }
+
+  if (clean.length > 0) {
+    const cleanNames = clean.map(r => {
+      const en = r.id ? ENGLISH_DIMENSION_NAMES[r.id] || r.id : r.name;
+      return `${r.name}（${en}）`;
+    });
+    lines.push(`✅ 合规：${cleanNames.join("、")}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatLocalFindingsForPrompt(localFindings: any[]): string {
+  if (localFindings.length === 0) return "";
+  return [
+    "【本地规则初审命中】",
+    ...localFindings.map((f) => [
+      `- ${f.suggestedLevel || "⚪"} ${f.keyword} -> ${f.root || "未知词根"}`,
+      `  - 触发原因：${f.trigger}`,
+      `  - 风险描述：${f.riskDescription}`,
+    ].join("\n")),
+    "",
+  ].join("\n");
 }
 
 async function handleInventoryCheck(
