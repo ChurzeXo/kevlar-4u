@@ -46,6 +46,7 @@ type ReviewWizardStep =
   | "waitingForOrchestrationAudit"
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
+  | "waitingForReviewDecision" // 新增：初审完成后等待用户决定是否复审
   | "waitingForReviewerConfirmation"
   | "completed";
 
@@ -140,6 +141,9 @@ async function advanceWizard(
 
     case "waitingForPersonaCreation":
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+
+    case "waitingForReviewDecision":
+      return handleReviewDecision(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
 
     case "waitingForReviewerConfirmation":
       return handleReviewerConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
@@ -468,7 +472,7 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
 }
 
 function extractAuditCandidates(content: string): string[] {
-  const normalized = content.replace(/[\s,，。！？；;：:、"'“”‘’()[\]{}<>《》|/\\-]+/g, "");
+  const normalized = content.replace(/[\s,，。！？；;：:、"'""''()[\]{}<>《》|/\\-]+/g, "");
   const candidates = new Set<string>();
   for (let size = 2; size <= 4; size++) {
     for (let i = 0; i <= normalized.length - size; i++) {
@@ -524,9 +528,9 @@ function getFindingsLevel(findings: any[]): string {
 // ── Phase 2: Cross-validation for risky dimensions ──
 
 interface CrossValidationPair {
-  source: string; // auditor that found the risk
-  validator: string; // auditor that validates it
-  question: string; // what to ask the validator
+  source: string;
+  validator: string;
+  question: string;
 }
 
 const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
@@ -589,11 +593,9 @@ async function crossValidateRiskyDimensions(
       const parsed = JSON.parse(stripCodeFence(response.content.trim()));
       const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
 
-      // Merge validated findings into the validator's dimension
       const validatorDim = results.find((r) => r.id === pair.validator);
       if (validatorDim && validatedFindings.length > 0) {
         for (const vf of validatedFindings) {
-          // Only add if not already present (dedup by keyword)
           const exists = validatorDim.findings.some((existing: any) => existing.keyword === vf.keyword);
           if (!exists) {
             validatorDim.findings.push(vf);
@@ -637,7 +639,6 @@ function escapeMarkdownTableCell(value: unknown): string {
 
 function formatPreAuditTable(clean: Array<{ name: string; id?: string }>): string[] {
   if (clean.length === 0) return [];
-
   return [
     "| 审查维度 | 结果 |",
     "| --- | --- |",
@@ -652,7 +653,7 @@ function formatFindingRiskLine(finding: any): string {
       ? `「${finding.dimension}」`
       : "该内容";
   const parts = [
-    finding.root ? `词根为“${finding.root}”` : undefined,
+    finding.root ? `词根为"${finding.root}"` : undefined,
     finding.trigger,
     finding.riskDescription || finding.description,
     finding.propagationRisk,
@@ -725,25 +726,37 @@ function formatLocalFindingsForPrompt(localFindings: any[]): string {
   ].join("\n");
 }
 
+// ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
+
+function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
+  if (state.preAuditReport?.summary) {
+    return [
+      "<!-- kevlar:verbatim-pre-audit:start -->",
+      `初审结果\n\n${state.preAuditReport.summary}`,
+      "<!-- kevlar:verbatim-pre-audit:end -->",
+    ].join("\n");
+  }
+  return [
+    "<!-- kevlar:verbatim-pre-audit:start -->",
+    "初审结果\n\n未找到系统审查员，跳过初审",
+    "<!-- kevlar:verbatim-pre-audit:end -->",
+  ].join("\n");
+}
+
+// ── 初审完成：展示结果并询问是否复审 ─────────────────────────────────────────
+//
+// 改造说明（原 handleInventoryCheck）：
+// 原版把初审结果、评审员推荐、"开始复审"邀请混在同一条消息里。
+// 改造后只展示初审结果 + 询问"是否需要复审"，step 置为 waitingForReviewDecision。
+// 评审员推荐逻辑移至 handleReviewDecision，用户确认后才执行。
+
 async function handleInventoryCheck(
   tmpDir: string,
   state: ReviewWizardState,
   personas: Persona[],
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
-  // 初审结果摘要提示
-  const preAuditSummary = state.preAuditReport?.summary
-    ? [
-        "<!-- kevlar:verbatim-pre-audit:start -->",
-        `初审结果\n\n${state.preAuditReport.summary}`,
-        "<!-- kevlar:verbatim-pre-audit:end -->",
-      ].join("\n")
-    : [
-        "<!-- kevlar:verbatim-pre-audit:start -->",
-        "初审结果\n\n未找到系统审查员，跳过初审",
-        "<!-- kevlar:verbatim-pre-audit:end -->",
-      ].join("\n");
-
+  // 无评审员：提示创建，流程暂停
   if (personas.length === 0) {
     state.step = "waitingForPersonaCreation";
     state.selectedPersonaIds = [];
@@ -752,18 +765,51 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        preAuditSummary,
+        buildPreAuditSummaryBlock(state),
         "",
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
         "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      ].join("\n"),
     );
   }
 
-  // 仅 1-2 位评审员：直接全选，进入评审员确认
+  // 有评审员：展示初审结果，询问是否需要复审
+  state.step = "waitingForReviewDecision";
+  await saveState(tmpDir, state);
+  return toolResponse(
+    state,
+    [
+      buildPreAuditSummaryBlock(state),
+      "",
+      "初审已完成。是否需要进入复审？",
+      "",
+      "回复「需要」或「开始复审」即可，我会为你推荐合适的复审评审员。",
+    ].join("\n"),
+  );
+}
+
+// ── 用户决定是否复审 ──────────────────────────────────────────────────────────
+
+async function handleReviewDecision(
+  skillsDir: string,
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  const normalized = userMessage.trim();
+
+  // 宽松识别确认复审意图
+  const wantsReview = /需要|开始|复审|确认|继续|好的|好|ok|yes/i.test(normalized);
+
+  if (!wantsReview) {
+    return toolResponse(state, "请回复「需要」进入复审，或告诉我你的其他需求。");
+  }
+
+  // 用户确认复审：执行评审员推荐
+  // 仅 1-2 位评审员：直接全选
   if (personas.length <= 2) {
     state.selectedPersonaIds = [...personas.map((p) => p.meta.id)];
     state.remainingPersonaIds = [];
@@ -772,8 +818,6 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        preAuditSummary,
-        "",
         `当前共有 ${personas.length} 位评审员，已全部选中：`,
         "",
         ...personas.map(
@@ -781,13 +825,11 @@ async function handleInventoryCheck(
         ),
         "",
         "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      ].join("\n"),
     );
   }
 
-  // 3 位及以上：AI 推荐 1-3 位，其余放入备选
+  // 3 位及以上：AI 推荐 1-3 位
   const recommendation = await recommendPersonas(state, personas, samplingFn);
   const recommendedIds = new Set(recommendation.personaIds);
 
@@ -800,8 +842,6 @@ async function handleInventoryCheck(
   return toolResponse(
     state,
     [
-      preAuditSummary + "\n",
-      "",
       recommendation.assistantMessage,
       "",
       ...(remainingPersonas.length > 0
@@ -817,6 +857,8 @@ async function handleInventoryCheck(
       .join("\n"),
   );
 }
+
+// ── 等待用户确认评审员 ────────────────────────────────────────────────────────
 
 async function handleReviewerConfirmation(
   skillsDir: string,
@@ -881,7 +923,7 @@ async function handleSwapReviewer(
     );
   }
 
-  // 备选池为空，告知用户并询问是否开始评审
+  // 备选池为空
   if (state.remainingPersonaIds.length === 0) {
     const selected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
     return toolResponse(
@@ -900,7 +942,6 @@ async function handleSwapReviewer(
   const removedId = state.selectedPersonaIds[position - 1];
   const removedPersona = personas.find((p) => p.meta.id === removedId);
 
-  // 从备选池取第一位加入已选，被换下的回到备选池末尾
   const addedId = state.remainingPersonaIds.shift()!;
   state.selectedPersonaIds = state.selectedPersonaIds.filter((id) => id !== removedId);
   state.selectedPersonaIds.push(addedId);
@@ -940,7 +981,6 @@ async function recommendPersonas(
     state.context || undefined,
   );
 
-  // If RST recommender found matches, use them
   if (rstRecommendation.personaIds.length > 0 && rstRecommendation.assistantMessage) {
     return rstRecommendation;
   }
@@ -994,7 +1034,6 @@ async function recommendPersonas(
     }
   }
 
-  // Final fallback: heuristic recommendation
   return heuristicRecommendation(state, personas);
 }
 
@@ -1070,11 +1109,9 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
   if (input.sessionId && fs.existsSync(statePath)) {
     const raw = await fs.promises.readFile(statePath, "utf-8");
     const state = JSON.parse(raw) as ReviewWizardState;
-    // Backward compatibility: ensure dimensions field exists
     if (!state.dimensions) {
       state.dimensions = { ...DEFAULT_DIMENSIONS_CONFIG };
     }
-    // 会话超过 10 分钟未活动，清理旧文件并用原始文案重建新会话
     if (Date.now() - state.createdAt > 10 * 60 * 1000) {
       await cleanupState(tmpDir, sessionId);
       return {
@@ -1089,7 +1126,6 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
       };
     }
-    // Backward compatibility: ensure systemAuditorIds exists
     if (!state.systemAuditorIds) {
       state.systemAuditorIds = [];
     }
