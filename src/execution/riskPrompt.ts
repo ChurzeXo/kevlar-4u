@@ -1,43 +1,11 @@
 import type { Persona } from "../utils/parser.js";
-import type { AssociationPattern } from "../dao/types.js";
 
-const DEFAULT_PATTERNS: AssociationPattern[] = [
-  { pattern: "颜色+身体部位", risk_type: "涉黄风险" },
-  { pattern: "食材+异常修饰", risk_type: "黑话暗语" },
-  { pattern: "人名+负面标签", risk_type: "人身攻击" },
-];
+export function buildKevlarRiskDirective(_options?: unknown): string {
+  return `【❌ 铁律军规：严禁给出修改建议 ❌】
+你的职责是【只做客观判决与成因解释】，绝对不允许教用户如何修改文案！禁止输出任何诸如"建议修改为..."、"建议删除..."、"建议使用更温和的词汇..."等引导、重写或修改建议！违者将导致解析失败。
 
-const DEFAULT_EVOLUTION_STRATEGIES = ["缩写演化", "谐音演化", "拆字演化", "Emoji嵌入"];
-
-export function buildKevlarRiskDirective(options?: {
-  associationPatterns?: AssociationPattern[];
-  evolutionStrategies?: string[];
-}): string {
-  const patterns = options?.associationPatterns?.length
-    ? options.associationPatterns
-    : DEFAULT_PATTERNS;
-  const strategies = options?.evolutionStrategies?.length
-    ? options.evolutionStrategies
-    : DEFAULT_EVOLUTION_STRATEGIES;
-  const patternList = patterns.map((p) => `[${p.pattern}]（${p.risk_type}）`).join("、");
-  const strategyList = strategies.join("、");
-
-  return `# 角色设定
-你是网络文化风控专家与恶意舆论红队测试员。在审查用户输入时，必须严格执行以下逻辑：
-
-## 一、【联想四步法】（强制逐词执行）
-1. 词根提取：提取输入文本中的核心语素或潜在核心概念（如食物、身体、谐音字）。
-2. 模式匹配：检查是否命中 ${patternList} 等高危模式。
-3. 演化联想：主动推演其${strategyList}是否在当下亚文化社区具备恶意。
-4. 语境检查：判断当前语境是属于正常表达（如正常食材描述）还是触发了暗语恶意。
-
-## 二、【反向测试红队指令】
-假设你是一个极端恶意的匿名网友，为了故意“冲”这段内容，你会如何操作：
-- 哪些词可以被单独拎出来断章取义？
-- 哪些谐音/缩写可以被用来做恶意群体的对线表情包？
-- 如果字面意思和实际意思产生语义断裂，最坏的引战方向是什么？
-
-执行要求：宁可误报，不可漏报。即使看起来正常的词，也要给出你的演化路径。`;
+【核心工作法：独立沙盒隔离】
+为了防止各维度标准混淆导致角色偏移，你必须将大脑切分为多个完全独立的"虚拟沙盒栏位"。在处理某个审查维度时，必须且仅针对待审计内容进行分析，绝对不允许带入其他维度的逻辑。`;
 }
 
 export function buildPseudoParallelDirective(personas: Persona[]): string {
