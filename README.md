@@ -1,11 +1,11 @@
 # Kevlar-4u — Comment Section Simulator
 
 ![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![License](https://img.shields.io/badge/license-AGPLv3-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
-🌐 [English](README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+🌐 [English](README.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md)
 
 ---
 
@@ -22,6 +22,16 @@ You think the key point stands out, but readers can't tell what you're trying to
 And most platforms don't offer a real **A/B test**. Once content goes live, by the time the **first wave of organic traffic** passes, it's usually too late to revise.
 
 **Kevlar-4u helps you surface these problems before you hit publish.**
+
+---
+
+## License
+
+Kevlar-4u's core local features are open-sourced under the **AGPLv3** license.
+
+Cloud-based risk word cloud services, paid rule synchronization, and advanced features are **proprietary commercial services**.
+
+---
 
 ## Who needs Kevlar
 
