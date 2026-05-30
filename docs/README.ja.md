@@ -1,6 +1,6 @@
 # Kevlar — コメント欄シミュレーター
 
-![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
+![Release](https://img.shields.io/badge/release-ready-blue?logo=github)
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
