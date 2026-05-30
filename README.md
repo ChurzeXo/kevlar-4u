@@ -1,8 +1,7 @@
 # Kevlar-4u — Comment Section Simulator
 
-![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
-![License](https://img.shields.io/badge/license-AGPLv3-blue)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![License](https://img.shields.io/github/license/9Churze/kevlar-4u?color=blue)
+![Version](https://img.shields.io/badge/version-1.3.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
 🌐 [English](README.md) · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md)
