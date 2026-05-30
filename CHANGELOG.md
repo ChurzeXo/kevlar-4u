@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.3.0] - 2026-05-30
+
+### Changed
+
+- **License changed from MIT to AGPLv3**
+  - Core local features remain open-source under AGPLv3
+  - Cloud-based risk word cloud services, paid rule synchronization, and advanced features are proprietary commercial services
+- **Documentation restructured**
+  - Added License section to all README files (English, Chinese, Japanese, Korean)
+  - Moved multi-language READMEs from root to `docs/` directory
+  - Updated `package.json` license field to `AGPL-3.0-or-later`
+  - Disabled npmjs language switcher (only English README in root)
+
+---
+
 ## [1.2.0] - 2026-05-27
 
 ### Added
