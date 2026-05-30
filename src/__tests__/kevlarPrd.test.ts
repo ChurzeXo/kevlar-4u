@@ -22,7 +22,7 @@ afterEach(() => {
 
 function writeCoreRules(): void {
   fs.writeFileSync(
-    path.join(tmpDir, "rules.json"),
+    path.join(tmpDir, "rules_free.json"),
     JSON.stringify({
       core_rules: {
         association_patterns: [
@@ -84,8 +84,8 @@ describe("Kevlar PRD rule repository", () => {
   });
 
   it("keeps packaged rules under 5KB", () => {
-    const size = fs.statSync(path.join(process.cwd(), "skills", "rules.json")).size;
-    assert.ok(size < 5 * 1024, `rules.json is ${size} bytes`);
+    const size = fs.statSync(path.join(process.cwd(), "skills", "rules_free.json")).size;
+    assert.ok(size < 5 * 1024, `rules_free.json is ${size} bytes`);
   });
 });
 

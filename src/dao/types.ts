@@ -7,10 +7,21 @@ export interface AssociativeRule {
   suggestion: string;
 }
 
+export interface MultiHopPattern {
+  pattern: string[];
+  risk: string;
+  type: string;
+}
+
 export interface RuleCategory {
-  enabled: boolean;
-  weight: number;
-  associative_map: AssociativeRule[];
+  enabled?: boolean;
+  weight?: number;
+  associative_map?: AssociativeRule[];
+  multi_hop_patterns?: MultiHopPattern[];
+  // Legacy fields for backward compatibility
+  name?: string;
+  severity?: string;
+  rules?: any[];
 }
 
 export interface RuleMeta {

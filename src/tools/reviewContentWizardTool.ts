@@ -214,7 +214,7 @@ async function handleSystemAudit(
 
     state.step = "waitingForOrchestrationAudit";
     await saveState(tmpDir, state);
-    return toolResponse(state, buildOrchestrationPrompt(state.content));
+    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors));
   }
 
   try {
@@ -231,7 +231,7 @@ async function handleSystemAudit(
     });
     state.step = "waitingForOrchestrationAudit";
     await saveState(tmpDir, state);
-    return toolResponse(state, buildOrchestrationPrompt(state.content));
+    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors));
   }
 }
 

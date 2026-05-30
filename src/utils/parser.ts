@@ -25,6 +25,12 @@ export interface PersonaMeta {
   behaviorHints?: PersonaBehaviorHints;
   /** RST v1 四层互联网反应模拟人格配置 */
   rst?: import("../execution/dimensions.js").RSTConfig;
+  /** Sandbox configuration for system auditors */
+  sandbox?: {
+    responsibility: string;
+    logic: string;
+    target: string;
+  };
 }
 
 export interface PersonaBehaviorHints {

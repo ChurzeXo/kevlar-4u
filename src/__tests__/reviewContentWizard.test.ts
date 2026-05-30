@@ -63,7 +63,7 @@ async function writePersona(id: string, name: string, tags: string[]): Promise<v
 
 function writePrdRules(): void {
   fs.writeFileSync(
-    path.join(skillsDir, "rules.json"),
+    path.join(skillsDir, "rules_free.json"),
     JSON.stringify({
       version: "2.0.0",
       last_updated: "2026-05-28",

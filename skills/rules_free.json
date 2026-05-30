@@ -1,0 +1,87 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-30",
+  "tier": "free",
+  "description": "免费版基础规则库 - 覆盖主流风险，包含多跳联想与大量实用示例",
+  "categories": {
+    "network_culture": {
+      "name": "网络文化与黑话",
+      "severity": "high",
+      "rules": [
+        {
+          "root": "木耳",
+          "variants": ["粉木耳", "黑木耳", "白木耳", "吃木耳"],
+          "risk": "经典低俗黑话",
+          "type": "涉黄"
+        },
+        { "root": "菊花", "variants": ["爆菊", "菊花残", "护菊"], "risk": "经典低俗黑话", "type": "涉黄" },
+        { "root": "约吗", "variants": ["约不约", "出来约", "今晚约"], "risk": "性邀约暗语", "type": "涉黄" },
+        { "root": "米虫", "variants": ["米虫文学"], "risk": "低俗/饭圈黑话", "type": "涉黄" },
+        { "root": "蚌埠住了", "risk": "嘲讽/阴阳怪气", "type": "情绪风险" },
+        { "root": "破防", "risk": "情绪化攻击", "type": "对立" },
+        { "root": "凡尔赛", "variants": ["凡尔赛文学"], "risk": "炫耀式表达", "type": "反向风险" },
+        { "root": "吃瓜", "variants": ["吃瓜群众", "瓜"], "risk": "围观起哄", "type": "中性" }
+      ],
+      "multi_hop_patterns": [
+        { "pattern": ["粉嫩", "食材"], "risk": "低俗联想（粉嫩+食材）", "type": "涉黄" },
+        { "pattern": ["粉", "嫩", "多汁"], "risk": "低俗联想", "type": "涉黄" },
+        { "pattern": ["黑", "白", "红", "身体部位"], "risk": "颜色+身体部位低俗联想", "type": "涉黄" },
+        { "pattern": ["小仙女", "公主病"], "risk": "性别刻板+凡尔赛", "type": "反向风险" },
+        { "pattern": ["内卷", "躺平", "精神内耗"], "risk": "代际/阶层对立", "type": "对立煽动" }
+      ]
+    },
+    "social_risk": {
+      "name": "社会伦理与群体风险",
+      "severity": "high",
+      "rules": [
+        { "root": "女司机", "risk": "性别刻板印象", "type": "歧视" },
+        { "root": "直男癌", "risk": "性别对立", "type": "对立煽动" },
+        {
+          "root": "某省人",
+          "variants": ["北方人", "南方人", "东北人", "河南人"],
+          "risk": "地域攻击",
+          "type": "地域歧视"
+        },
+        { "root": "凡尔赛", "risk": "优越感炫耀", "type": "特权凝视" },
+        { "root": "圣母", "risk": "道德绑架", "type": "反向风险" },
+        { "root": "阴阳怪气", "risk": "攻击性语气", "type": "情绪风险" },
+        { "root": "小镇做题家", "risk": "阶层嘲讽", "type": "身份污名化" },
+        { "root": "油腻", "risk": "中年男性刻板印象", "type": "歧视" },
+        { "root": "精神股东", "risk": "粉丝经济嘲讽", "type": "群体冒犯" }
+      ]
+    },
+    "compliance": {
+      "name": "法律合规",
+      "severity": "critical",
+      "rules": [
+        { "root": "最", "risk": "广告法极限词", "type": "虚假宣传" },
+        { "root": "第一", "risk": "广告法极限词", "type": "虚假宣传" },
+        { "root": "唯一", "risk": "广告法极限词", "type": "虚假宣传" },
+        { "root": "包治", "risk": "非法医疗宣传", "type": "医疗风险" },
+        { "root": "保本", "risk": "非法金融承诺", "type": "金融风险" },
+        { "root": "国家级", "risk": "违规使用国家相关用语", "type": "政治红线" },
+        { "root": "百年", "risk": "敏感历史时间节点", "type": "政治风险" }
+      ]
+    },
+    "context_distortion": {
+      "name": "语境脱嵌风险",
+      "severity": "high",
+      "rules": [
+        { "root": "努力", "context": "女生要努力", "risk": "可能被解读为PUA", "type": "性别对立" },
+        { "root": "会做生意", "context": "某地人会做生意", "risk": "地域刻板印象", "type": "地域歧视" },
+        { "root": "我不是针对谁", "risk": "经典阴阳怪气", "type": "情绪风险" }
+      ]
+    },
+    "factual_integrity": {
+      "name": "事实与逻辑硬伤",
+      "severity": "medium",
+      "rules": [
+        { "root": "众所周知", "risk": "可能无依据", "type": "过度泛化" },
+        { "root": "所有", "risk": "绝对化表达", "type": "逻辑漏洞" },
+        { "root": "永远", "risk": "绝对化表达", "type": "逻辑漏洞" }
+      ]
+    }
+  },
+  "evolution_strategies": ["谐音", "缩写", "拆字", "Emoji嵌入", "多跳联想", "热点事件绑定"],
+  "update_frequency": "每月更新"
+}

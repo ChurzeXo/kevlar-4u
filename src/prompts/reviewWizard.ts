@@ -25,61 +25,10 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 - 仅输出：风险评测、社会语义分析、传播风险评估、多视角评审意见
 - 绝不：修改原文、优化文案、重写内容、提供法律/医疗/投资建议`;
 
-export interface AuditSandbox {
-  id: number;
-  name: string;
-  codeName: string;
-  responsibility: string;
-  logic: string;
-  target: string;
-}
-
-const AUDIT_SANDBOXES: AuditSandbox[] = [
-  {
-    id: 1,
-    name: "合规哨兵",
-    codeName: "legal_compliance",
-    responsibility: "审查广告法、虚假宣传、非法建议、侵权、政治红线等硬合规风险。",
-    logic: "严格以法律法规和平台规则为准绳，零容忍绝对化用语和无依据承诺。",
-    target: "抓取法律与平台硬性违规片段。",
-  },
-  {
-    id: 2,
-    name: "语境猎手",
-    codeName: "context_distortion",
-    responsibility: "审查语境脱嵌风险，评估内容被截图、断章取义后的恶意解读可能。",
-    logic: "专注于『脱离原始上下文后』会被如何曲解，使用最坏解读原则。",
-    target: "抓取易被断章取义、二次创作的风险点。",
-  },
-  {
-    id: 3,
-    name: "暗语破译",
-    codeName: "network_culture_risk",
-    responsibility: "审查网络黑话、亚文化梗、隐晦低俗含义及最新网络文化风险。",
-    logic: "以互联网最坏解读为标准，识别可能引发群体嘲讽或公关危机的暗语。",
-    target: "抓取网络文化误读和黑话风险。",
-  },
-  {
-    id: 4,
-    name: "事实判官",
-    codeName: "factual_integrity",
-    responsibility: "审查事实错误、常识背离、逻辑漏洞、数据失真等问题。",
-    logic: "以可靠常识、逻辑和公开事实为准绳，识别硬伤。",
-    target: "抓取事实硬伤与逻辑谬误。",
-  },
-  {
-    id: 5,
-    name: "社伦判官",
-    codeName: "social_risk",
-    responsibility: "审查社会伦理风险、群体冒犯、歧视偏见、语气情绪问题及反向风险。",
-    logic: "同时应用最坏解读原则和反向风险原则，关注歧视、物化、对立、凡尔赛、道德绑架等。",
-    target: "抓取社会风险、伦理问题与情绪反噬点。",
-  },
-];
-
-export function buildFiveSandboxesSection(): string {
-  const sections = AUDIT_SANDBOXES.map((sandbox) => {
-    return `[沙盒 #${sandbox.id}: ${sandbox.name} (${sandbox.codeName})]
+export function buildFiveSandboxesSection(systemAuditors: Persona[]): string {
+  const sections = systemAuditors.map((auditor, index) => {
+    const sandbox = auditor.meta.sandbox || { responsibility: "暂无配置", logic: "暂无配置", target: "暂无配置" };
+    return `[沙盒 #${index + 1}: ${auditor.meta.name} (${auditor.meta.id})]
 - 职责：${sandbox.responsibility}
 - 逻辑：${sandbox.logic}
 - 目标：${sandbox.target}`;
@@ -103,7 +52,7 @@ export function buildCommonRiskRules(): string {
   ].join("\n");
 }
 
-export function buildOrchestrationPrompt(userContent: string): string {
+export function buildOrchestrationPrompt(userContent: string, systemAuditors: Persona[]): string {
   return [
     `你是一个高精度的 **Kevlar 本地内容安全审查引擎**。`,
     ``,
@@ -114,7 +63,7 @@ export function buildOrchestrationPrompt(userContent: string): string {
     `【核心工作法：独立沙盒隔离】`,
     `为了防止各维度标准混淆导致角色偏移，你必须将大脑切分为 5 个完全独立的"虚拟沙盒栏位"。在处理某个沙盒时，必须且仅针对下文"待审计输入内容"围栏内的文本进行分析，绝对不允许带入其他沙盒的逻辑。`,
     ``,
-    buildFiveSandboxesSection(),
+    buildFiveSandboxesSection(systemAuditors),
     ``,
     `===========================================================`,
     `【第二阶段：交叉验证与冲突仲裁（CROSS_AUDIT_VERIFICATION）】`,

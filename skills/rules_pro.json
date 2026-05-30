@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-05-30",
+  "tier": "pro",
+  "description": "Pro版高级规则库 - 实时热点 + 复杂场景（后端开发中）",
+  "categories": {
+    "network_culture": {
+      "name": "网络文化与黑话（Pro）",
+      "severity": "high",
+      "rules": [{ "root": "示例占位", "risk": "Pro版实时热点黑话", "type": "涉黄/低俗" }],
+      "multi_hop_patterns": [{ "pattern": ["示例", "多跳"], "risk": "Pro版复杂多跳联想", "type": "高级风险" }]
+    }
+  },
+  "evolution_strategies": ["谐音", "缩写", "拆字", "Emoji嵌入", "多跳联想", "亚文化专属", "实时热点"],
+  "update_frequency": "每周/每日更新（云同步）",
+  "pro_features": ["实时热点词库", "亚文化专属规则", "社区反馈优化", "自定义高级规则"]
+}
