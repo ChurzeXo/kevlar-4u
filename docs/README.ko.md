@@ -1,7 +1,7 @@
 # Kevlar — 댓글 시뮬레이터
 
 ![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
-![License](https://img.shields.io/badge/license-AGPLv3-blue)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
@@ -27,7 +27,7 @@
 
 ## 라이선스
 
-Kevlar-4u의 핵심 로컬 기능은 **AGPLv3** 라이선스로 오픈소스화되어 있습니다.
+Kevlar-4u의 핵심 로컬 기능은 **AGPL-3.0** 라이선스로 오픈소스화되어 있습니다.
 
 클라우드 기반 리스크 워드 클라우드 서비스, 유료 규칙 동기화 및 고급 기능은 **독점 상용 서비스**입니다.
 

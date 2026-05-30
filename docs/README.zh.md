@@ -1,7 +1,7 @@
 # Kevlar — 社交媒体作品发布前的反馈模拟器
 
 ![Release](https://img.shields.io/github/actions/workflow/status/9Churze/kevlar-4u/release.yml?label=Release&logo=github)
-![License](https://img.shields.io/badge/license-AGPLv3-blue)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
@@ -27,7 +27,7 @@
 
 ## 许可协议
 
-Kevlar-4u 的核心本地功能以 **AGPLv3** 协议开源。
+Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
 
 云端风险词云服务、付费规则同步及高级功能属于**商业闭源服务**。
 

@@ -27,7 +27,7 @@ And most platforms don't offer a real **A/B test**. Once content goes live, by t
 
 ## License
 
-Kevlar-4u's core local features are open-sourced under the **AGPLv3** license.
+Kevlar-4u's core local features are open-sourced under the **AGPL-3.0** license.
 
 Cloud-based risk word cloud services, paid rule synchronization, and advanced features are **proprietary commercial services**.
 
