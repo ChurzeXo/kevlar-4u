@@ -801,8 +801,8 @@ async function handleReviewDecision(
 ): Promise<ToolResult> {
   const normalized = userMessage.trim();
 
-  // 宽松识别确认复审意图
-  const wantsReview = /需要|开始|复审|确认|继续|好的|好|ok|yes/i.test(normalized);
+  // 宽松识别确认复审意图（"好"需要完整词边界，不匹配"这篇不好"中的"好"）
+  const wantsReview = /^(?:需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes)$|^开始$|^确认$|^需要$|^是$|^嗯$/i.test(normalized);
 
   if (!wantsReview) {
     return toolResponse(state, "请回复「需要」进入复审，或告诉我你的其他需求。");

@@ -16,8 +16,9 @@
     "title": "评审员列表",
     "description": "查看已有评审员列表。",
     "empty": "暂无评审员",
-    "count": "共 {{count}} 个评审员",
-    "platformCount": "{{platform}} 平台: {{count}} 个"
+    "emptyMessage": "⚠️ 没有任何评审员，你可以先创建一些自定义评审员。",
+    "count": "共 {{count}} 位评审员",
+    "platformCount": "{{platform}} 平台: {{count}} 位"
   },
   "createPersona": {
     "title": "创建评审员",

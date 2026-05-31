@@ -22,33 +22,12 @@ export function buildKevlarRiskDirective(_options?: unknown): string {
 }
 
 /**
- * 构建伪并行执行指令（显式 CoT 版本）
+ * 构建伪并行执行规范（仅声明式头部，不含 outputBlocks）
+ *
+ * 每个审查员的输出结构由 personaBlocks 中的 <cot_N> / <findings_N>
+ * 和 PERSONA_END 标记定义，此处只声明执行规则避免双重输出框架。
  */
 export function buildPseudoParallelDirective(personas: Persona[]): string {
-  const outputBlocks = personas
-    .map((persona, index) => {
-      const n = index + 1;
-      return `\
-═══════════════════════════════════════
-▶ 审查员 ${n} 号：[${persona.meta.name}]
-═══════════════════════════════════════
-【独立声明】我的评估不参考任何其他审查员的输出，仅依据待审内容和本角色设定。
-
-<cot_${n}>
-请在此写出完整推理过程（不得省略）：
-1. 本角色负责哪些风险类型？
-2. 逐项检查待审内容，列出所有候选风险点。
-3. 对每个候选点逐一判断：是否成立？严重程度？理由是什么？
-4. 若无任何风险，明确写出"未发现风险"并说明原因。
-</cot_${n}>
-
-<findings_${n}>
-（在此输出本角色的最终结论，格式严格遵循角色定义中的输出规范。
-  若无风险则输出空结论，不得省略此标签。）
-</findings_${n}>`;
-    })
-    .join("\n\n");
-
   const personaNames = personas.map((p, i) => `审查员 ${i + 1} 号 [${p.meta.name}]`).join("、");
 
   return `\
@@ -60,20 +39,8 @@ export function buildPseudoParallelDirective(personas: Persona[]): string {
 - 每个审查员执行时，【只能】基于"待审内容"和自身角色定义作出判断。
 - 严禁使用"正如前一位审查员所说""同上""我同意上一位"等任何跨角色引用。
 - 必须先完整输出 <cot_N>（推理过程），再输出 <findings_N>（最终结论），不得颠倒或合并。
-- 所有审查员执行完毕后，仲裁层读取全部 <findings_N> 标签内容进行合并。
-
-${outputBlocks}
-
-═══════════════════════════════════════
-▶ 仲裁层：最终风控合并报告
-═══════════════════════════════════════
-请读取上方所有 <findings_N> 标签中的结论，执行以下操作：
-1. 合并所有发现，去除重复项，保留最高风险等级。
-2. 识别跨审查员的冲突点（如某审查员判高危、另一审查员判合规），给出仲裁理由。
-3. 按风险等级（🔴 → 🟡 → 🟢）排序输出最终报告。
-
-【严禁】将 <cot_N> 中的推理过程作为最终结论输出。
-【严禁】输出任何文案修改建议。`;
+- 每个审查员输出完毕后，必须输出 <!-- KEVLAR_PERSONA_END:N --> 标记。
+- 所有审查员执行完毕后，按下方「最终汇总报告」格式输出合并报告。`;
 }
 
 function safeFunctionName(name: string): string {

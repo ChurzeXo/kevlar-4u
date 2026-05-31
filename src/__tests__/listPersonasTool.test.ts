@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, before } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
@@ -7,8 +7,13 @@ import * as os from "os";
 import { handleListPersonas } from "../tools/listPersonasTool.js";
 import { writePersonaFile, invalidatePersonasCache } from "../utils/parser.js";
 import type { PersonaMeta } from "../utils/parser.js";
+import { initI18n } from "../i18n/index.js";
 
 let skillsDir: string;
+
+before(async () => {
+  await initI18n();
+});
 
 beforeEach(() => {
   skillsDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-list-test-"));

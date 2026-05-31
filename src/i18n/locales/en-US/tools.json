@@ -16,6 +16,7 @@
     "title": "Reviewer List",
     "description": "View existing reviewer list.",
     "empty": "No reviewers yet",
+    "emptyMessage": "⚠️ No reviewers available. You can create custom reviewers to start reviewing.",
     "count": "Total {{count}} reviewers",
     "platformCount": "{{platform}}: {{count}} reviewers"
   },

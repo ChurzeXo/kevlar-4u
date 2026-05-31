@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, mock } from "node:test";
+import { describe, it, beforeEach, afterEach, before, mock } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
@@ -23,8 +23,13 @@ import { directApiHandler } from "../execution/modes/direct_api.js";
 import { samplingHandler } from "../execution/modes/sampling.js";
 import { writePersonaFile } from "../utils/parser.js";
 import type { Persona, PersonaMeta } from "../utils/parser.js";
+import { initI18n } from "../i18n/index.js";
 
 let tmpDir: string;
+
+before(async () => {
+  await initI18n();
+});
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-exec-test-"));

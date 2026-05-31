@@ -37,7 +37,10 @@ describe("scanForCredentials", () => {
   });
 
   it("detects Slack tokens (xoxb-)", () => {
-    const result = scanForCredentials("xoxb-FAKE_TOKEN_1234567890_abcdefghijklmnop");
+    // Construct token at test time to avoid GitHub secret scanner false positive
+    const prefix = "xoxb";
+    const token = `${prefix}-1234567890-1234567890-abcdefghijklmnopABCDEFGH`;
+    const result = scanForCredentials(token);
     assert.ok(result.length > 0);
     assert.ok(result[0].match(/xoxb-/));
   });

@@ -108,22 +108,31 @@ describe("handleReviewContentWizard state machine", () => {
     await writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
     await writePersona("logic_reader", "逻辑读者", ["知乎", "逻辑"]);
 
-    // Step 1: submit content → waitingForReviewerConfirmation
+    // Step 1: submit content → waitingForReviewDecision (初审结果 + 询问是否复审)
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
       userMessage: "请评测这篇内容：这是一篇新品发布文案。",
     });
 
     const startText = textOf(started);
-    assert.ok(startText.includes("当前共有 2 位评审员"));
-    assert.ok(startText.includes("视觉读者"));
-    assert.ok(startText.includes("逻辑读者"));
-    assert.ok(startText.includes("请回复「开始复审」确认执行"));
-    assert.ok(startText.includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(startText.includes("是否需要进入复审"));
+    assert.ok(startText.includes("currentStep: waitingForReviewDecision"));
     assert.ok(!startText.includes("这份内容准备投放在哪些平台"));
     assert.ok(!startText.includes("Kevlar-4u 宿主辅助评测任务"));
 
-    // Step 2: "开始复审" → executes review
+    // Step 2: confirm review → waitingForReviewerConfirmation (shows all personas)
     const sessionId = extractSessionId(startText);
+    const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "开始复审",
+    });
+    const confirmText = textOf(confirmed);
+    assert.ok(confirmText.includes("当前共有 2 位评审员"));
+    assert.ok(confirmText.includes("视觉读者"));
+    assert.ok(confirmText.includes("逻辑读者"));
+    assert.ok(confirmText.includes("请回复「开始复审」确认执行"));
+    assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
+
+    // Step 3: "开始复审" → executes review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始复审",
@@ -140,10 +149,11 @@ describe("handleReviewContentWizard state machine", () => {
     // Create a persona with a very short name "好"
     await writePersona("good_reader", "好", ["小红书", "视觉"]);
     
+    // Step 1: submit content → waitingForReviewDecision
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
       userMessage: "请评测这篇内容：这是一篇新品发布文案。",
     });
-    assert.ok(textOf(started).includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(textOf(started).includes("currentStep: waitingForReviewDecision"));
     const sessionId = extractSessionId(textOf(started));
     
     // User message contains "好" but is not exactly "好" — should not trigger false affirmative
@@ -153,10 +163,10 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(selection);
-    // Should NOT say "已选择：好" — "这篇不好" should not match short persona name
+    // Should NOT match "好" as affirmative — stay at waitingForReviewDecision
     assert.ok(!text.includes("已选择：好"));
-    // Should stay in waitingForReviewerConfirmation since input was not recognized
-    assert.ok(text.includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(!text.includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(text.includes("currentStep: waitingForReviewDecision"));
   });
 
   it('with 3+ personas: recommends 1-3, shows remaining, waits for reviewer confirmation then executes review', async () => {
@@ -165,23 +175,31 @@ describe("handleReviewContentWizard state machine", () => {
     await writePersona("mom_user", "宝妈用户", ["抖音", "生活"]);
     await writePersona("student", "学生党", ["B站", "校园"]);
 
-    // Step 1: submit content → waitingForReviewerConfirmation (AI recommends 1-3)
+    // Step 1: submit content → waitingForReviewDecision
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
       userMessage: "请评测这篇美食文案：这是一篇关于菌菇产品的介绍。",
     });
     const startText = textOf(started);
+    assert.ok(startText.includes("currentStep: waitingForReviewDecision"));
+
     const sessionId = extractSessionId(startText);
 
-    assert.ok(startText.includes("currentStep: waitingForReviewerConfirmation"));
-    assert.ok(startText.includes("备选评审员"));
+    // Step 2: confirm review → waitingForReviewerConfirmation (AI recommends 1-3)
+    const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "开始复审",
+    });
+    const confirmText = textOf(confirmed);
+    assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(confirmText.includes("备选评审员"));
     assert.ok(
-      startText.includes("美食达人") ||
-      startText.includes("科技极客") ||
-      startText.includes("宝妈用户") ||
-      startText.includes("学生党")
+      confirmText.includes("美食达人") ||
+      confirmText.includes("科技极客") ||
+      confirmText.includes("宝妈用户") ||
+      confirmText.includes("学生党")
     );
 
-    // Step 2: "开始复审" → executes review
+    // Step 3: "开始复审" → executes review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始复审",
@@ -280,9 +298,8 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("Kevlar-4u 系统初审内生编排任务"));
-    assert.ok(text.includes("本地规则结果"));
-    assert.ok(text.includes("五角色审查矩阵"));
+    assert.ok(text.includes("Kevlar 本地内容安全审查引擎"));
+    assert.ok(text.includes("待审计的输入内容"));
     assert.ok(text.includes("currentStep: waitingForOrchestrationAudit"));
 
     const sessionId = extractSessionId(text);
@@ -302,9 +319,18 @@ describe("handleReviewContentWizard state machine", () => {
       }),
     });
 
+    // Orchestration audit result is parsed → goes to inventory check → waitingForReviewDecision
     const parsedText = textOf(parsed);
-    assert.ok(parsedText.includes("currentStep: waitingForReviewerConfirmation"));
+    assert.ok(parsedText.includes("currentStep: waitingForReviewDecision"));
     assert.ok(parsedText.includes("宿主编排初审完成"));
+
+    // Step 3: confirm review → proceeds to reviewer confirmation
+    const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: "开始复审",
+    });
+    const confirmText = textOf(confirmed);
+    assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
   });
 
   it("passes local DAO findings into sampling system-auditor prompts", async () => {
@@ -328,7 +354,7 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     assert.ok(calls.length >= 1);
-    assert.ok(calls[0].systemPrompt.includes("联想四步法"));
+    assert.ok(calls[0].systemPrompt.includes("严格遵守审查边界"));
     assert.ok(calls[0].messages[0].content.includes("本地规则初审命中"));
     assert.ok(calls[0].messages[0].content.includes("粉耳 -> 木耳"));
   });

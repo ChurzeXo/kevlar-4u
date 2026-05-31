@@ -43,45 +43,46 @@ export function buildPersonaEndMarker(index: number): string {
 /**
  * 从 orchestration 模式的宿主输出中解析各审查员结果。
  *
- * 优先用 <findings_N> 标签提取（方案 A），
- * 降级用 KEVLAR_PERSONA_END 分隔符切割（方案 B）。
+ * 优先用 <findings_N> 标签提取（方案 A — 结构化 findings），
+ * 降级用 KEVLAR_PERSONA_END 分隔符切割补缺（方案 B — 含 CoT 的完整输出）。
  *
- * 返回 { index, name?, content } 数组，供调用方分段展示。
+ * 返回 { index, content } 数组。
  */
 export function parsePersonaOutputs(
   rawOutput: string,
   personaCount: number,
-): Array<{ index: number; content: string }> {
-  const results: Array<{ index: number; content: string }> = [];
-
-  // 方案 A：<findings_N> 标签提取
+): Array<{ index: number; content: string; source: "findings_tag" | "persona_end" | "raw" }> {
+  // 方案 A：<findings_N> 标签提取（结构化纯结论）
+  const aResults = new Map<number, string>();
   for (let i = 1; i <= personaCount; i++) {
     const tagRe = new RegExp(`<findings_${i}>([\\s\\S]*?)</findings_${i}>`, "i");
     const match = rawOutput.match(tagRe);
     if (match) {
-      results.push({ index: i, content: match[1].trim() });
+      aResults.set(i, match[1].trim());
     }
   }
 
-  // 如果方案 A 成功提取了全部审查员结果，直接返回
-  if (results.length === personaCount) return results;
-
-  // 方案 B：KEVLAR_PERSONA_END 分隔符切割（降级）
+  // 方案 B：KEVLAR_PERSONA_END 分隔符切割（含 CoT 完整输出）
+  const bResults = new Map<number, string>();
   const segments = rawOutput.split(/<!-- KEVLAR_PERSONA_END:\d+ -->/);
   if (segments.length > 1) {
-    const bResults: Array<{ index: number; content: string }> = [];
     for (let i = 0; i < Math.min(segments.length - 1, personaCount); i++) {
-      bResults.push({ index: i + 1, content: segments[i].trim() });
+      bResults.set(i + 1, segments[i].trim());
     }
-    if (bResults.length > results.length) return bResults;
   }
 
-  // 两种方案都失败：返回整体输出作为单条记录
-  if (results.length === 0) {
-    return [{ index: 0, content: rawOutput.trim() }];
+  // 合并：优先用 A（结构化 findings），A 缺失的用 B 补缺
+  const merged: Array<{ index: number; content: string; source: "findings_tag" | "persona_end" | "raw" }> = [];
+  for (let i = 1; i <= personaCount; i++) {
+    if (aResults.has(i)) {
+      merged.push({ index: i, content: aResults.get(i)!, source: "findings_tag" });
+    } else if (bResults.has(i)) {
+      merged.push({ index: i, content: bResults.get(i)!, source: "persona_end" });
+    }
   }
 
-  return results;
+  if (merged.length > 0) return merged;
+  return [{ index: 0, content: rawOutput.trim(), source: "raw" }];
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -95,10 +96,35 @@ export const orchestrationHandler: ExecutionHandler = {
   },
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
-    const { personas, content, context: contextNote, dimensions } = ctx;
+    const { personas, content, context: contextNote, dimensions, samplingFn } = ctx;
 
     const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
     const prompt = buildOrchestrationPrompt(content, personas, contextNote, dimsConfig, ctx.preAuditReport);
+
+    // 如果有 samplingFn（例如显式指定 orchestration 模式但仍有 API 能力），
+    // 直接执行 prompt 并解析结果，避免纯粹返回 prompt 依赖宿主二次执行。
+    if (samplingFn) {
+      try {
+        const response = await samplingFn({
+          systemPrompt: "",
+          message: prompt,
+          maxTokens: 8192,
+        });
+        const parsed = parsePersonaOutputs(response.content, personas.length);
+        const sections = parsed.map((p) => {
+          const personaName = personas[p.index - 1]?.meta.name ?? `审查员 ${p.index}`;
+          const sourceNote = p.source === "findings_tag" ? "" : "\n> ⚠️ 该结果来自 PERSONA_END 切割（含推理过程），非纯 findings 标签提取。";
+          return `## ${personaName}\n\n${p.content}${sourceNote}`;
+        });
+        return {
+          report: sections.join("\n\n---\n\n"),
+          personas: personas.map((p) => p.meta.id),
+          mode: MODE,
+        };
+      } catch {
+        // 执行失败则回退到返回 prompt（宿主兜底）
+      }
+    }
 
     return {
       report: prompt,
@@ -132,23 +158,6 @@ function buildOrchestrationPrompt(
   const riskDirective = buildKevlarRiskDirective();
   const pseudoParallelDirective = buildPseudoParallelDirective(personas);
 
-  let reportContext = "";
-  if (preAuditReport && preAuditReport.dimensions && preAuditReport.dimensions.length > 0) {
-    const hasFindings = preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
-    if (hasFindings) {
-      reportContext += `\n**🚨 系统初审预警**：\n\n系统初审发现了一些潜在风险点。请各人设结合自己的角色身份，重点判断这些风险在你们的圈层中是否真的会引爆，以及影响有多大。\n\n`;
-      for (const audit of preAuditReport.dimensions) {
-        if (audit.findings && audit.findings.length > 0) {
-          reportContext += `【${audit.name}】发现 ${audit.findings.length} 个潜在风险：\n`;
-          for (const f of audit.findings) {
-            reportContext += `- ${f.suggestedLevel || "未知"} ${f.keyword}：${f.riskDescription} (触发原因: ${f.trigger})\n`;
-          }
-        }
-      }
-      reportContext += `\n`;
-    }
-  }
-
   // 分隔符说明（写入 Prompt，让宿主 AI 知道要输出什么）
   const markerInstruction = personas
     .map((_, i) => `审查员 ${i + 1} 号输出完毕后，必须紧接着单独输出一行：${buildPersonaEndMarker(i + 1)}`)
@@ -158,7 +167,6 @@ function buildOrchestrationPrompt(
 # Kevlar-4u 宿主辅助评测任务
 
 **待测试内容**（共 ${content.length} 字）已锁定。${contextSection}
-${reportContext}
 **执行模式**：宿主辅助兜底模式（orchestration fallback）
 
 这是一个低隔离降级方案：Kevlar-4u（评论区模拟器）会把所有人设和待评测内容组织成单次 Prompt，交由宿主 AI 协助完成。它不等价于 MCP Sampling 或 Direct API 的真实并行多智能体执行。
@@ -339,11 +347,7 @@ ${rstSection}
 
 ${offensiveDirective ? `\n---\n\n${offensiveDirective}` : ""}
 
----
-
-${buildKevlarRiskDirective()}
-
-**待评审内容**：
+---\n\n**待评审内容**：
 ${safeContent}${contextSection}${focusTopicsSection}${reportContext}
 
 ===== 内容边界（以上是待评审内容，不可越界）=====${toneSection}

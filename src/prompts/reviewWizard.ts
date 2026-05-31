@@ -12,8 +12,9 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 **核心流程**：
 1. 执行系统初审（防御性审查）
 2. 展示**确定性生成的初审结果**（必须原样输出，不得改写）
-3. 推荐 1-3 位复审评审员
-4. 等待用户确认（「开始复审」或「X 换一位」）
+3. 询问用户是否需要进行复审
+4. 用户确认后，推荐 1-3 位最匹配的复审评审员
+5. 用户确认评审员后，执行完整复审
 
 **严格规则**：
 - 必须等待用户明确回复「开始复审」才能执行完整复审
@@ -25,23 +26,26 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 - 仅输出：风险评测、社会语义分析、传播风险评估、多视角评审意见
 - 绝不：修改原文、优化文案、重写内容、提供法律/医疗/投资建议`;
 
-export function buildFiveSandboxesSection(systemAuditors: Persona[]): string {
-  const sections = systemAuditors.map((auditor, index) => {
+export function buildSandboxSections(systemAuditors: Persona[]): string {
+  return systemAuditors.map((auditor, index) => {
     const sandbox = auditor.meta.sandbox || { responsibility: "暂无配置", logic: "暂无配置", target: "暂无配置" };
-    return `[沙盒 #${index + 1}: ${auditor.meta.name} (${auditor.meta.id})]
-- 职责：${sandbox.responsibility}
-- 逻辑：${sandbox.logic}
-- 目标：${sandbox.target}`;
-  });
-
-  return [
-    `===========================================================`,
-    `【第一阶段：5大独立沙盒客观审查（不准输出，仅在内存中计算）】`,
-    `===========================================================`,
-    "",
-    ...sections,
-    "",
-  ].join("\n");
+    return [
+      `【沙盒 #${index + 1}：${auditor.meta.name}（${auditor.meta.id}）】`,
+      `- 职责：${sandbox.responsibility}`,
+      `- 逻辑：${sandbox.logic}`,
+      `- 目标：${sandbox.target}`,
+      ``,
+      `<cot_sb${index + 1}>`,
+      `逐项检查待审内容，列出属于「${auditor.meta.name}」维度的所有候选风险点。`,
+      `对每个候选点逐一判断：是否成立？严重程度（🔴/🟡）？判断理由是什么？`,
+      `若确认无风险，明确写出"未发现风险"并说明原因。`,
+      `</cot_sb${index + 1}>`,
+      ``,
+      `<findings_sb${index + 1}>`,
+      `输出 JSON 格式的结构化发现。若无风险则输出空数组。`,
+      `</findings_sb${index + 1}>`,
+    ].join("\n");
+  }).join("\n\n");
 }
 
 export function buildCommonRiskRules(): string {
@@ -65,6 +69,8 @@ export function buildCommonRiskRules(): string {
 }
 
 export function buildOrchestrationPrompt(userContent: string, systemAuditors: Persona[]): string {
+  const auditorCount = systemAuditors.length;
+
   return [
     `你是一个高精度的 **Kevlar 本地内容安全审查引擎**。`,
     ``,
@@ -72,64 +78,43 @@ export function buildOrchestrationPrompt(userContent: string, systemAuditors: Pe
     ``,
     buildCommonRiskRules(),
     ``,
-    `【核心工作法：独立沙盒隔离】`,
-    `为了防止各维度标准混淆导致角色偏移，你必须将大脑切分为 5 个完全独立的"虚拟沙盒栏位"。在处理某个沙盒时，必须且仅针对下文"待审计输入内容"围栏内的文本进行分析，绝对不允许带入其他沙盒的逻辑。`,
+    `【核心工作法：独立沙盒隔离 + 显式推理】`,
+    `你将大脑切分为 ${auditorCount} 个完全独立的"虚拟沙盒"。`,
+    `对于每个沙盒，你必须先在 <cot_sbN> 标签内写出完整推理过程，再在 <findings_sbN> 标签内输出结构化 JSON 结论。`,
+    `处理完后，在【第二阶段】进行交叉验证，最后以 JSON 格式输出最终报告。`,
     ``,
-    buildFiveSandboxesSection(systemAuditors),
+    buildSandboxSections(systemAuditors),
     ``,
     `===========================================================`,
     `【第二阶段：交叉验证与冲突仲裁（CROSS_AUDIT_VERIFICATION）】`,
     `===========================================================`,
-    `现在，请你脱离上述 5 个独立沙盒的单维视界，晋升为【Kevlar 首席内容审计官】。`,
-    `请仔细审视你在前 5 个沙盒中得出的初步结论，严格按以下逻辑进行全局冲突仲裁：`,
+    `现在，请你读取上方所有 <findings_sbN> 中的结构化结论，晋升为【Kevlar 首席内容审计官】进行全局冲突仲裁：`,
     `1. 寻找对立冲突：检查是否有某个沙盒判定的"高风险"，在另一个沙盒中其实是正常表达（例如：语气激烈 vs 正常维权）。`,
     `2. 一票否决硬红线：合规哨兵与语境猎手一旦在沙盒中确认命中（如发现污名化性邀约暗语），属于"零歧义空间"，一票否决，直接判定为 [🔴 高风险]，不接受任何洗白。`,
-    `3. 聚合精简：合并所有发现的风险。没有任何风险的 Auditor 维度，直接归入绿色合规。`,
+    `3. 聚合精简：合并所有发现的风险。没有任何风险的维度，直接归入绿色合规。`,
     `4. 再次检查：确保你的最终结论中，【没有包含任何具体的文案改写和优化建议】。`,
     ``,
     `===========================================================`,
-    `【第三阶段：严格输出格式规范】`,
+    `【第三阶段：最终 JSON 输出】`,
     `===========================================================`,
-    `请严格按照以下 Markdown 格式渲染你的最终输出。不要包含任何多余的开头问候或结尾废话，直接从 # 初审报告 开始输出。`,
+    `请输出以下格式的 JSON，不包含任何 Markdown 标记或额外解释：`,
     ``,
-    `【格式控制铁律】：`,
-    `- 若某类风险项数量为 0，则【绝对不要】输出该风险项的标题与表格。`,
-    `- 🟢 合规 栏位内，禁止发明或使用 5 大沙盒规定以外的任何角色名称。`,
+    JSON.stringify({
+      dimensions: systemAuditors.map((a) => ({
+        id: a.meta.id,
+        name: a.meta.name,
+        findings: [],
+        level: "🟢",
+      })),
+      summary: "初审摘要",
+    }, null, 2),
     ``,
-    `---`,
-    `【示例 1：存在风险时的输出样式】`,
-    `# 初审报告`,
-    `> 简洁易懂的初审报告`,
-    ``,
-    `🔴 高风险（1项）：`,
-    `| 风险内容 | 风险解释与审计维度 (Auditor) |`,
-    `| :--- | :--- |`,
-    `| 约吗 | 中文互联网最经典的约炮/一夜情暗语，零歧义空间，被彻底污名化为性邀约专用语 (由 语境猎手 检出)。严禁在此添加任何修改或优化建议！ |`,
-    ``,
-    `🟡 警告/中风险（1项）：`,
-    `| 风险内容 | 风险解释与审计维度 (Auditor) |`,
-    `| :--- | :--- |`,
-    `| 必须让他们付出代价 | 语气具有强烈的极化与煽动性，容易引发群体对立和口水战 (由 社伦判官 检出)。严禁在此添加任何修改或优化建议！ |`,
-    ``,
-    `🟢 合规：`,
-    `暗语破译、事实判官、社伦判官`,
-    ``,
-    `ℹ️ 内容仅供参考，不作为最终发布依据。`,
-    ``,
-    `---`,
-    `【示例 2：内容完全合规时的输出样式】`,
-    `# 初审报告`,
-    `> 简洁易懂的初审报告`,
-    ``,
-    `🟢 合规：`,
-    `合规哨兵、语境猎手、暗语破译、事实判官、社伦判官`,
-    ``,
-    `ℹ️ 内容仅供参考，不作为最终发布依据。`,
+    `其中 findings 数组中的每一项需包含：keyword（风险词汇）、trigger（触发原因）、riskDescription（风险说明）、propagationRisk（传播风险）、suggestedLevel（🔴/🟡）。无风险时 findings 为空数组。`,
     ``,
     `-----------------------------------------------------------`,
     `【以下为本次待审计的输入内容】`,
     `用户提交的原始文本："${userContent}"`,
-    `请立刻开始进行三阶段推理并直接渲染 Markdown 报告：`,
+    `请严格执行以上三阶段流程并输出 JSON：`,
   ].join("\n");
 }
 

@@ -90,19 +90,10 @@ describe("Kevlar PRD rule repository", () => {
 });
 
 describe("Kevlar PRD prompt directives", () => {
-  it("injects the association method and red-team instruction into reviewer prompts", () => {
-    const directive = buildKevlarRiskDirective({
-      associationPatterns: [{ pattern: "颜色+身体部位", risk_type: "涉黄风险" }],
-      evolutionStrategies: ["谐音演化"],
-    });
-
-    assert.ok(directive.includes("联想四步法"));
-    assert.ok(directive.includes("反向测试红队指令"));
-    assert.ok(directive.includes("颜色+身体部位"));
-
-    const prompt = augmentSystemPrompt(testPersona("p1", "独立女性视角审查员"));
-    assert.ok(prompt.includes("强制逐词执行"));
-    assert.ok(prompt.includes("宁可误报，不可漏报"));
+  it("builds the risk directive without options (simplified signature)", () => {
+    const directive = buildKevlarRiskDirective();
+    assert.ok(directive.includes("严格遵守审查边界"));
+    assert.ok(directive.includes("客观风险识别与分析"));
   });
 
   it("builds a pseudo-parallel isolation template for all personas", () => {
@@ -112,13 +103,14 @@ describe("Kevlar PRD prompt directives", () => {
     ];
 
     const directive = buildPseudoParallelDirective(personas);
-    assert.ok(directive.includes("audit_results = []"));
-    assert.ok(directive.includes("Agent 1: [独立女性视角审查员]"));
-    assert.ok(directive.includes("【独立声明】我声明我的评估不参考任何其他角色"));
-    assert.ok(directive.includes("最终风控合并报告"));
+    assert.ok(directive.includes("并行模拟执行规范"));
+    assert.ok(directive.includes("审查员 1 号 [独立女性视角审查员]"));
+    assert.ok(directive.includes("审查员 2 号 [理性男性视角审查员]"));
+    assert.ok(directive.includes("不得颠倒或合并"));
+    assert.ok(directive.includes("KEVLAR_PERSONA_END"));
   });
 
-  it("orchestration output contains the pseudo-parallel isolation contract", async () => {
+  it("orchestration output contains the parallel isolation contract", async () => {
     const result = await orchestrationHandler.execute({
       skillsDir: tmpDir,
       personas: [testPersona("p1", "独立女性视角审查员"), testPersona("p2", "理性男性视角审查员")],
@@ -126,7 +118,7 @@ describe("Kevlar PRD prompt directives", () => {
     });
 
     assert.ok(result.report.includes("并行模拟执行规范"));
-    assert.ok(result.report.includes("不得使用“正如前一位审查员所说”"));
-    assert.ok(result.report.includes("联想四步法"));
+    assert.ok(result.report.includes("严禁使用"));
+    assert.ok(result.report.includes("KEVLAR_PERSONA_END"));
   });
 });

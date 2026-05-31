@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -7,6 +7,11 @@ import {
   getErrorMessage,
   formatErrorResponse,
 } from "../utils/errors.js";
+import { initI18n } from "../i18n/index.js";
+
+before(async () => {
+  await initI18n();
+});
 
 describe("ErrorCode", () => {
   it("has validation error codes", () => {
