@@ -68,53 +68,126 @@ export function buildCommonRiskRules(): string {
   ].join("\n");
 }
 
+/**
+ * Compact CoT checklist for each system auditor dimension.
+ * Derived from each auditor's systemPrompt, adapted for single-inference
+ * "matrix filling" mode — pure checklist execution, no role-playing.
+ */
+function buildCompactAuditorCoT(auditor: Persona): string {
+  const id = auditor.meta.id;
+  const name = auditor.meta.name;
+
+  const CHECKLISTS: Record<string, string[]> = {
+    legal_compliance: [
+      `1. 逐句扫描绝对化用语/极限词（"最""第一""唯一"等）和无法证明的行业领先声明`,
+      `2. 检测虚假/夸大宣传：虚构数据、误导性比较、无依据的功效承诺`,
+      `3. 识别非法医疗/投资建议、政治/历史红线、诱导欺诈、侵犯第三方权益`,
+      `4. 检查行业特殊监管（食品/保健品/金融/教培）和未成年人保护违规`,
+    ],
+    social_risk: [
+      `1. 识别歧视/偏见/身份标签污名化/物化/刻板印象/特权凝视表达`,
+      `2. 检测道德绑架、受害者有罪论、对立煽动`,
+      `3. 评估语气情绪风险：凡尔赛、说教感、阴阳怪气、道德优越感、攻击性表达`,
+      `4. 同时从"最坏解读"和"反向风险"两个角度评估每个候选点`,
+    ],
+    context_distortion: [
+      `1. 识别易被截图/断章取义的句子——脱离上下文后语义发生根本性偏移`,
+      `2. 评估是否容易被二次创作（P图、恶搞、断章取义、标题党化截取）`,
+      `3. 对每个候选点判断：是否有多个解读空间、其中一个是负面的？`,
+    ],
+    network_culture_risk: [
+      `1. 扫描网络黑话、亚文化梗、隐晦低俗含义、缩写/数字暗语/Emoji组合`,
+      `2. 识别谐音撞车、跨平台语境误读、粉圈冲突暗语风险`,
+      `3. 对每个候选点按"最坏解读"原则判断真实严重程度`,
+    ],
+    factual_integrity: [
+      `1. 检查数据/统计是否有明显错误、单位混淆、计算谬误`,
+      `2. 识别常识性错误（科学/历史/地理/文化常识违背）`,
+      `3. 检查逻辑漏洞：前后矛盾、因果倒置、以偏概全、循环论证`,
+      `4. 识别概念混淆、引用失真、过时信息、过度泛化`,
+    ],
+  };
+
+  const steps = CHECKLISTS[id];
+  if (!steps) {
+    return [
+      `1. 逐项检查待审内容中属于「${name}」维度的所有风险点`,
+      `2. 对每个候选点逐一判断：是否成立？严重程度（🔴/🟡）？判断理由是什么？`,
+    ].join("\n");
+  }
+
+  return steps.join("\n");
+}
+
 export function buildOrchestrationPrompt(userContent: string, systemAuditors: Persona[]): string {
-  const auditorCount = systemAuditors.length;
+  const sandboxSections = systemAuditors
+    .map((auditor) => {
+      return [
+        `#### 沙盒：${auditor.meta.name}（${auditor.meta.id}）`,
+        ``,
+        buildCompactAuditorCoT(auditor),
+        ``,
+        `该维度分析结束后输出 JSON 发现：keyword（风险词汇）、trigger（触发原因）、riskDescription（风险说明）、propagationRisk（传播风险）、suggestedLevel（🔴/🟡）。`,
+      ].join("\n");
+    })
+    .join("\n\n");
 
   return [
-    `你是一个高精度的 **Kevlar 本地内容安全审查引擎**。`,
+    `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（单次推理版）`,
     ``,
-    `你的核心使命是：以极高的严谨度和防御性，对社交媒体内容进行多维度风险扫描，保护用户避免公关翻车和合规事故。`,
+    `## 【元规则】`,
+    `1. 运行环境：单次推理孤岛状态，无外部状态机`,
+    `2. 执行身份：非情感化的【多维特征分析与语义映射矩阵】`,
+    `3. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
     ``,
     buildCommonRiskRules(),
     ``,
-    `【核心工作法：独立沙盒隔离 + 显式推理】`,
-    `你将大脑切分为 ${auditorCount} 个完全独立的"虚拟沙盒"。`,
-    `对于每个沙盒，你必须先在 <cot_sbN> 标签内写出完整推理过程，再在 <findings_sbN> 标签内输出结构化 JSON 结论。`,
-    `处理完后，在【第二阶段】进行交叉验证，最后以 JSON 格式输出最终报告。`,
+    `## 【待测文案】`,
+    `"""`,
+    userContent,
+    `"""`,
     ``,
-    buildSandboxSections(systemAuditors),
+    `## 【矩阵填空执行协议】`,
+    `请严格按照以下协议流程进行逐项分析，最终只输出标准 JSON。`,
     ``,
-    `===========================================================`,
-    `【第二阶段：交叉验证与冲突仲裁（CROSS_AUDIT_VERIFICATION）】`,
-    `===========================================================`,
-    `现在，请你读取上方所有 <findings_sbN> 中的结构化结论，晋升为【Kevlar 首席内容审计官】进行全局冲突仲裁：`,
-    `1. 寻找对立冲突：检查是否有某个沙盒判定的"高风险"，在另一个沙盒中其实是正常表达（例如：语气激烈 vs 正常维权）。`,
-    `2. 一票否决硬红线：合规哨兵与语境猎手一旦在沙盒中确认命中（如发现污名化性邀约暗语），属于"零歧义空间"，一票否决，直接判定为 [🔴 高风险]，不接受任何洗白。`,
-    `3. 聚合精简：合并所有发现的风险。没有任何风险的维度，直接归入绿色合规。`,
-    `4. 再次检查：确保你的最终结论中，【没有包含任何具体的文案改写和优化建议】。`,
+    `### Step 1: 零度事实解构（无倾向特征提取热身）`,
+    `1. 提取核心关键词及派生词列表`,
+    `2. 判断字面语境分类（日常分享/专业科普/商业宣传等）`,
+    `3. 列出潜在歧义词/多义词`,
     ``,
-    `===========================================================`,
-    `【第三阶段：最终 JSON 输出】`,
-    `===========================================================`,
-    `请输出以下格式的 JSON，不包含任何 Markdown 标记或额外解释：`,
+    `### Step 2: 五维度语义对撞（硬性协议隔离，防止视角相互污染）`,
     ``,
-    JSON.stringify({
-      dimensions: systemAuditors.map((a) => ({
-        id: a.meta.id,
-        name: a.meta.name,
-        findings: [],
-        level: "🟢",
-      })),
-      summary: "初审摘要",
-    }, null, 2),
+    sandboxSections,
     ``,
-    `其中 findings 数组中的每一项需包含：keyword（风险词汇）、trigger（触发原因）、riskDescription（风险说明）、propagationRisk（传播风险）、suggestedLevel（🔴/🟡）。无风险时 findings 为空数组。`,
+    `### Step 3: 交叉仲裁与噪音过滤`,
+    `1. 评估各维度的发现是否属于过度联想（Noise）`,
+    `2. 合并跨维度重复发现，取最高风险等级`,
+    `3. 收敛最终发现列表`,
+    `4. 再次确认所有 findings 中【没有包含任何修改建议或文案优化意见】`,
     ``,
-    `-----------------------------------------------------------`,
-    `【以下为本次待审计的输入内容】`,
-    `用户提交的原始文本："${userContent}"`,
-    `请严格执行以上三阶段流程并输出 JSON：`,
+    `### Step 4: 最终 JSON 输出`,
+    `请输出以下格式的纯 JSON，不包含任何 Markdown 标记或额外解释：`,
+    ``,
+    JSON.stringify(
+      {
+        dimensions: systemAuditors.map((a) => ({
+          id: a.meta.id,
+          name: a.meta.name,
+          findings: [],
+          level: "🟢",
+        })),
+      },
+      null,
+      2,
+    ),
+    ``,
+    `其中：`,
+    `- dimensions 数组覆盖以上 ${systemAuditors.length} 个维度`,
+    `- 每个维度的 findings 包含：keyword, trigger, riskDescription, propagationRisk, suggestedLevel`,
+    `- 无发现时 findings 为空数组`,
+    `- level 根据 findings 自动推算：含 🔴 则为 🔴，含 🟡 则为 🟡，均为空则为 🟢`,
+    ``,
+    `请严格执行以上流程并输出 JSON：`,
   ].join("\n");
 }
 
