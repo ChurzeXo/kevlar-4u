@@ -27,25 +27,27 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 - 绝不：修改原文、优化文案、重写内容、提供法律/医疗/投资建议`;
 
 export function buildSandboxSections(systemAuditors: Persona[]): string {
-  return systemAuditors.map((auditor, index) => {
-    const sandbox = auditor.meta.sandbox || { responsibility: "暂无配置", logic: "暂无配置", target: "暂无配置" };
-    return [
-      `【沙盒 #${index + 1}：${auditor.meta.name}（${auditor.meta.id}）】`,
-      `- 职责：${sandbox.responsibility}`,
-      `- 逻辑：${sandbox.logic}`,
-      `- 目标：${sandbox.target}`,
-      ``,
-      `<cot_sb${index + 1}>`,
-      `逐项检查待审内容，列出属于「${auditor.meta.name}」维度的所有候选风险点。`,
-      `对每个候选点逐一判断：是否成立？严重程度（🔴/🟡）？判断理由是什么？`,
-      `若确认无风险，明确写出"未发现风险"并说明原因。`,
-      `</cot_sb${index + 1}>`,
-      ``,
-      `<findings_sb${index + 1}>`,
-      `输出 JSON 格式的结构化发现。若无风险则输出空数组。`,
-      `</findings_sb${index + 1}>`,
-    ].join("\n");
-  }).join("\n\n");
+  return systemAuditors
+    .map((auditor, index) => {
+      const sandbox = auditor.meta.sandbox || { responsibility: "暂无配置", logic: "暂无配置", target: "暂无配置" };
+      return [
+        `【沙盒 #${index + 1}：${auditor.meta.name}（${auditor.meta.id}）】`,
+        `- 职责：${sandbox.responsibility}`,
+        `- 逻辑：${sandbox.logic}`,
+        `- 目标：${sandbox.target}`,
+        ``,
+        `<cot_sb${index + 1}>`,
+        `逐项检查待审内容，列出属于「${auditor.meta.name}」维度的所有候选风险点。`,
+        `对每个候选点逐一判断：是否成立？严重程度（🔴/🟡）？判断理由是什么？`,
+        `若确认无风险，明确写出"未发现风险"并说明原因。`,
+        `</cot_sb${index + 1}>`,
+        ``,
+        `<findings_sb${index + 1}>`,
+        `输出 JSON 格式的结构化发现。若无风险则输出空数组。`,
+        `</findings_sb${index + 1}>`,
+      ].join("\n");
+    })
+    .join("\n\n");
 }
 
 export function buildCommonRiskRules(): string {
@@ -160,10 +162,18 @@ export function buildOrchestrationPrompt(userContent: string, systemAuditors: Pe
     sandboxSections,
     ``,
     `### Step 3: 交叉仲裁与噪音过滤`,
-    `1. 评估各维度的发现是否属于过度联想（Noise）`,
-    `2. 合并跨维度重复发现，取最高风险等级`,
-    `3. 收敛最终发现列表`,
-    `4. 再次确认所有 findings 中【没有包含任何修改建议或文案优化意见】`,
+    ``,
+    `<arbitration_sandbox>`,
+    `  <cot_arbitration>`,
+    `    1. 逐一审查 Step 2 各沙盒的发现，标记哪些属于过度联想（Noise）`,
+    `    2. 合并跨维度重复发现，保留最高风险等级`,
+    `    3. 评估被标记为 Noise 的发现是否确实缺乏文本依据`,
+    `    4. 确认收敛后的发现列表中【没有包含任何修改建议或文案优化意见】`,
+    `  </cot_arbitration>`,
+    `  <arbitration_output>`,
+    `    输出被过滤的 Noise 列表和保留的最终发现清单（JSON 格式）`,
+    `  </arbitration_output>`,
+    `</arbitration_sandbox>`,
     ``,
     `### Step 4: 最终 JSON 输出`,
     `请输出以下格式的纯 JSON，不包含任何 Markdown 标记或额外解释：`,

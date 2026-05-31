@@ -52,8 +52,19 @@ Break out of the single-AI perspective with comprehensive persona customization:
 
 ### 2. Two-Stage Review Pipeline
 
-- **Stage 1 — System Pre-audit**: Five specialized system auditors scan content for compliance, context distortion, network culture risks, factual errors, and social risk — producing a structured findings report.
-- **Stage 2 — RST Review**: User-created reviewers with RST personalities receive **Focus Topics** (filtered + translated from pre-audit findings) and produce authentic user reactions, not dimension-scored reports.
+**Stage 1 — System Pre-audit**: Five specialized system auditors scan content in five defensive dimensions:
+
+| Auditor (ID) | Focus |
+|---|---|
+| 合规哨兵 (`legal_compliance`) | Advertising law violations, false claims, political/legal red lines, industry regulation |
+| 社伦判官 (`social_risk`) | Discrimination, stereotyping, moralizing, tone-of-voice risks, reverse-risk ("backfire effect") |
+| 语境猎手 (`context_distortion`) | Screenshot out-of-context vulnerability, malicious misinterpretation potential |
+| 暗语破译 (`network_culture_risk`) | Internet slang collisions, subculture terminology, hidden vulgar meanings |
+| 事实判官 (`factual_integrity`) | Factual errors, common-sense violations, logical fallacies, data credibility |
+
+When independent LLM access is available (MCP Sampling / Direct API), each auditor runs as a separate LLM call for maximum isolation. Under Orchestration fallback, a single-inference **matrix-filling protocol** replaces role-playing — each dimension is a structured XML sandbox slot filled independently, then arbitrated. See [Protocol Comparison](#protocol-comparison-pseudo-parallel-vs-matrix-filling).
+
+**Stage 2 — RST Review**: User-created reviewers with RST personalities receive **Focus Topics** (filtered + translated from pre-audit findings based on each persona's RST triggers) and produce authentic user reactions, not dimension-scored reports.
 
 ---
 
@@ -159,17 +170,68 @@ After creation, Kevlar-4u automatically infers the cultural background, blind sp
 
 Kevlar-4u supports three execution modes. The default `auto` selects the best mode based on your environment.
 
-| Mode | Identifier | Description | Best for |
-| --- | --- | --- | --- |
-| MCP Sampling | `mcp_sampling` | Each reviewer gets an independent sampling request, maximum isolation | Clients that support Sampling, pursuing authentic multi-perspective review |
-| Direct API | `direct_api` | Directly calls external model API | Clients without Sampling, or script automation |
-| Orchestration (Host-assisted fallback) | `orchestration` | Host AI assists completion, low-isolation fallback | Last resort when neither Sampling nor API Key is available |
+```
+                   ┌─────────────────────────────┐
+                   │  User submits review request │
+                   └─────────────┬───────────────┘
+                                 │
+                   ┌─────────────▼───────────────┐
+                   │  Mode resolution (auto):     │
+                   │  1. kevlar-config.json       │
+                   │  2. KEVLAR_MODE env          │
+                   │  3. Auto-detect capability   │
+                   └─────────────┬───────────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              ▼                  ▼                   ▼
+   ┌─────────────────┐  ┌─────────────────┐  ┌──────────────────────┐
+   │ MCP Sampling    │  │ Direct API      │  │ Orchestration        │
+   │                 │  │                 │  │ (Host fallback)      │
+   │ Independent     │  │ Independent     │  │ Single-prompt        │
+   │ sampling req    │  │ API calls       │  │ host-assisted        │
+   │ per persona     │  │ per persona     │  │ sequential persona   │
+   │ Max isolation   │  │ Good isolation  │  │ Lower isolation      │
+   └─────────────────┘  └─────────────────┘  └──────────────────────┘
+```
 
-`auto` mode resolution order:
+### Mode details
+
+| Mode | Identifier | Fallback trigger | Pre-audit strategy | Review strategy |
+| --- | --- | --- | --- | --- |
+| MCP Sampling | `mcp_sampling` | Client declares `sampling` capability | 5 independent LLM calls, one per auditor | Independent LLM call per persona |
+| Direct API | `direct_api` | `KEVLAR_API_KEY` or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` set | 5 independent LLM calls, one per auditor | Independent LLM call per persona |
+| Orchestration | `orchestration` | Neither Sampling nor API keys available | **V4 Matrix-filling protocol** — single prompt with 5 XML sandbox slots | **Reinforced role-play** — sequential persona execution with context reset gates |
+
+### Auto mode resolution
 
 1. Uses the mode specified in `skills/kevlar-config.json` (if set)
 2. Otherwise reads the `KEVLAR_MODE` environment variable
 3. Otherwise auto-selects by availability: `mcp_sampling` → `direct_api` → `orchestration`
+
+### Orchestration mode isolation details
+
+When falling back to Orchestration (no independent LLM access):
+
+**System pre-audit**: Uses the [V4 matrix-filling protocol](#protocol-comparison-pseudo-parallel-vs-matrix-filling) — a single inference where the model fills structured XML sandbox slots (one per defensive dimension) rather than role-playing as independent characters. Each sandbox contains a dimension-specific CoT checklist derived from the auditor's `systemPrompt`. An `<arbitration_sandbox>` then cross-validates and filters noise. Finally, the model outputs pure JSON `{ dimensions: [...] }`, and the summary is auto-generated by the code to ensure consistent formatting.
+
+**RST review**: Personas retain their role-play mode (required for authentic "real user" simulation), but each persona block is preceded by a **context reset gate**: `--- 隔离边界：上下文重置点。丢弃上一个审查员的全部推理和结论 ---`. This prevents the long-tail degradation where later personas soften or repeat earlier ones.
+
+---
+
+## Protocol Comparison: Pseudo-parallel vs Matrix-filling
+
+The V4 matrix-filling protocol was introduced to solve the **role drift** problem in the system pre-audit fallback path. Here is how it compares with the earlier pseudo-parallel approach (still used in the RST review path):
+
+| Aspect | Pseudo-parallel (legacy pre-audit) | Matrix-filling (V4, current pre-audit) | Role-play with reset gates (current review) |
+|---|---|---|---|
+| Philosophy | "Act as N independent reviewers" | "Fill structured slots with factual analysis" | "Act as persona, then reset context" |
+| Role drift risk | **High** — frequent cross-pollution between auditors | **Low** — protocol-level slot isolation, no "acting" language | **Medium** — reset gates mitigate but don't eliminate drift |
+| Output format | Free-form Markdown report | Strict JSON `{ dimensions: [...] }` | Mixed — JSON findings for system auditors, free text for RST personas |
+| CoT source | Generic (`<cot>` with same template for all) | Dimension-specific (derived from each auditor's `systemPrompt`) | Persona-specific (follows each persona's own prompt) |
+| Arbitration | Flat instruction list in prompt body | `<arbitration_sandbox>` with dedicated CoT + output slots | Manual summary section (host AI aggregates) |
+| Modification advice | Not explicitly prohibited | **Explicitly banned** in meta-rules + arbitration step | Prohibited via `buildKevlarRiskDirective()` |
+
+**Why not apply matrix-filling to RST review?** RST personas are designed to simulate *authentic user reactions* ("real internet user's first response, not an evaluation report"). Matrix-filling would suppress the emotional/creative freedom these personas need. The context reset gate approach gives most of the isolation benefit without sacrificing persona expressiveness.
 
 ---
 
