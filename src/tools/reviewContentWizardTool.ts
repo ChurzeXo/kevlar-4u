@@ -260,7 +260,7 @@ async function executeLlmSystemAudit(
   localFindings: any[],
   caller: AuditLlmCaller,
 ): Promise<{ dimensions: PreAuditDimensionResult[]; summary: string }> {
-  const auditorResults = await runSystemAuditors(content, systemAuditors, localFindings, caller);
+  const auditorResults = await runSystemAuditors(content, systemAuditors, caller);
   const mergedResults = normalizePreAuditDimensions(
     mergeLocalFindingsIntoAudits(auditorResults, localFindings),
     systemAuditors,
@@ -272,10 +272,8 @@ async function executeLlmSystemAudit(
 async function runSystemAuditors(
   content: string,
   systemAuditors: Persona[],
-  localFindings: any[],
   caller: AuditLlmCaller,
 ): Promise<PreAuditDimensionResult[]> {
-  const localContext = formatLocalFindingsForPrompt(localFindings);
   return Promise.all(
     systemAuditors.map(async (auditor) => {
       try {
@@ -284,7 +282,7 @@ async function runSystemAuditors(
           messages: [
             {
               role: "user",
-              content: [localContext, "请审查以下内容：", "", content].filter(Boolean).join("\n"),
+              content: ["请审查以下内容：", "", content].join("\n"),
             },
           ],
           maxTokens: 2048,
@@ -389,9 +387,9 @@ function normalizeFinding(finding: Record<string, unknown>): Record<string, unkn
 
 async function finalizePreAuditReport(
   content: string,
-  localFindings: any[],
-  auditorResults: PreAuditDimensionResult[],
-  crossValidatedResults: PreAuditDimensionResult[],
+  localFindings: any[],                        // Step 0
+  mergedResults: PreAuditDimensionResult[],    // Step 2
+  crossValidatedResults: PreAuditDimensionResult[],  // Step 3
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
 ): Promise<{ dimensions: PreAuditDimensionResult[]; summary: string }> {
@@ -404,9 +402,9 @@ async function finalizePreAuditReport(
           role: "user",
           content: JSON.stringify({
             content,
-            localFindings,
-            auditorResults,
-            crossValidatedResults,
+            localFindings,          // Step 0
+            mergedResults,          // Step 2
+            crossValidatedResults,  // Step 3
           }),
         },
       ],
@@ -709,21 +707,6 @@ function summarizePreAuditResults(
   }
 
   return lines.join("\n");
-}
-
-function formatLocalFindingsForPrompt(localFindings: any[]): string {
-  if (localFindings.length === 0) return "";
-  return [
-    "【本地规则初审命中】",
-    ...localFindings.map((f) =>
-      [
-        `- ${f.suggestedLevel || "⚪"} ${f.keyword} -> ${f.root || "未知词根"}`,
-        `  - 触发原因：${f.trigger}`,
-        `  - 风险描述：${f.riskDescription}`,
-      ].join("\n"),
-    ),
-    "",
-  ].join("\n");
 }
 
 // ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
