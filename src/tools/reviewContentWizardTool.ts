@@ -14,7 +14,12 @@ import { buildKevlarRiskDirective } from "../execution/riskPrompt.js";
 import { callConfiguredDirectApi, hasApiKey } from "../execution/modes/direct_api.js";
 import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
-import { TOOL_DESCRIPTION, buildOrchestrationPrompt, buildPreAuditFinalizerPrompt } from "../prompts/reviewWizard.js";
+import {
+  TOOL_DESCRIPTION,
+  buildOrchestrationPrompt,
+  buildPreAuditFinalizerPrompt,
+  buildCompactAuditorCoT,
+} from "../prompts/reviewWizard.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
@@ -228,7 +233,13 @@ async function handleSystemAudit(
     const timingFinding = localFindings.find((f) => f.timingDescription);
     const timingContext = timingFinding?.timingDescription as string | undefined;
 
-    const preAuditReport = await executeLlmSystemAudit(state.content, systemAuditors, localFindings, caller, timingContext);
+    const preAuditReport = await executeLlmSystemAudit(
+      state.content,
+      systemAuditors,
+      localFindings,
+      caller,
+      timingContext,
+    );
     state.preAuditReport = preAuditReport;
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
     state.step = "checkPersonaInventory";
@@ -274,9 +285,8 @@ async function executeLlmSystemAudit(
   const bareOnlyAuditors = systemAuditors.filter(
     (a) => a.meta.id === "context_distortion" || a.meta.id === "network_culture_risk",
   );
-  const bareFindings = bareOnlyAuditors.length > 0
-    ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller)
-    : [];
+  const bareFindings =
+    bareOnlyAuditors.length > 0 ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller) : [];
 
   // Round 2: 原文 → 所有维度执行（现有流程）
   const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext);
@@ -295,14 +305,21 @@ async function executeLlmSystemAudit(
     systemAuditors,
   );
   const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
-  const report = await finalizePreAuditReport(content, localFindings, mergedResults, crossValidatedResults, systemAuditors, caller);
+  const report = await finalizePreAuditReport(
+    content,
+    localFindings,
+    mergedResults,
+    crossValidatedResults,
+    systemAuditors,
+    caller,
+  );
 
   // Phase 2.2: 协同风险加权计算
   const dimensionLevels: Record<string, string> = {};
   for (const dim of crossValidatedResults) {
-    dimensionLevels[dim.id] = dim.level ?? '🟢';
+    dimensionLevels[dim.id] = dim.level ?? "🟢";
   }
-  const timingFlag = localFindings.some((f) => f.timingWindowId) ? ['timing_risk'] : [];
+  const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
   const synergy = calculateSynergy(dimensionLevels, timingFlag);
   report.synergyFlags = {
     triggered: synergy.triggered,
@@ -326,16 +343,41 @@ async function runSystemAuditors(
       try {
         // 时机上下文仅注入给 social_risk 审计员
         const auditContent =
-          timingContext && auditor.meta.id === "social_risk"
-            ? [content, "", timingContext].join("\n")
-            : content;
+          timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
 
         const response = await caller({
-          systemPrompt: [auditor.systemPrompt, "", "---", "", buildKevlarRiskDirective()].join("\n"),
+          systemPrompt: [
+            auditor.systemPrompt,
+            "",
+            "---",
+            "",
+            buildCompactAuditorCoT(auditor),
+            "",
+            "---",
+            "",
+            buildKevlarRiskDirective(),
+          ].join("\n"),
           messages: [
             {
               role: "user",
-              content: ["请审查以下内容：", "", auditContent].join("\n"),
+              content: [
+                `请按照你的推理框架对以下内容执行审查。`,
+                ``,
+                `执行顺序：`,
+                `第一步：完成三视角解码`,
+                `  - 视角A：内容的字面语义是什么？提取所有描述性词汇`,
+                `  - 视角B：路人第一眼感知到什么？哪些词会让人停顿？`,
+                `  - 视角C：恶意攻击者会截哪句话？把哪几个词组合在一起杀伤力最大？`,
+                `           完整推演攻击链：原始表达 → 截图后呈现 → 评论区反应 → 舆情走向`,
+                `第二步：执行你的维度专项推理`,
+                `第三步：只输出 JSON findings，不输出推理过程`,
+                ``,
+                `重要：视角C发现的攻击点，无论是否匹配任何预设风险类型，都必须进入 findings。`,
+                ``,
+                `待审查内容：`,
+                ``,
+                auditContent,
+              ].join("\n"),
             },
           ],
           maxTokens: 2048,
@@ -384,11 +426,9 @@ async function handleOrchestrationAuditResult(
     if (!report.synergyFlags) {
       const dimensionLevels: Record<string, string> = {};
       for (const dim of dimensions) {
-        dimensionLevels[dim.id] = dim.level ?? '🟢';
+        dimensionLevels[dim.id] = dim.level ?? "🟢";
       }
-      const timingFlag = dimensions.some((d) =>
-        d.findings?.some((f: any) => f.timingWindowId),
-      ) ? ['timing_risk'] : [];
+      const timingFlag = dimensions.some((d) => d.findings?.some((f: any) => f.timingWindowId)) ? ["timing_risk"] : [];
       const synergy = calculateSynergy(dimensionLevels, timingFlag);
       report.synergyFlags = {
         triggered: synergy.triggered,
@@ -486,9 +526,9 @@ interface PreAuditReport {
 
 async function finalizePreAuditReport(
   content: string,
-  localFindings: any[],                        // Step 0
-  mergedResults: PreAuditDimensionResult[],    // Step 2
-  crossValidatedResults: PreAuditDimensionResult[],  // Step 3
+  localFindings: any[], // Step 0
+  mergedResults: PreAuditDimensionResult[], // Step 2
+  crossValidatedResults: PreAuditDimensionResult[], // Step 3
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
 ): Promise<PreAuditReport> {
@@ -501,9 +541,9 @@ async function finalizePreAuditReport(
           role: "user",
           content: JSON.stringify({
             content,
-            localFindings,          // Step 0
-            mergedResults,          // Step 2
-            crossValidatedResults,  // Step 3
+            localFindings, // Step 0
+            mergedResults, // Step 2
+            crossValidatedResults, // Step 3
           }),
         },
       ],
@@ -693,14 +733,12 @@ const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
   {
     source: "social_risk",
     validator: "factual_integrity",
-    question:
-      "以下内容被「社伦判官」标记为社会风险。这些风险点有事实依据吗？还是纯粹基于情绪联想？请只输出 JSON。",
+    question: "以下内容被「社伦判官」标记为社会风险。这些风险点有事实依据吗？还是纯粹基于情绪联想？请只输出 JSON。",
   },
   {
     source: "legal_compliance",
     validator: "social_risk",
-    question:
-      "以下内容被「合规哨兵」标记为合规风险。这些合规问题是否同时触发了社会对立？请只输出 JSON。",
+    question: "以下内容被「合规哨兵」标记为合规风险。这些合规问题是否同时触发了社会对立？请只输出 JSON。",
   },
 ];
 
@@ -943,7 +981,9 @@ async function handleReviewDecision(
   const normalized = userMessage.trim();
 
   // 宽松识别确认复审意图（"好"需要完整词边界，不匹配"这篇不好"中的"好"）
-  const wantsReview = /^(?:需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes)$|^开始$|^确认$|^需要$|^是$|^嗯$/i.test(normalized);
+  const wantsReview = /^(?:需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes)$|^开始$|^确认$|^需要$|^是$|^嗯$/i.test(
+    normalized,
+  );
 
   if (!wantsReview) {
     return toolResponse(state, "请回复「需要」进入复审，或告诉我你的其他需求。");
