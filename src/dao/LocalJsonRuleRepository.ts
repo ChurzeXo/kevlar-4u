@@ -1,7 +1,19 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { IRuleRepository } from "./IRuleRepository.js";
-import type { AssociationPattern, AssociativeRule, CoreRules, RuleCategory, RuleMeta, RulesData, RulesIndex } from "./types.js";
+import type {
+  AssociationPattern,
+  AssociativeRule,
+  CoreRules,
+  RuleCategory,
+  RuleMeta,
+  RulesData,
+  RulesIndex,
+  SensitiveWindow,
+  StructuralMatch,
+  StructuralPattern,
+  TimingFinding,
+} from "./types.js";
 import { logger } from "../utils/observability.js";
 
 /**
@@ -18,14 +30,79 @@ export function decryptFeedData(cipherText: string, _token: string): string {
   return "";
 }
 
+const BUILTIN_SENSITIVE_WINDOWS: SensitiveWindow[] = [
+  {
+    id: "womens_day",
+    label: "妇女节",
+    month: 3,
+    day: 8,
+    windowDays: 7,
+    riskMultiplier: 2.0,
+    relevanceKeywords: ["女性", "女人", "妈妈", "姐妹", "她", "女生", "美妆", "护肤", "身材", "减肥", "婚姻", "职场"],
+    forceKeywords: ["女权", "性别", "物化", "歧视"],
+  },
+  {
+    id: "childrens_day",
+    label: "儿童节",
+    month: 6,
+    day: 1,
+    windowDays: 7,
+    riskMultiplier: 2.5,
+    relevanceKeywords: ["孩子", "儿童", "小朋友", "亲子", "教育", "玩具", "童装", "未成年"],
+    forceKeywords: ["恋童", "幼", "侵犯"],
+  },
+  {
+    id: "valentines_day",
+    label: "情人节",
+    month: 2,
+    day: 14,
+    windowDays: 5,
+    riskMultiplier: 1.8,
+    relevanceKeywords: ["恋爱", "约会", "礼物", "浪漫", "情侣", "单身", "表白", "前任"],
+    forceKeywords: ["出轨", "约炮", "419"],
+  },
+  {
+    id: "labour_day",
+    label: "劳动节",
+    month: 5,
+    day: 1,
+    windowDays: 3,
+    riskMultiplier: 1.3,
+    relevanceKeywords: ["打工人", "加班", "996", "劳动", "薪资", "休假", "职场"],
+    forceKeywords: ["剥削", "压榨"],
+  },
+  {
+    id: "programmers_day",
+    label: "程序员节",
+    month: 10,
+    day: 24,
+    windowDays: 3,
+    riskMultiplier: 1.5,
+    relevanceKeywords: ["程序员", "代码", "程序", "IT", "技术", "编程"],
+    forceKeywords: [],
+  },
+  {
+    id: "singles_day",
+    label: "光棍节",
+    month: 11,
+    day: 11,
+    windowDays: 3,
+    riskMultiplier: 1.5,
+    relevanceKeywords: ["单身", "购物", "消费", "打折", "双十一", "折扣"],
+    forceKeywords: [],
+  },
+];
+
 export class LocalJsonRuleRepository implements IRuleRepository {
+  private skillsDir: string;
   private rulesPath: string;
   private proRulesPath: string;
   private index: RulesIndex | null = null;
 
   constructor(skillsDir: string) {
-    this.rulesPath = path.join(skillsDir, "rules_free.json");     // 默认免费版
-    this.proRulesPath = path.join(skillsDir, "rules_pro.json");   // 付费版
+    this.skillsDir = skillsDir;
+    this.rulesPath = path.join(skillsDir, "rules_free.json");
+    this.proRulesPath = path.join(skillsDir, "rules_pro.json");
   }
 
   /**
@@ -42,10 +119,10 @@ export class LocalJsonRuleRepository implements IRuleRepository {
 
   async loadRules(): Promise<boolean> {
     try {
+      // ── 1. 加载现有 rules_free.json 和 rules_pro.json ──────────────────
       let mergedData: RulesData = { version: "0.0.0", last_updated: "", categories: {} };
       let coreRulesFromFree: CoreRules | undefined;
 
-      // 1. 加载免费版（必须）
       if (fs.existsSync(this.rulesPath)) {
         const freeRaw = await fs.promises.readFile(this.rulesPath, "utf-8");
         const freeData: RulesData = JSON.parse(freeRaw);
@@ -57,15 +134,13 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         return false;
       }
 
-      // 2. 如果是付费用户，加载并合并 Pro 规则
       if (this.isProUser() && fs.existsSync(this.proRulesPath)) {
         const proRaw = await fs.promises.readFile(this.proRulesPath, "utf-8");
         const proData: RulesData = JSON.parse(proRaw);
-        mergedData = this.mergeRules(mergedData, proData, true); // true = pro 优先
+        mergedData = this.mergeRules(mergedData, proData, true);
         logger.info("Pro rules merged for paid user", { event: "pro_rules_merged", version: proData.version });
       }
 
-      // Phase 2: if an encrypted remote feed file exists, decrypt and merge
       const encryptedPath = this.rulesPath.replace(/\.json$/, ".encrypted");
       if (fs.existsSync(encryptedPath)) {
         const encryptedRaw = await fs.promises.readFile(encryptedPath, "utf-8");
@@ -73,7 +148,7 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         if (decrypted) {
           try {
             const remoteData: RulesData = JSON.parse(decrypted);
-            mergedData = this.mergeRules(mergedData, remoteData, true); // Remote 也优先
+            mergedData = this.mergeRules(mergedData, remoteData, true);
             logger.info("Rules enriched from remote feed", { event: "rules_remote_merged" });
           } catch {
             logger.warn("Failed to parse decrypted remote rules", { event: "rules_remote_parse_error" });
@@ -81,13 +156,43 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         }
       }
 
-      // 后续索引构建逻辑
+      // ── 2. 加载 rules_lowbrow.json（独立 schema，不混入 categories） ───
+      const lowbrowPath = path.join(this.skillsDir, "rules_lowbrow.json");
+      let semanticPrimesData: Record<string, string[]> = {};
+      let structuralPatternsData: StructuralPattern[] = [];
+
+      if (fs.existsSync(lowbrowPath)) {
+        const lowbrowRaw = await fs.promises.readFile(lowbrowPath, "utf-8");
+        const lowbrowData = JSON.parse(lowbrowRaw);
+        if (lowbrowData.semantic_primes) {
+          semanticPrimesData = Object.fromEntries(
+            Object.entries(lowbrowData.semantic_primes).map(
+              ([k, v]: [string, any]) => [k, v.words ?? []]
+            )
+          );
+        }
+        structuralPatternsData = lowbrowData.structural_patterns ?? [];
+        logger.info("Lowbrow rules loaded", {
+          event: "lowbrow_rules_loaded",
+          primeCategories: Object.keys(semanticPrimesData).length,
+          structuralPatterns: structuralPatternsData.length,
+        });
+      }
+
+      // ── 3. 加载 rules_sensitive.json（复用 categories 格式） ────────────
+      const sensitivePath = path.join(this.skillsDir, "rules_sensitive.json");
+      if (fs.existsSync(sensitivePath)) {
+        const sensitiveRaw = await fs.promises.readFile(sensitivePath, "utf-8");
+        const sensitiveData: RulesData = JSON.parse(sensitiveRaw);
+        mergedData = this.mergeRules(mergedData, sensitiveData);
+        logger.info("Sensitive rules loaded", { event: "sensitive_rules_loaded" });
+      }
+
+      // ── 4. 构建索引 ─────────────────────────────────────────────────────
       const exactBlacklist = new Set<string>();
       const associativeMap = new Map<string, { category: string; rule: AssociativeRule }>();
       const variantMap = new Map<string, { category: string; rule: AssociativeRule }>();
 
-      // 从原始数据中获取 associationPatterns 和 evolutionStrategies
-      // 优先使用 freeData 中的 core_rules，如果没有则使用合并后的数据
       const coreRules = coreRulesFromFree || mergedData.core_rules;
       const associationPatterns = coreRules?.association_patterns ?? [];
       const evolutionStrategies = coreRules?.evolution_strategies ?? [];
@@ -102,6 +207,8 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         variantMap,
         associationPatterns,
         evolutionStrategies,
+        semanticPrimes: new Map(Object.entries(semanticPrimesData)),
+        structuralPatterns: structuralPatternsData,
         meta: {
           version: mergedData.version ?? "2.1.0",
           last_updated: mergedData.last_updated ?? "",
@@ -115,7 +222,7 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         tier: this.isProUser() ? "pro" : "free",
         version: mergedData.version,
         blacklistSize: exactBlacklist.size,
-        associativeSize: associativeMap.size,
+        structuralPatterns: structuralPatternsData.length,
       });
 
       return true;
@@ -230,6 +337,225 @@ export class LocalJsonRuleRepository implements IRuleRepository {
     });
     return false;
   }
+
+  // ── Phase 0.1 时机节点检测 ────────────────────────────────────────────
+
+  checkTimingRisk(date: Date, content: string): TimingFinding | null {
+    const today = `${date.getMonth() + 1}/${date.getDate()}`;
+
+    for (const window of BUILTIN_SENSITIVE_WINDOWS) {
+      const windowDate = new Date(date.getFullYear(), window.month - 1, window.day);
+      const diffMs = date.getTime() - windowDate.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      const absDiff = Math.abs(diffDays);
+
+      if (absDiff > window.windowDays) continue;
+
+      // 第一层：本地规则层——内容必须命中关联词
+      const hasForceKeyword = window.forceKeywords.length > 0
+        ? window.forceKeywords.some((kw) => content.includes(kw))
+        : false;
+      const hasRelevanceKeyword = window.relevanceKeywords.some((kw) => content.includes(kw));
+
+      if (!hasForceKeyword && !hasRelevanceKeyword) continue;
+
+      return {
+        type: 'timing_risk',
+        windowId: window.id,
+        windowLabel: window.label,
+        daysFromCenter: diffDays,
+        riskMultiplier: window.riskMultiplier,
+        matched: true,
+        description: `当前日期处于【${window.label}窗口期】（距中心日 ${absDiff} 天），内容涉及关联主题词，建议关注舆论语境下的风险放大效应。`,
+      };
+    }
+
+    return null;
+  }
+
+  // ── L2 结构模式检测 ─────────────────────────────────────────────────────
+
+  checkStructuralPatterns(content: string): StructuralMatch[] {
+    if (!this.index) return [];
+    const { semanticPrimes, structuralPatterns } = this.index;
+    if (structuralPatterns.length === 0 || semanticPrimes.size === 0) return [];
+
+    const results: StructuralMatch[] = [];
+
+    for (const pattern of structuralPatterns) {
+      // ── 分两种模式处理 ──────────────────────────────────────────────
+
+      if (pattern.minCategoryCount !== undefined) {
+        // 密度模式：计算窗口内满足至少 N 个不同类别
+        const densityMatches = this.matchByDensity(content, pattern, semanticPrimes);
+        if (densityMatches) results.push(densityMatches);
+      } else if (pattern.requiredCategories && pattern.requiredCategories.length > 0) {
+        // 精确类别模式：所有 requiredCategories 必须同时命中
+        const categoryMatches = this.matchByRequiredCategories(content, pattern, semanticPrimes);
+        if (categoryMatches) results.push(categoryMatches);
+      }
+    }
+
+    return results;
+  }
+
+  // ── 精确类别模式 ──────────────────────────────────────────────────────
+
+  private matchByRequiredCategories(
+    content: string,
+    pattern: StructuralPattern,
+    semanticPrimes: Map<string, string[]>,
+  ): StructuralMatch | null {
+    const categoryHits: Array<{ word: string; position: number }>[] = [];
+
+    for (const catId of pattern.requiredCategories!) {
+      const words = semanticPrimes.get(catId);
+      if (!words || words.length === 0) return null;
+      const hits = findWordsInContent(content, words);
+      if (hits.length === 0) return null;
+      categoryHits.push(hits);
+    }
+
+    // 最小跨度窗口
+    let minRange = Infinity;
+    let bestMinPos = 0;
+    let bestMaxPos = 0;
+    let bestWords: Array<{ category: string; word: string; position: number }> = [];
+
+    function walk(idx: number, selected: Array<{ category: string; word: string; position: number }>) {
+      if (idx === categoryHits.length) {
+        const positions = selected.map((h) => h.position);
+        const range = Math.max(...positions) - Math.min(...positions);
+        if (range < minRange) {
+          minRange = range;
+          bestMinPos = Math.min(...positions);
+          bestMaxPos = Math.max(...positions);
+          bestWords = [...selected];
+        }
+        return;
+      }
+      for (const hit of categoryHits[idx]) {
+        walk(idx + 1, [...selected, { ...hit, category: pattern.requiredCategories![idx] }]);
+      }
+    }
+
+    const cappedHits = categoryHits.map((hits) =>
+      hits.length > 5 ? hits.slice(0, 5) : hits,
+    );
+    walk(0, []);
+
+    if (minRange > pattern.windowSize) return null;
+
+    return {
+      patternId: pattern.id,
+      riskType: pattern.risk_type,
+      severity: pattern.severity,
+      matchedWords: bestWords,
+      windowStart: bestMinPos,
+      windowEnd: bestMaxPos,
+      suggestedLevel: pattern.auto_red ? "🔴" : "🟡",
+    };
+  }
+
+  // ── 密度模式：命中至少 N 个不同类别 ──────────────────────────────────
+
+  private matchByDensity(
+    content: string,
+    pattern: StructuralPattern,
+    semanticPrimes: Map<string, string[]>,
+  ): StructuralMatch | null {
+    const threshold = pattern.minCategoryCount!;
+    const windowSize = pattern.windowSize;
+
+    // 对每个类别找所有命中位置
+    const categoryRanges: Array<{ catId: string; hits: Array<{ word: string; position: number }> }> = [];
+
+    for (const [catId, words] of semanticPrimes) {
+      const hits = findWordsInContent(content, words);
+      if (hits.length > 0) {
+        categoryRanges.push({ catId, hits });
+      }
+    }
+
+    if (categoryRanges.length < threshold) return null;
+
+    // 找到最小窗口内能涵盖最大类别数的位置
+    // 策略：滑动窗口扫描所有命中位置
+    // 提取所有命中位置作为事件点
+    type EventPoint = {
+      pos: number;
+      catId: string;
+      word: string;
+      isStart: boolean;
+    };
+
+    const events: EventPoint[] = [];
+    for (const { catId, hits } of categoryRanges) {
+      for (const hit of hits) {
+        events.push({ pos: hit.position, catId, word: hit.word, isStart: true });
+      }
+    }
+    events.sort((a, b) => a.pos - b.pos);
+
+    // 滑动窗口
+    let bestCatCount = 0;
+    let bestStart = 0;
+    let bestEnd = 0;
+    let bestWords: Array<{ category: string; word: string; position: number }> = [];
+
+    for (let i = 0; i < events.length; i++) {
+      const windowEnd = events[i].pos + windowSize;
+      const catSet = new Set<string>();
+      const windowWords: Array<{ category: string; word: string; position: number }> = [];
+
+      for (let j = i; j < events.length && events[j].pos <= windowEnd; j++) {
+        catSet.add(events[j].catId);
+        windowWords.push({ category: events[j].catId, word: events[j].word, position: events[j].pos });
+      }
+
+      if (catSet.size > bestCatCount || (catSet.size === bestCatCount && (events[bestStart]?.pos ?? 0) > events[i].pos)) {
+        bestCatCount = catSet.size;
+        bestStart = i;
+        bestEnd = events[i].pos + windowSize;
+        bestWords = windowWords;
+      }
+    }
+
+    if (bestCatCount < threshold) return null;
+
+    const hitCount = bestCatCount;
+
+    return {
+      patternId: pattern.id,
+      riskType: pattern.risk_type,
+      severity: pattern.severity,
+      matchedWords: bestWords,
+      windowStart: events[bestStart]?.pos ?? 0,
+      windowEnd: bestEnd,
+      suggestedLevel: pattern.auto_red ? "🔴" : hitCount >= threshold + 1 ? "🔴" : "🟡",
+      hitCount,
+      totalCategories: semanticPrimes.size,
+    };
+  }
+}
+
+// ── 辅助函数：在文本中查找一组词的所有位置 ──────────────────────────────
+
+function findWordsInContent(content: string, words: string[]): Array<{ word: string; position: number }> {
+  const results: Array<{ word: string; position: number }> = [];
+  const seen = new Set<string>();
+  for (const word of words) {
+    if (seen.has(word)) continue;
+    seen.add(word);
+    let startIndex = 0;
+    while (startIndex < content.length) {
+      const pos = content.indexOf(word, startIndex);
+      if (pos < 0) break;
+      results.push({ word, position: pos });
+      startIndex = pos + 1;
+    }
+  }
+  return results;
 }
 
 function normalizeRulesData(data: RulesData): Record<string, RuleCategory> {

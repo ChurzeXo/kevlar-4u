@@ -12,6 +12,8 @@ import type { ToolModule } from "./types.js";
 import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
 import { buildKevlarRiskDirective } from "../execution/riskPrompt.js";
 import { callConfiguredDirectApi, hasApiKey } from "../execution/modes/direct_api.js";
+import { calculateSynergy } from "../execution/synergyCalculator.js";
+import { stripContext } from "../utils/stripContext.js";
 import { TOOL_DESCRIPTION, buildOrchestrationPrompt, buildPreAuditFinalizerPrompt } from "../prompts/reviewWizard.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
@@ -222,7 +224,11 @@ async function handleSystemAudit(
   }
 
   try {
-    const preAuditReport = await executeLlmSystemAudit(state.content, systemAuditors, localFindings, caller);
+    // 从 localFindings 中提取时机上下文，注入给 social_risk LLM 审计员
+    const timingFinding = localFindings.find((f) => f.timingDescription);
+    const timingContext = timingFinding?.timingDescription as string | undefined;
+
+    const preAuditReport = await executeLlmSystemAudit(state.content, systemAuditors, localFindings, caller, timingContext);
     state.preAuditReport = preAuditReport;
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
     state.step = "checkPersonaInventory";
@@ -259,30 +265,77 @@ async function executeLlmSystemAudit(
   systemAuditors: Persona[],
   localFindings: any[],
   caller: AuditLlmCaller,
-): Promise<{ dimensions: PreAuditDimensionResult[]; summary: string }> {
-  const auditorResults = await runSystemAuditors(content, systemAuditors, caller);
+  timingContext?: string,
+): Promise<PreAuditReport> {
+  // Phase 0.4: 物理脱嵌预处理 — 两轮投喂
+  const stripped = stripContext(content);
+
+  // Round 1: 裸文 → 仅 context_distortion + network_culture_risk 执行
+  const bareOnlyAuditors = systemAuditors.filter(
+    (a) => a.meta.id === "context_distortion" || a.meta.id === "network_culture_risk",
+  );
+  const bareFindings = bareOnlyAuditors.length > 0
+    ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller)
+    : [];
+
+  // Round 2: 原文 → 所有维度执行（现有流程）
+  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext);
+
+  // Delta 分析：bareFindings 有但 fullFindings 没有 → 脱嵌型风险
+  const bareKeywords = new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)));
+  const fullKeywords = new Set(auditorResults.flatMap((r) => r.findings.map((f: any) => f.keyword)));
+  const deltaRisks = {
+    bareOnly: [...bareKeywords].filter((kw) => !fullKeywords.has(kw)),
+    fullOnly: [...fullKeywords].filter((kw) => !bareKeywords.has(kw)),
+    stable: [...bareKeywords].filter((kw) => fullKeywords.has(kw)),
+  };
+
   const mergedResults = normalizePreAuditDimensions(
     mergeLocalFindingsIntoAudits(auditorResults, localFindings),
     systemAuditors,
   );
   const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
-  return finalizePreAuditReport(content, localFindings, mergedResults, crossValidatedResults, systemAuditors, caller);
+  const report = await finalizePreAuditReport(content, localFindings, mergedResults, crossValidatedResults, systemAuditors, caller);
+
+  // Phase 2.2: 协同风险加权计算
+  const dimensionLevels: Record<string, string> = {};
+  for (const dim of crossValidatedResults) {
+    dimensionLevels[dim.id] = dim.level ?? '🟢';
+  }
+  const timingFlag = localFindings.some((f) => f.timingWindowId) ? ['timing_risk'] : [];
+  const synergy = calculateSynergy(dimensionLevels, timingFlag);
+  report.synergyFlags = {
+    triggered: synergy.triggered,
+    overallMultiplier: synergy.overallMultiplier,
+  };
+
+  // 附加 delta 信号到报告
+  report.deltaRisks = deltaRisks;
+
+  return report;
 }
 
 async function runSystemAuditors(
   content: string,
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
+  timingContext?: string,
 ): Promise<PreAuditDimensionResult[]> {
   return Promise.all(
     systemAuditors.map(async (auditor) => {
       try {
+        // 时机上下文仅注入给 social_risk 审计员
+        const auditContent =
+          timingContext && auditor.meta.id === "social_risk"
+            ? [content, "", timingContext].join("\n")
+            : content;
+
         const response = await caller({
           systemPrompt: [auditor.systemPrompt, "", "---", "", buildKevlarRiskDirective()].join("\n"),
           messages: [
             {
               role: "user",
-              content: ["请审查以下内容：", "", content].join("\n"),
+              content: ["请审查以下内容：", "", auditContent].join("\n"),
             },
           ],
           maxTokens: 2048,
@@ -315,13 +368,35 @@ async function handleOrchestrationAuditResult(
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
     const dimensions = normalizePreAuditDimensions(parsed.dimensions, []);
-    state.preAuditReport = {
+    const report: PreAuditReport = {
       dimensions,
       summary:
         typeof parsed.summary === "string" && parsed.summary.trim()
           ? parsed.summary.trim()
           : summarizePreAuditResults(dimensions),
+      riskProfile: parsed.riskProfile ?? undefined,
+      synergyFlags: parsed.synergyFlags ?? undefined,
+      worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
+      deltaRisks: parsed.deltaRisks ?? undefined,
     };
+
+    // Phase 2.2: 宿主编排路径也执行协同风险加权计算
+    if (!report.synergyFlags) {
+      const dimensionLevels: Record<string, string> = {};
+      for (const dim of dimensions) {
+        dimensionLevels[dim.id] = dim.level ?? '🟢';
+      }
+      const timingFlag = dimensions.some((d) =>
+        d.findings?.some((f: any) => f.timingWindowId),
+      ) ? ['timing_risk'] : [];
+      const synergy = calculateSynergy(dimensionLevels, timingFlag);
+      report.synergyFlags = {
+        triggered: synergy.triggered,
+        overallMultiplier: synergy.overallMultiplier,
+      };
+    }
+
+    state.preAuditReport = report;
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
@@ -385,6 +460,30 @@ function normalizeFinding(finding: Record<string, unknown>): Record<string, unkn
   return normalized;
 }
 
+interface PreAuditReport {
+  dimensions: PreAuditDimensionResult[];
+  summary: string;
+  riskProfile?: {
+    timing_risk: string;
+    context_risk: string;
+    cultural_risk: string;
+    narrative_power_risk: string;
+    emotion_risk: string;
+    symbol_risk: string;
+    propagation_risk: string;
+  };
+  synergyFlags?: {
+    triggered: string[];
+    overallMultiplier: number;
+  };
+  worstCaseNarrative?: string;
+  deltaRisks?: {
+    bareOnly: string[];
+    fullOnly: string[];
+    stable: string[];
+  };
+}
+
 async function finalizePreAuditReport(
   content: string,
   localFindings: any[],                        // Step 0
@@ -392,7 +491,7 @@ async function finalizePreAuditReport(
   crossValidatedResults: PreAuditDimensionResult[],  // Step 3
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
-): Promise<{ dimensions: PreAuditDimensionResult[]; summary: string }> {
+): Promise<PreAuditReport> {
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
   try {
     const response = await caller({
@@ -418,6 +517,10 @@ async function finalizePreAuditReport(
         typeof parsed.summary === "string" && parsed.summary.trim()
           ? parsed.summary.trim()
           : summarizePreAuditResults(dimensions),
+      riskProfile: parsed.riskProfile ?? undefined,
+      synergyFlags: parsed.synergyFlags ?? undefined,
+      worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
+      deltaRisks: parsed.deltaRisks ?? undefined,
     };
   } catch (err) {
     logger.warn("Pre-audit finalizer failed, using deterministic summary", {
@@ -434,7 +537,26 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
   if (!loaded) return [];
 
   const findings: any[] = [];
+
+  // ── Phase 0.1：时机节点检测 ─────────────────────────────────────────
+  // L1 本地层仅标记命中，不决定风险等级（由 LLM L2 层判定）
+  const timingFinding = repo.checkTimingRisk(new Date(), content);
+  if (timingFinding) {
+    findings.push({
+      dimension: "时机风险",
+      keyword: timingFinding.windowLabel,
+      trigger: `时机窗口命中：${timingFinding.windowLabel}`,
+      riskDescription: timingFinding.description,
+      propagationRisk: `窗口期内风险系数 ${timingFinding.riskMultiplier}x，建议关注舆论放大效应。`,
+      source: "local_rule_engine",
+      timingWindowId: timingFinding.windowId,
+      timingMultiplier: timingFinding.riskMultiplier,
+      timingDescription: timingFinding.description,
+    });
+  }
   const seen = new Set<string>();
+
+  // ── Phase 0a：现有 2-4 gram 滑动窗口匹配 ──────────────────────────────
   const candidates = extractAuditCandidates(content);
 
   for (const candidate of candidates) {
@@ -464,6 +586,30 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
         root: match.rule.root,
       });
     }
+  }
+
+  // ── Phase 0b：L2 结构模式检测 ─────────────────────────────────────────
+  const structuralMatches = repo.checkStructuralPatterns(content);
+  for (const sm of structuralMatches) {
+    const key = `struct::${sm.patternId}::${sm.windowStart}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const matchedWordsStr = sm.matchedWords.map((m) => m.word).join("、");
+    findings.push({
+      dimension: "低俗擦边风险",
+      keyword: matchedWordsStr,
+      trigger: `语义类别组合命中：${sm.patternId}`,
+      riskDescription: [
+        `风险类型：${sm.riskType}`,
+        `命中词：${matchedWordsStr}`,
+        `位置范围：${sm.windowStart}-${sm.windowEnd}`,
+      ].join("；"),
+      propagationRisk: "多类别语义词在同一窗口内堆叠，容易被截图后进行颜色/身体向解读。",
+      suggestedLevel: sm.suggestedLevel,
+      source: "local_rule_engine",
+      patternId: sm.patternId,
+    });
   }
 
   return findings;
@@ -543,6 +689,18 @@ const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
     validator: "network_culture_risk",
     question:
       "以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度验证：这些风险点是否确实在特定网络社区有恶意含义？请只输出 JSON。",
+  },
+  {
+    source: "social_risk",
+    validator: "factual_integrity",
+    question:
+      "以下内容被「社伦判官」标记为社会风险。这些风险点有事实依据吗？还是纯粹基于情绪联想？请只输出 JSON。",
+  },
+  {
+    source: "legal_compliance",
+    validator: "social_risk",
+    question:
+      "以下内容被「合规哨兵」标记为合规风险。这些合规问题是否同时触发了社会对立？请只输出 JSON。",
   },
 ];
 

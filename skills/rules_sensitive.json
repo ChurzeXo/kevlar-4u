@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-06-04",
+  "tier": "free",
+  "description": "政治/敏感话题规则库 — 按情境分词根管理，不依赖 L1/L2 语义类别",
+
+  "categories": {
+    "historical_sensitive": {
+      "name": "历史敏感",
+      "severity": "critical",
+      "rules": [
+        { "root": "某", "variants_check": ["某事件", "那个事", "那件事"], "context": "某+敏感事件", "risk": "历史敏感事件指代", "type": "政治敏感" },
+        { "root": "六四", "variants_check": ["64", "6.4", "六四事件", "天安门事件"], "risk": "敏感历史事件", "type": "政治敏感" },
+        { "root": "天安门", "variants_check": ["天安门广场", "广场事件"], "risk": "政治敏感场所", "type": "政治敏感" }
+      ]
+    },
+    "territorial_sensitive": {
+      "name": "领土主权",
+      "severity": "critical",
+      "rules": [
+        { "root": "台湾", "variants_check": ["台独", "台湾独立", "台湾国", "tw"], "context": "台湾+国家/独立/主权", "risk": "涉及领土主权错误表述", "type": "政治敏感" },
+        { "root": "藏", "variants_check": ["西藏", "藏独", "西藏独立"], "context": "西藏+独立/国家", "risk": "涉及领土主权", "type": "政治敏感" },
+        { "root": "疆", "variants_check": ["新疆", "疆独", "新疆独立"], "context": "新疆+独立/国家", "risk": "涉及领土主权", "type": "政治敏感" },
+        { "root": "南海", "variants_check": ["南海主权", "南海仲裁"], "risk": "涉及领土主权", "type": "政治敏感" }
+      ]
+    },
+    "leadership_sensitive": {
+      "name": "领导人相关",
+      "severity": "critical",
+      "rules": [
+        { "root": "习", "variants_check": ["老大", "维尼", "包子", "习核心", "圣上"], "risk": "领导人相关敏感表达", "type": "政治敏感" },
+        { "root": "中南海", "variants_check": ["中南海保镖", "海里"], "risk": "政治敏感场所", "type": "政治敏感" }
+      ]
+    },
+    "ideology_sensitive": {
+      "name": "意识形态",
+      "severity": "high",
+      "rules": [
+        { "root": "独裁", "variants_check": ["独裁者", "独裁政权", "独裁统治"], "risk": "涉政治体制敏感用词", "type": "政治敏感" },
+        { "root": "极权", "variants_check": ["极权主义", "极权体制"], "risk": "涉政治体制敏感用词", "type": "政治敏感" },
+        { "root": "洗脑", "variants_check": ["被洗脑", "洗脑教育", "洗脑术"], "risk": "涉意识形态攻击", "type": "政治敏感" },
+        { "root": "言论自由", "variants_check": ["没有言论自由", "言论管控"], "risk": "涉政治体制对比", "type": "政治敏感" },
+        { "root": "人权", "variants_check": ["人权问题", "人权记录", "没有人权"], "risk": "涉政治体制对比", "type": "政治敏感" }
+      ]
+    },
+    "event_sensitive": {
+      "name": "群体事件",
+      "severity": "high",
+      "rules": [
+        { "root": "罢工", "variants_check": ["罢工潮", "大罢工", "工人罢工"], "risk": "涉群体事件", "type": "政治敏感" },
+        { "root": "游行", "variants_check": ["游行示威", "上街游行", "街头运动"], "risk": "涉群体事件", "type": "政治敏感" },
+        { "root": "示威", "variants_check": ["示威游行", "抗议示威", "暴力示威"], "risk": "涉群体事件", "type": "政治敏感" },
+        { "root": "上访", "variants_check": ["上访户", "进京上访", "集体上访"], "risk": "涉信访事件", "type": "政治敏感" }
+      ]
+    },
+    "religion_sensitive": {
+      "name": "宗教民族",
+      "severity": "high",
+      "rules": [
+        { "root": "清真", "variants_check": ["不清真", "清真食品", "泛清真化"], "context": "清真+不清真/猪肉", "risk": "涉宗教敏感", "type": "宗教敏感" },
+        { "root": "回民", "variants_check": ["回回", "回族"], "risk": "涉民族话题", "type": "宗教敏感" },
+        { "root": "法轮", "variants_check": ["法轮功", "法轮大法"], "risk": "涉邪教", "type": "政治敏感" }
+      ]
+    }
+  }
+}
