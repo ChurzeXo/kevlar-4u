@@ -868,41 +868,89 @@ function summarizePreAuditResults(
 ): string {
   if (results.length === 0) return "本地规则与系统审查员均未命中风险点";
 
-  const risky: Array<{ name: string; findings: any[]; id?: string }> = [];
-  const clean: Array<{ name: string; id?: string }> = [];
+  const risky: Array<{ name: string; findings: any[]; id?: string; level?: string }> = [];
 
   for (const r of results) {
-    const hasFindings = r.findings && r.findings.length > 0;
-    if (hasFindings) {
+    if (r.findings && r.findings.length > 0) {
       risky.push(r);
-    } else {
-      clean.push(r);
     }
   }
 
-  const lines: string[] = [];
-
-  const tableLines = formatPreAuditTable(clean);
-  if (tableLines.length > 0) {
-    lines.push(...tableLines);
+  // 全部通过
+  if (risky.length === 0) {
+    return [
+      "⚠️ 风险发现",
+      "",
+      "| 维度 | 结果 |",
+      "| --- | --- |",
+      ...results.map((r) => `| ${escapeMarkdownTableCell(r.name)} | 🟢 通过 |`),
+      "",
+      "核心风险：无",
+    ].join("\n");
   }
 
-  if (risky.length > 0) {
-    if (lines.length > 0) lines.push("");
-    lines.push(
-      ...risky.flatMap((r, index) => {
-        const section = formatRiskSection(r);
-        return index === 0 ? section : ["", ...section];
-      }),
-    );
+  // 有风险维度：只展示有风险的维度
+  const riskSummaryLines = risky.map((r) => {
+    const level = r.level || getFindingsLevel(r.findings);
+    const riskKeywords = r.findings
+      .map((f) => f.keyword || f.trigger)
+      .filter(Boolean)
+      .join("、");
+    return `| ${escapeMarkdownTableCell(r.name)} | ${level} ${riskKeywords} |`;
+  });
+
+  // 核心风险总结：从所有 findings 中提取关键信息
+  const coreRisk = buildCoreRiskSummary(risky);
+
+  return [
+    "⚠️ 风险发现",
+    "",
+    "| 维度 | 风险内容 |",
+    "| --- | --- |",
+    ...riskSummaryLines,
+    "",
+    "核心风险：",
+    coreRisk,
+  ].join("\n");
+}
+
+function buildCoreRiskSummary(
+  risky: Array<{ name: string; findings: any[]; id?: string; level?: string }>,
+): string {
+  // 提取所有高风险关键词
+  const highRiskKeywords: string[] = [];
+  const riskDescriptions: string[] = [];
+
+  for (const r of risky) {
+    for (const f of r.findings) {
+      if (f.suggestedLevel === "🔴" && f.keyword) {
+        highRiskKeywords.push(f.keyword);
+      }
+      if (f.riskDescription) {
+        riskDescriptions.push(f.riskDescription);
+      }
+    }
   }
 
-  if (risky.length === 0 && clean.length > 0) {
-    lines.push("");
-    lines.push(`✅ 合规通过：${clean.map((r) => r.name).join(" · ")}`);
+  // 去重
+  const uniqueKeywords = [...new Set(highRiskKeywords)];
+
+  // 生成简洁的核心风险描述
+  if (uniqueKeywords.length > 0) {
+    const keywordStr = uniqueKeywords.join("、");
+    const base = `文案中「${keywordStr}」存在明确风险联想`;
+    if (riskDescriptions.length > 0) {
+      return `${base}。${riskDescriptions[0]}`;
+    }
+    return `${base}，存在被截图传播演变为舆情事件的可能。`;
   }
 
-  return lines.join("\n");
+  // 降级：用 riskDescription 拼接
+  if (riskDescriptions.length > 0) {
+    return riskDescriptions[0];
+  }
+
+  return "存在潜在语义或传播风险，建议进入复审确认。";
 }
 
 // ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
@@ -953,7 +1001,7 @@ async function handleInventoryCheck(
     );
   }
 
-  // 有评审员：展示初审结果，询问是否需要复审
+  // 有评审员：展示初审结果，询问下一步
   state.step = "waitingForReviewDecision";
   await saveState(tmpDir, state);
   return toolResponse(
@@ -961,9 +1009,9 @@ async function handleInventoryCheck(
     [
       buildPreAuditSummaryBlock(state),
       "",
-      "初审已完成。是否需要进入复审？",
-      "",
-      "回复「需要」或「开始复审」即可，我会为你推荐合适的复审评审员。",
+      "请选择下一步：",
+      "1. 进入复审",
+      "2. 平台合规检查（即将开放）",
     ].join("\n"),
   );
 }
@@ -980,13 +1028,32 @@ async function handleReviewDecision(
 ): Promise<ToolResult> {
   const normalized = userMessage.trim();
 
-  // 宽松识别确认复审意图（"好"需要完整词边界，不匹配"这篇不好"中的"好"）
-  const wantsReview = /^(?:需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes)$|^开始$|^确认$|^需要$|^是$|^嗯$/i.test(
-    normalized,
-  );
+  // 选项 2：平台合规检查（即将开放）
+  if (/^(2|平台合规检查|合规检查|平台检查)$/i.test(normalized)) {
+    return toolResponse(
+      state,
+      [
+        "该功能正在开发中，敬请期待。",
+        "",
+        "请选择下一步：",
+        "1. 进入复审",
+        "2. 平台合规检查（即将开放）",
+      ].join("\n"),
+    );
+  }
+
+  // 选项 1：进入复审
+  const wantsReview = /^(1|需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes)$/i.test(normalized);
 
   if (!wantsReview) {
-    return toolResponse(state, "请回复「需要」进入复审，或告诉我你的其他需求。");
+    return toolResponse(
+      state,
+      [
+        "请选择下一步：",
+        "1. 进入复审",
+        "2. 平台合规检查（即将开放）",
+      ].join("\n"),
+    );
   }
 
   // 用户确认复审：执行评审员推荐

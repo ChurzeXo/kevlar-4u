@@ -225,10 +225,10 @@ describe("handleReviewContentWizard state machine", () => {
 
     const text = textOf(started);
     assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
-    assert.ok(text.includes("| 审查维度 | 结果 |"));
-    assert.ok(text.includes("| 合规哨兵 | ✅ 通过 |"));
-    assert.ok(text.includes("| 语境猎手 | ✅ 通过 |"));
-    assert.ok(text.includes("| 事实判官 | ✅ 通过 |"));
+    assert.ok(text.includes("| 维度 | 结果 |"));
+    assert.ok(text.includes("| 合规哨兵 | 🟢 通过 |"));
+    assert.ok(text.includes("| 语境猎手 | 🟢 通过 |"));
+    assert.ok(text.includes("| 事实判官 | 🟢 通过 |"));
     assert.ok(!text.includes("审 查 维 度"));
   });
 
@@ -240,10 +240,9 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("⚠️ 风险预警"));
+    assert.ok(text.includes("⚠️ 风险发现"));
     assert.ok(text.includes("本地规则引擎"));
-    assert.ok(text.includes("⚠️ 风险预警（本地规则引擎（本地规则））"));
-    assert.ok(text.includes("发现 1 项潜在风险：「粉耳」"));
+    assert.ok(text.includes("| 本地规则引擎 | 🔴"));
     assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
 
     const sessionId = extractSessionId(text);
@@ -269,10 +268,9 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("⚠️ 风险预警"));
+    assert.ok(text.includes("⚠️ 风险发现"));
     assert.ok(text.includes("暗语破译"));
-    assert.ok(text.includes("⚠️ 风险预警（暗语破译（网络文化））"));
-    assert.ok(text.includes("发现 1 项潜在风险：「粉耳」"));
+    assert.ok(text.includes("| 暗语破译 | 🔴"));
 
     const sessionId = extractSessionId(text);
     const state = JSON.parse(
@@ -298,8 +296,8 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("Kevlar 本地内容安全审查引擎"));
-    assert.ok(text.includes("待审计的输入内容"));
+    assert.ok(text.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
+    assert.ok(text.includes("待测文案"));
     assert.ok(text.includes("currentStep: waitingForOrchestrationAudit"));
 
     const sessionId = extractSessionId(text);
@@ -355,7 +353,7 @@ describe("handleReviewContentWizard state machine", () => {
 
     assert.ok(calls.length >= 1);
     assert.ok(calls[0].systemPrompt.includes("严格遵守审查边界"));
-    assert.ok(calls[0].messages[0].content.includes("本地规则初审命中"));
+    assert.ok(calls[0].messages[0].content.includes("本地规则命中"));
     assert.ok(calls[0].messages[0].content.includes("粉耳 -> 木耳"));
   });
 });
