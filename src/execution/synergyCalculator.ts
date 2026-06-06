@@ -9,6 +9,12 @@ export interface SynergyRule {
 export interface SynergyResult {
   triggered: string[];
   overallMultiplier: number;
+  levelUpgrades: Array<{
+    dimension: string;
+    from: string;
+    to: string;
+    reason: string;
+  }>;
   details: Array<{
     rule: SynergyRule;
     matched: boolean;
@@ -51,6 +57,7 @@ export function calculateSynergy(
   extraFlags?: string[],
 ): SynergyResult {
   const details: SynergyResult['details'] = [];
+  const levelUpgrades: SynergyResult['levelUpgrades'] = [];
   let overallMultiplier = 1.0;
 
   for (const rule of SYNERGY_RULES) {
@@ -71,12 +78,29 @@ export function calculateSynergy(
     details.push({ rule, matched });
     if (matched) {
       overallMultiplier *= rule.multiplier;
+      
+      // 如果规则要求升级 level，将相关维度的 🟡 升级为 🔴
+      if (rule.upgradeLevel) {
+        for (const dim of rule.dimensions) {
+          if (dim === 'timing_risk') continue; // timing_risk 不是实际维度
+          const currentLevel = dimensionLevels[dim] ?? '🟢';
+          if (currentLevel === '🟡') {
+            levelUpgrades.push({
+              dimension: dim,
+              from: '🟡',
+              to: '🔴',
+              reason: rule.label,
+            });
+          }
+        }
+      }
     }
   }
 
   return {
     triggered: details.filter((d) => d.matched).map((d) => d.rule.label),
     overallMultiplier: Math.round(overallMultiplier * 10) / 10,
+    levelUpgrades,
     details,
   };
 }

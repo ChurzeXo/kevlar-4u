@@ -192,6 +192,7 @@ export class LocalJsonRuleRepository implements IRuleRepository {
       const exactBlacklist = new Set<string>();
       const associativeMap = new Map<string, { category: string; rule: AssociativeRule }>();
       const variantMap = new Map<string, { category: string; rule: AssociativeRule }>();
+      const multiHopPatterns = new Map<string, Array<{ pattern: string[]; risk: string }>>();
 
       const coreRules = coreRulesFromFree || mergedData.core_rules;
       const associationPatterns = coreRules?.association_patterns ?? [];
@@ -199,6 +200,10 @@ export class LocalJsonRuleRepository implements IRuleRepository {
 
       for (const [categoryName, category] of Object.entries(normalizeRulesData(mergedData))) {
         indexCategory(categoryName, category, exactBlacklist, associativeMap, variantMap);
+        // 索引 multi_hop_patterns
+        if (category.multi_hop_patterns) {
+          multiHopPatterns.set(categoryName, category.multi_hop_patterns);
+        }
       }
 
       this.index = {
@@ -209,6 +214,7 @@ export class LocalJsonRuleRepository implements IRuleRepository {
         evolutionStrategies,
         semanticPrimes: new Map(Object.entries(semanticPrimesData)),
         structuralPatterns: structuralPatternsData,
+        multiHopPatterns,
         meta: {
           version: mergedData.version ?? "2.1.0",
           last_updated: mergedData.last_updated ?? "",
@@ -341,8 +347,6 @@ export class LocalJsonRuleRepository implements IRuleRepository {
   // ── Phase 0.1 时机节点检测 ────────────────────────────────────────────
 
   checkTimingRisk(date: Date, content: string): TimingFinding | null {
-    const today = `${date.getMonth() + 1}/${date.getDate()}`;
-
     for (const window of BUILTIN_SENSITIVE_WINDOWS) {
       const windowDate = new Date(date.getFullYear(), window.month - 1, window.day);
       const diffMs = date.getTime() - windowDate.getTime();
@@ -371,6 +375,43 @@ export class LocalJsonRuleRepository implements IRuleRepository {
     }
 
     return null;
+  }
+
+  // ── Multi-hop patterns 检测 ─────────────────────────────────────────────
+
+  checkMultiHopPatterns(content: string): Array<{ pattern: string[]; risk: string; category: string; matchedWords: string[] }> {
+    if (!this.index) return [];
+    const { multiHopPatterns } = this.index;
+    if (multiHopPatterns.size === 0) return [];
+
+    const results: Array<{ pattern: string[]; risk: string; category: string; matchedWords: string[] }> = [];
+
+    for (const [category, patterns] of multiHopPatterns) {
+      for (const pattern of patterns) {
+        const matchedWords: string[] = [];
+        let allMatched = true;
+
+        for (const word of pattern.pattern) {
+          if (content.includes(word)) {
+            matchedWords.push(word);
+          } else {
+            allMatched = false;
+            break;
+          }
+        }
+
+        if (allMatched && matchedWords.length > 0) {
+          results.push({
+            pattern: pattern.pattern,
+            risk: pattern.risk,
+            category,
+            matchedWords,
+          });
+        }
+      }
+    }
+
+    return results;
   }
 
   // ── L2 结构模式检测 ─────────────────────────────────────────────────────

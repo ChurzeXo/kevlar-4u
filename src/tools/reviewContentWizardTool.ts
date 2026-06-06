@@ -305,6 +305,15 @@ async function executeLlmSystemAudit(
     systemAuditors,
   );
   const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
+  
+  // Phase 2.2: 协同风险加权计算（在 finalizer 之前）
+  const dimensionLevels: Record<string, string> = {};
+  for (const dim of crossValidatedResults) {
+    dimensionLevels[dim.id] = dim.level ?? "🟢";
+  }
+  const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
+  const synergy = calculateSynergy(dimensionLevels, timingFlag);
+  
   const report = await finalizePreAuditReport(
     content,
     localFindings,
@@ -312,22 +321,26 @@ async function executeLlmSystemAudit(
     crossValidatedResults,
     systemAuditors,
     caller,
+    synergy,
+    deltaRisks,
   );
 
-  // Phase 2.2: 协同风险加权计算
-  const dimensionLevels: Record<string, string> = {};
-  for (const dim of crossValidatedResults) {
-    dimensionLevels[dim.id] = dim.level ?? "🟢";
-  }
-  const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
-  const synergy = calculateSynergy(dimensionLevels, timingFlag);
   report.synergyFlags = {
     triggered: synergy.triggered,
     overallMultiplier: synergy.overallMultiplier,
+    levelUpgrades: synergy.levelUpgrades,
   };
-
-  // 附加 delta 信号到报告
   report.deltaRisks = deltaRisks;
+
+  // 应用协同加权的 level 升级
+  if (synergy.levelUpgrades.length > 0) {
+    for (const upgrade of synergy.levelUpgrades) {
+      const dim = report.dimensions.find((d) => d.id === upgrade.dimension);
+      if (dim && dim.level === upgrade.from) {
+        dim.level = upgrade.to;
+      }
+    }
+  }
 
   return report;
 }
@@ -515,6 +528,12 @@ interface PreAuditReport {
   synergyFlags?: {
     triggered: string[];
     overallMultiplier: number;
+    levelUpgrades?: Array<{
+      dimension: string;
+      from: string;
+      to: string;
+      reason: string;
+    }>;
   };
   worstCaseNarrative?: string;
   deltaRisks?: {
@@ -531,6 +550,8 @@ async function finalizePreAuditReport(
   crossValidatedResults: PreAuditDimensionResult[], // Step 3
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
+  synergy?: { triggered: string[]; overallMultiplier: number; details: Array<{ rule: any; matched: boolean }> },
+  deltaRisks?: any,
 ): Promise<PreAuditReport> {
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
   try {
@@ -544,6 +565,8 @@ async function finalizePreAuditReport(
             localFindings, // Step 0
             mergedResults, // Step 2
             crossValidatedResults, // Step 3
+            synergy, // Phase 2.2: 协同加权结果
+            deltaRisks, // 脱嵌 delta 信号
           }),
         },
       ],
@@ -650,6 +673,17 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
       source: "local_rule_engine",
       patternId: sm.patternId,
     });
+  }
+
+  // ── Phase 0.1 升级：当 timing 命中时，将同一窗口内的 🟡 findings 升级为 🔴 ──
+  if (timingFinding) {
+    for (const finding of findings) {
+      if (finding.suggestedLevel === "🟡" && finding.source === "local_rule_engine") {
+        finding.suggestedLevel = "🔴";
+        finding.timingUpgrade = true;
+        finding.timingUpgradeReason = `时机窗口【${timingFinding.windowLabel}】命中，风险系数 ${timingFinding.riskMultiplier}x，自动升级`;
+      }
+    }
   }
 
   return findings;

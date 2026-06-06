@@ -150,4 +150,6 @@ export interface RulesIndex {
   semanticPrimes: Map<string, string[]>;
   /** L2 结构模式列表 */
   structuralPatterns: StructuralPattern[];
+  /** Multi-hop patterns from rules_free.json */
+  multiHopPatterns: Map<string, Array<{ pattern: string[]; risk: string }>>;
 }
