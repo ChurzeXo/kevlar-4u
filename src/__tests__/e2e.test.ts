@@ -66,7 +66,8 @@ describe("End-to-End integration test", () => {
       assert.equal(step1.content[0].type, "text");
 
       const step1Text = step1.content[0].text;
-      assert.ok(step1Text.includes("是否需要进入复审"), "Should ask if review needed");
+      assert.ok(step1Text.includes("请选择下一步："), "Should ask for the next review action");
+      assert.ok(step1Text.includes("1. 进入复审"), "Should offer review as the next action");
       assert.ok(step1Text.includes("currentStep: waitingForReviewDecision"), "Should be in review decision step");
 
       // Extract sessionId

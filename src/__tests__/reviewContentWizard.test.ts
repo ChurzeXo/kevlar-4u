@@ -114,7 +114,8 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const startText = textOf(started);
-    assert.ok(startText.includes("是否需要进入复审"));
+    assert.ok(startText.includes("请选择下一步："));
+    assert.ok(startText.includes("1. 进入复审"));
     assert.ok(startText.includes("currentStep: waitingForReviewDecision"));
     assert.ok(!startText.includes("这份内容准备投放在哪些平台"));
     assert.ok(!startText.includes("Kevlar-4u 宿主辅助评测任务"));
@@ -331,7 +332,7 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
   });
 
-  it("passes local DAO findings into sampling system-auditor prompts", async () => {
+  it("uses orchestration-style isolated matrix prompts for sampling system auditors", async () => {
     writePrdRules();
     await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
     await writePersona("foodie", "美食达人", ["小红书", "美食"]);
@@ -352,7 +353,11 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     assert.ok(calls.length >= 1);
+    assert.ok(calls[0].systemPrompt.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
+    assert.ok(calls[0].systemPrompt.includes("真实隔离 LLM 沙盒"));
     assert.ok(calls[0].systemPrompt.includes("严格遵守审查边界"));
+    assert.ok(calls[0].messages[0].content.includes("Step 0：职业黑粉逆向全局解码"));
+    assert.ok(calls[0].messages[0].content.includes("Step 1：当前维度沙盒推理"));
     assert.ok(calls[0].messages[0].content.includes("本地规则命中"));
     assert.ok(calls[0].messages[0].content.includes("粉耳 -> 木耳"));
   });

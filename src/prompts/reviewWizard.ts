@@ -1,4 +1,5 @@
 import type { Persona } from "../utils/parser.js";
+import type { StrippedContent } from "../utils/stripContext.js";
 
 export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 
@@ -201,7 +202,16 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
   return steps.join("\n");
 }
 
-export function buildOrchestrationPrompt(userContent: string, systemAuditors: Persona[]): string {
+export interface OrchestrationPreAuditContext {
+  localFindings: any[];
+  stripped: StrippedContent;
+}
+
+export function buildOrchestrationPrompt(
+  userContent: string,
+  systemAuditors: Persona[],
+  preAuditContext?: OrchestrationPreAuditContext,
+): string {
   const sandboxSections = systemAuditors
     .map((auditor) => {
       return [
@@ -215,6 +225,38 @@ export function buildOrchestrationPrompt(userContent: string, systemAuditors: Pe
       ].join("\n");
     })
     .join("\n\n");
+
+  const deterministicContextSection = preAuditContext
+    ? [
+        `## 【代码预处理结果（必须作为事实输入）】`,
+        ``,
+        `以下内容不是建议，而是 Kevlar 代码层已经完成的确定性预处理结果。你必须把它们作为矩阵扫描输入，不得忽略。`,
+        ``,
+        `### Pipeline Step 0：本地规则引擎输出 localFindings`,
+        preAuditContext.localFindings.length > 0
+          ? JSON.stringify(preAuditContext.localFindings, null, 2)
+          : `[]`,
+        ``,
+        `### Pipeline Step 1：物理脱嵌输出`,
+        JSON.stringify(
+          {
+            bare: preAuditContext.stripped.bare,
+            replacements: preAuditContext.stripped.replacements,
+          },
+          null,
+          2,
+        ),
+        ``,
+        `### 宿主执行要求`,
+        `- Step 2 裸文审计必须使用上方 bare 文本，只对 context_distortion 与 network_culture_risk 两个维度执行。`,
+        `- Step 3 全文审计必须使用【待测文案】原文，对全部 system_auditor 维度执行。`,
+        `- Step 4 必须根据裸文审计与全文审计结果生成 deltaRisks: bareOnly/fullOnly/stable。`,
+        `- Step 5 必须把 localFindings 合并进 network_culture_risk 维度；若该维度不存在，则建立 local_rule_engine 维度。`,
+        `- Step 6 必须模拟交叉验证：network_culture_risk ↔ context_distortion，social_risk → factual_integrity，legal_compliance → social_risk。`,
+        `- Step 7 必须输出 synergyFlags，至少包含 triggered 与 overallMultiplier；如有升级请包含 levelUpgrades。`,
+        `- Step 8 必须输出最终仲裁后的 dimensions、summary、riskProfile、worstCaseNarrative、deltaRisks。`,
+      ].join("\n")
+    : "";
 
   return [
     `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（单次推理版）`,
@@ -233,6 +275,8 @@ export function buildOrchestrationPrompt(userContent: string, systemAuditors: Pe
     `"""`,
     userContent,
     `"""`,
+    ``,
+    deterministicContextSection,
     ``,
     `## 【矩阵填空执行协议】`,
     `请严格按照以下协议流程进行逐项分析，最终只输出标准 JSON。`,
@@ -308,6 +352,137 @@ export function buildOrchestrationPrompt(userContent: string, systemAuditors: Pe
     ``,
     `请严格执行以上流程并输出 JSON：`,
   ].join("\n");
+}
+
+export function buildIsolatedSystemAuditorPrompt(auditor: Persona): string {
+  return [
+    `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（真实沙盒单维度版）`,
+    ``,
+    `## 【元规则】`,
+    `1. 运行环境：真实隔离 LLM 沙盒；当前调用只代表一个系统审查员`,
+    `2. 执行身份：非情感化的【单维特征分析与语义映射沙盒】`,
+    `3. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
+    ``,
+    buildCommonRiskRules(),
+    ``,
+    buildCoreReasoningFramework(),
+    ``,
+    `## 【当前沙盒】`,
+    `- 审查员：${auditor.meta.name}（${auditor.meta.id}）`,
+    `- 角色描述：${auditor.meta.description}`,
+    ``,
+    `## 【审查员原始规则】`,
+    auditor.systemPrompt,
+    ``,
+    `## 【单沙盒矩阵填空执行协议】`,
+    `请严格按照用户消息中的 Step 0 → Step 1 → Step 2 → Step 3 执行。`,
+    `最终只输出标准 JSON，不包含 Markdown 标记、标签、推理过程或额外解释。`,
+  ].join("\n");
+}
+
+export function buildIsolatedSystemAuditorMessage(
+  content: string,
+  auditor: Persona,
+  options?: {
+    localFindings?: any[];
+    timingContext?: string;
+  },
+): string {
+  const localFindings = options?.localFindings ?? [];
+  const localFindingsSection =
+    localFindings.length > 0
+      ? [
+          `## 【本地规则引擎预警】`,
+          `以下发现来自确定性本地规则，只能作为风险候选输入，不可丢弃；请在当前维度相关时纳入 findings：`,
+          ``,
+          JSON.stringify(localFindings, null, 2),
+          ``,
+        ].join("\n")
+      : "";
+
+  const timingContextSection = options?.timingContext
+    ? [
+        `## 【时机上下文】`,
+        options.timingContext,
+        ``,
+      ].join("\n")
+    : "";
+
+  return [
+    `## 【待测文案】`,
+    `"""`,
+    content,
+    `"""`,
+    ``,
+    localFindingsSection,
+    timingContextSection,
+    `## 【矩阵填空执行协议】`,
+    `请严格按照以下协议流程进行逐项分析，最终只输出标准 JSON。`,
+    ``,
+    `### Step 0：职业黑粉逆向全局解码（当前沙盒的推理基础）`,
+    ``,
+    `在进入维度专项沙盒之前，先对整段内容执行一次「断章取义三步走」全局解码：`,
+    ``,
+    `**① 局部截取（找黑料原子）**：`,
+    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+    `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
+    `- 列出所有潜在的黑料原子。`,
+    ``,
+    `**② 语境脱嵌（剥离防线）**：`,
+    `- 将每个黑料原子剥离所有前后文，孤立审视。`,
+    `- 这句话孤立存在时，直觉上会产生什么完全不同的歧义或恶劣反差？`,
+    ``,
+    `**③ 情绪重构（强行扣帽）**：`,
+    `- 结合当前社会痛点，给脱嵌的内容扣上煽动情绪的帽子。`,
+    `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
+    `- 能扣上帽子的攻击点，直接进入当前沙盒的候选 findings，不需要等待常规检查项确认。`,
+    ``,
+    `### Step 1：当前维度沙盒推理（基于 Step 0 的输出）`,
+    ``,
+    `#### 沙盒：${auditor.meta.name}（${auditor.meta.id}）`,
+    ``,
+    buildCompactAuditorCoT(auditor),
+    ``,
+    `重要提示：当前沙盒的推理必须以 Step 0 的输出为输入，而不是重新从零开始解读内容。`,
+    `Step 0 已发现的攻击点，当前沙盒负责判断它是否属于本维度并补充风险描述。`,
+    ``,
+    `### Step 2：单沙盒仲裁与噪音过滤`,
+    ``,
+    `1. 逐一审查 Step 1 的发现，标记哪些属于过度联想（Noise）。`,
+    `   判断标准：能否推演出完整攻击链？不能则为 Noise。`,
+    `2. 检查 Step 0 的候选列表：是否有被当前维度遗漏的攻击点？`,
+    `   有则补入 findings；不可因为「不在常规检查范围」而丢弃。`,
+    `3. 确认最终发现列表中没有包含任何修改建议或文案优化意见。`,
+    ``,
+    `### Step 3：最终 JSON 输出`,
+    `请输出以下格式的纯 JSON，不包含 Markdown 标记或额外解释：`,
+    ``,
+    JSON.stringify(
+      {
+        findings: [
+          {
+            keyword: "风险词汇",
+            trigger: "触发原因",
+            riskDescription: "风险说明",
+            propagationRisk: "传播风险",
+            suggestedLevel: "🔴/🟡",
+            propagationPath: "可选：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    ``,
+    `其中：`,
+    `- 无发现时 findings 必须为空数组`,
+    `- suggestedLevel 只能使用 🔴 或 🟡`,
+    `- 只要 Step 0 或当前沙盒能推演出完整攻击链，必须进入 findings`,
+    ``,
+    `请严格执行以上流程并输出 JSON：`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[]): string {

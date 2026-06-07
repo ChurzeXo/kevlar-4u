@@ -10,7 +10,6 @@ import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
 import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
-import { buildKevlarRiskDirective } from "../execution/riskPrompt.js";
 import { callConfiguredDirectApi, hasApiKey } from "../execution/modes/direct_api.js";
 import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
@@ -18,7 +17,9 @@ import {
   TOOL_DESCRIPTION,
   buildOrchestrationPrompt,
   buildPreAuditFinalizerPrompt,
-  buildCompactAuditorCoT,
+  buildIsolatedSystemAuditorMessage,
+  buildIsolatedSystemAuditorPrompt,
+  type OrchestrationPreAuditContext,
 } from "../prompts/reviewWizard.js";
 
 export const reviewContentWizardToolDefinition: Tool = {
@@ -69,6 +70,7 @@ interface ReviewWizardState {
   systemAuditorIds: string[];
   dimensions: DimensionsConfig;
   preAuditReport?: any;
+  orchestrationPreAuditContext?: OrchestrationPreAuditContext;
 }
 
 interface Recommendation {
@@ -141,7 +143,7 @@ async function advanceWizard(
       return handleSystemAudit(skillsDir, tmpDir, state, personas, systemAuditors, samplingFn);
 
     case "waitingForOrchestrationAudit":
-      return handleOrchestrationAuditResult(tmpDir, state, personas, userMessage, samplingFn);
+      return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
 
     case "checkPersonaInventory":
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
@@ -224,8 +226,9 @@ async function handleSystemAudit(
     }
 
     state.step = "waitingForOrchestrationAudit";
+    state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
     await saveState(tmpDir, state);
-    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors));
+    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
   }
 
   try {
@@ -251,9 +254,17 @@ async function handleSystemAudit(
       error: getErrorInfo(err).message,
     });
     state.step = "waitingForOrchestrationAudit";
+    state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
     await saveState(tmpDir, state);
-    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors));
+    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
   }
+}
+
+function buildOrchestrationPreAuditContext(content: string, localFindings: any[]): OrchestrationPreAuditContext {
+  return {
+    localFindings,
+    stripped: stripContext(content),
+  };
 }
 
 function resolveSystemAuditCaller(samplingFn?: MultiTurnSamplingFunction): AuditLlmCaller | undefined {
@@ -286,10 +297,10 @@ async function executeLlmSystemAudit(
     (a) => a.meta.id === "context_distortion" || a.meta.id === "network_culture_risk",
   );
   const bareFindings =
-    bareOnlyAuditors.length > 0 ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller) : [];
+    bareOnlyAuditors.length > 0 ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller, undefined, localFindings) : [];
 
   // Round 2: 原文 → 所有维度执行（现有流程）
-  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext);
+  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings);
 
   // Delta 分析：bareFindings 有但 fullFindings 没有 → 脱嵌型风险
   const bareKeywords = new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)));
@@ -350,6 +361,7 @@ async function runSystemAuditors(
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
   timingContext?: string,
+  localFindings: any[] = [],
 ): Promise<PreAuditDimensionResult[]> {
   return Promise.all(
     systemAuditors.map(async (auditor) => {
@@ -359,38 +371,14 @@ async function runSystemAuditors(
           timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
 
         const response = await caller({
-          systemPrompt: [
-            auditor.systemPrompt,
-            "",
-            "---",
-            "",
-            buildCompactAuditorCoT(auditor),
-            "",
-            "---",
-            "",
-            buildKevlarRiskDirective(),
-          ].join("\n"),
+          systemPrompt: buildIsolatedSystemAuditorPrompt(auditor),
           messages: [
             {
               role: "user",
-              content: [
-                `请按照你的推理框架对以下内容执行审查。`,
-                ``,
-                `执行顺序：`,
-                `第一步：完成三视角解码`,
-                `  - 视角A：内容的字面语义是什么？提取所有描述性词汇`,
-                `  - 视角B：路人第一眼感知到什么？哪些词会让人停顿？`,
-                `  - 视角C：恶意攻击者会截哪句话？把哪几个词组合在一起杀伤力最大？`,
-                `           完整推演攻击链：原始表达 → 截图后呈现 → 评论区反应 → 舆情走向`,
-                `第二步：执行你的维度专项推理`,
-                `第三步：只输出 JSON findings，不输出推理过程`,
-                ``,
-                `重要：视角C发现的攻击点，无论是否匹配任何预设风险类型，都必须进入 findings。`,
-                ``,
-                `待审查内容：`,
-                ``,
-                auditContent,
-              ].join("\n"),
+              content: buildIsolatedSystemAuditorMessage(auditContent, auditor, {
+                localFindings,
+                timingContext: timingContext && auditor.meta.id === "social_risk" ? timingContext : undefined,
+              }),
             },
           ],
           maxTokens: 2048,
@@ -417,12 +405,17 @@ async function handleOrchestrationAuditResult(
   tmpDir: string,
   state: ReviewWizardState,
   userPersonas: Persona[],
+  systemAuditors: Persona[],
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
-    const dimensions = normalizePreAuditDimensions(parsed.dimensions, []);
+    const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+    const dimensions = normalizePreAuditDimensions(
+      mergeLocalFindingsIntoAudits(normalizePreAuditDimensions(parsed.dimensions, systemAuditors), localFindings),
+      systemAuditors,
+    );
     const report: PreAuditReport = {
       dimensions,
       summary:
@@ -432,7 +425,7 @@ async function handleOrchestrationAuditResult(
       riskProfile: parsed.riskProfile ?? undefined,
       synergyFlags: parsed.synergyFlags ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
-      deltaRisks: parsed.deltaRisks ?? undefined,
+      deltaRisks: parsed.deltaRisks ?? buildEmptyDeltaRisks(),
     };
 
     // Phase 2.2: 宿主编排路径也执行协同风险加权计算
@@ -450,6 +443,7 @@ async function handleOrchestrationAuditResult(
     }
 
     state.preAuditReport = report;
+    state.orchestrationPreAuditContext = undefined;
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
@@ -741,6 +735,10 @@ function getFindingsLevel(findings: any[]): string {
     if (finding.suggestedLevel === "🟡") level = "🟡";
   }
   return level;
+}
+
+function buildEmptyDeltaRisks(): { bareOnly: string[]; fullOnly: string[]; stable: string[] } {
+  return { bareOnly: [], fullOnly: [], stable: [] };
 }
 
 // ── Phase 2: Cross-validation for risky dimensions ──
