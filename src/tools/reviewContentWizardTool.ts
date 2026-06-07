@@ -22,6 +22,18 @@ import {
   type OrchestrationPreAuditContext,
 } from "../prompts/reviewWizard.js";
 
+const ORCHESTRATION_GUIDANCE = [
+  "⚠️ **当前无独立 LLM 能力，需要你执行评测协议**",
+  "",
+  "请按以下步骤操作：",
+  "1. 阅读下方协议的 Step 0 → Step 3",
+  "2. 按协议执行分析，输出纯 JSON（不含 Markdown）",
+  "3. 将 JSON 作为 userMessage 再次调用本工具（保持 sessionId 不变）",
+  "",
+  "---",
+  "",
+].join("\n");
+
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
   description: TOOL_DESCRIPTION,
@@ -228,7 +240,7 @@ async function handleSystemAudit(
     state.step = "waitingForOrchestrationAudit";
     state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
     await saveState(tmpDir, state);
-    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
+    return toolResponse(state, ORCHESTRATION_GUIDANCE + buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
   }
 
   try {
@@ -256,7 +268,7 @@ async function handleSystemAudit(
     state.step = "waitingForOrchestrationAudit";
     state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
     await saveState(tmpDir, state);
-    return toolResponse(state, buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
+    return toolResponse(state, ORCHESTRATION_GUIDANCE + buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
   }
 }
 
