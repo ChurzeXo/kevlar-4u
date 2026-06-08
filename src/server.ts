@@ -63,7 +63,14 @@ async function cleanStaleDrafts(tmpDir: string) {
             await fs.promises.unlink(filePath);
             logger.info("Cleaned stale wizard state", { event: "clean_stale_wizard", file });
           }
-        } catch {
+        } catch (err) {
+          // JSON parse error or missing createdAt - clean up corrupted file
+          try {
+            await fs.promises.unlink(filePath);
+            logger.info("Cleaned corrupted wizard state", { event: "clean_corrupted_wizard", file });
+          } catch {
+            // Ignore cleanup errors
+          }
         }
       })());
     }

@@ -70,7 +70,14 @@ export function readConfig(): KevlarConfig {
   try {
     const raw = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw) as Partial<KevlarConfig>;
-    result = { ...DEFAULT_CONFIG, ...parsed };
+    result = {
+      ...DEFAULT_CONFIG,
+      ...parsed,
+      multiAgent: {
+        ...DEFAULT_CONFIG.multiAgent,
+        ...(parsed?.multiAgent || {}),
+      },
+    };
   } catch {
     // Config doesn't exist or is invalid - use defaults
     result = { ...DEFAULT_CONFIG };

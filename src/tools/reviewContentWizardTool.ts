@@ -21,6 +21,12 @@ import {
   buildIsolatedSystemAuditorPrompt,
   type OrchestrationPreAuditContext,
 } from "../prompts/reviewWizard.js";
+import {
+  getWebContextForAuditor,
+  isWebSearchSupported,
+  type WebSearchConfig,
+  type WebSearchFunction,
+} from "../execution/webSearch.js";
 
 const ORCHESTRATION_GUIDANCE = [
   "⚠️ **当前无独立 LLM 能力，需要你执行评测协议**",
@@ -28,7 +34,20 @@ const ORCHESTRATION_GUIDANCE = [
   "请按以下步骤操作：",
   "1. 阅读下方协议的 Step 0 → Step 3",
   "2. 按协议执行分析，输出纯 JSON（不含 Markdown）",
-  "3. 将 JSON 作为 userMessage 再次调用本工具（保持 sessionId 不变）",
+  "3. 将 JSON 作为 userMessage 再次调用本工具",
+  "",
+  "**调用示例**：",
+  "```",
+  "review_content_wizard(",
+  '  sessionId="wizard-review-xxxxx",',
+  '  userMessage="{\\"dimensions\\":[...]}"',
+  ")",
+  "```",
+  "",
+  "**注意事项**：",
+  "- sessionId 必须与当前会话一致",
+  "- userMessage 必须是纯 JSON，不能包含 Markdown 标记",
+  "- JSON 结构必须包含 dimensions 数组",
   "",
   "---",
   "",
@@ -59,6 +78,7 @@ export interface ReviewWizardInput {
   sessionId?: string;
   userMessage: string;
   samplingFn?: MultiTurnSamplingFunction;
+  webSearchFn?: WebSearchFunction;
 }
 
 type ReviewWizardStep =
@@ -83,6 +103,7 @@ interface ReviewWizardState {
   dimensions: DimensionsConfig;
   preAuditReport?: any;
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
+  webSearchConfig?: WebSearchConfig;
 }
 
 interface Recommendation {
@@ -115,6 +136,16 @@ export async function handleReviewContentWizard(
   try {
     await fs.promises.mkdir(tmpDir, { recursive: true });
     const state = await loadOrCreateState(tmpDir, input);
+
+    // 初始化 web search config
+    if (input.webSearchFn && !state.webSearchConfig) {
+      state.webSearchConfig = {
+        enabled: true,
+        searchFn: input.webSearchFn,
+        maxResults: 3,
+      };
+    }
+
     const allPersonas = await loadAllPersonas(skillsDir);
     const userPersonas = allPersonas.filter((p) => !p.meta.tags.includes("system_auditor"));
     const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
@@ -218,18 +249,17 @@ async function handleSystemAudit(
   const caller = resolveSystemAuditCaller(samplingFn);
   if (!caller) {
     if (process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK === "1") {
-      const results = normalizePreAuditDimensions(
-        mergeLocalFindingsIntoAudits(
-          systemAuditors.map((auditor) => ({
-            id: auditor.meta.id,
-            name: auditor.meta.name,
-            findings: [],
-            level: "🟢",
-          })),
-          localFindings,
-        ),
-        systemAuditors,
+      const mergedResults = await mergeLocalFindingsIntoAuditsAsync(
+        systemAuditors.map((auditor) => ({
+          id: auditor.meta.id,
+          name: auditor.meta.name,
+          findings: [],
+          level: "🟢",
+        })),
+        localFindings,
+        state.webSearchConfig,
       );
+      const results = normalizePreAuditDimensions(mergedResults, systemAuditors);
       state.preAuditReport = { dimensions: results, summary: summarizePreAuditResults(results) };
       state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
       state.step = "checkPersonaInventory";
@@ -240,7 +270,11 @@ async function handleSystemAudit(
     state.step = "waitingForOrchestrationAudit";
     state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
     await saveState(tmpDir, state);
-    return toolResponse(state, ORCHESTRATION_GUIDANCE + buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
+    return toolResponse(
+      state,
+      ORCHESTRATION_GUIDANCE +
+        buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
+    );
   }
 
   try {
@@ -254,6 +288,7 @@ async function handleSystemAudit(
       localFindings,
       caller,
       timingContext,
+      state.webSearchConfig,
     );
     state.preAuditReport = preAuditReport;
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
@@ -268,7 +303,11 @@ async function handleSystemAudit(
     state.step = "waitingForOrchestrationAudit";
     state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
     await saveState(tmpDir, state);
-    return toolResponse(state, ORCHESTRATION_GUIDANCE + buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext));
+    return toolResponse(
+      state,
+      ORCHESTRATION_GUIDANCE +
+        buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
+    );
   }
 }
 
@@ -300,6 +339,7 @@ async function executeLlmSystemAudit(
   localFindings: any[],
   caller: AuditLlmCaller,
   timingContext?: string,
+  webSearchConfig?: WebSearchConfig,
 ): Promise<PreAuditReport> {
   // Phase 0.4: 物理脱嵌预处理 — 两轮投喂
   const stripped = stripContext(content);
@@ -309,10 +349,12 @@ async function executeLlmSystemAudit(
     (a) => a.meta.id === "context_distortion" || a.meta.id === "network_culture_risk",
   );
   const bareFindings =
-    bareOnlyAuditors.length > 0 ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller, undefined, localFindings) : [];
+    bareOnlyAuditors.length > 0
+      ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller, undefined, localFindings, webSearchConfig)
+      : [];
 
   // Round 2: 原文 → 所有维度执行（现有流程）
-  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings);
+  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings, webSearchConfig);
 
   // Delta 分析：bareFindings 有但 fullFindings 没有 → 脱嵌型风险
   const bareKeywords = new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)));
@@ -324,11 +366,11 @@ async function executeLlmSystemAudit(
   };
 
   const mergedResults = normalizePreAuditDimensions(
-    mergeLocalFindingsIntoAudits(auditorResults, localFindings),
+    await mergeLocalFindingsIntoAuditsAsync(auditorResults, localFindings, webSearchConfig),
     systemAuditors,
   );
   const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
-  
+
   // Phase 2.2: 协同风险加权计算（在 finalizer 之前）
   const dimensionLevels: Record<string, string> = {};
   for (const dim of crossValidatedResults) {
@@ -336,7 +378,7 @@ async function executeLlmSystemAudit(
   }
   const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
   const synergy = calculateSynergy(dimensionLevels, timingFlag);
-  
+
   const report = await finalizePreAuditReport(
     content,
     localFindings,
@@ -374,6 +416,7 @@ async function runSystemAuditors(
   caller: AuditLlmCaller,
   timingContext?: string,
   localFindings: any[] = [],
+  webSearchConfig?: WebSearchConfig,
 ): Promise<PreAuditDimensionResult[]> {
   return Promise.all(
     systemAuditors.map(async (auditor) => {
@@ -381,6 +424,25 @@ async function runSystemAuditors(
         // 时机上下文仅注入给 social_risk 审计员
         const auditContent =
           timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
+
+        // 🆕 联网搜索：针对支持的维度
+        let webContext = "";
+        if (webSearchConfig?.enabled && webSearchConfig.searchFn && isWebSearchSupported(auditor.meta.id)) {
+          try {
+            webContext = await getWebContextForAuditor(
+              auditor.meta.id,
+              auditContent,
+              webSearchConfig.searchFn,
+              { maxResults: webSearchConfig.maxResults }
+            );
+          } catch (err) {
+            logger.warn("Web search failed, continuing without web context", {
+              event: "web_search_failed",
+              auditorId: auditor.meta.id,
+              error: getErrorInfo(err).message,
+            });
+          }
+        }
 
         const response = await caller({
           systemPrompt: buildIsolatedSystemAuditorPrompt(auditor),
@@ -390,6 +452,7 @@ async function runSystemAuditors(
               content: buildIsolatedSystemAuditorMessage(auditContent, auditor, {
                 localFindings,
                 timingContext: timingContext && auditor.meta.id === "social_risk" ? timingContext : undefined,
+                webContext,
               }),
             },
           ],
@@ -424,10 +487,12 @@ async function handleOrchestrationAuditResult(
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
-    const dimensions = normalizePreAuditDimensions(
-      mergeLocalFindingsIntoAudits(normalizePreAuditDimensions(parsed.dimensions, systemAuditors), localFindings),
-      systemAuditors,
+    const mergedResults = await mergeLocalFindingsIntoAuditsAsync(
+      normalizePreAuditDimensions(parsed.dimensions, systemAuditors),
+      localFindings,
+      state.webSearchConfig,
     );
+    const dimensions = normalizePreAuditDimensions(mergedResults, systemAuditors);
     const report: PreAuditReport = {
       dimensions,
       summary:
@@ -740,6 +805,118 @@ function mergeLocalFindingsIntoAudits(
   return merged;
 }
 
+/**
+ * 🆕 Async version with web verification for high-risk local findings
+ */
+async function mergeLocalFindingsIntoAuditsAsync(
+  audits: PreAuditDimensionResult[],
+  localFindings: any[],
+  webSearchConfig?: WebSearchConfig,
+): Promise<PreAuditDimensionResult[]> {
+  // 先执行同步合并
+  const merged = mergeLocalFindingsIntoAudits(audits, localFindings);
+
+  // 如果没有联网配置或没有本地规则发现，直接返回
+  if (!webSearchConfig?.enabled || !webSearchConfig.searchFn || localFindings.length === 0) {
+    return merged;
+  }
+
+  // 对高风险的本地规则 findings 进行联网验证
+  const highRiskFindings = localFindings.filter(
+    (f) => f.suggestedLevel === "🔴" || f.suggestedLevel === "🟡"
+  );
+
+  if (highRiskFindings.length === 0) {
+    return merged;
+  }
+
+  logger.info("Verifying local findings via web search", {
+    event: "web_verify_local_findings",
+    count: highRiskFindings.length,
+  });
+
+  // 并发验证所有高风险 findings
+  const verifiedFindings = await Promise.all(
+    highRiskFindings.map(async (finding) => {
+      try {
+        return await verifyLocalFinding(finding, webSearchConfig.searchFn!);
+      } catch (err) {
+        logger.warn("Web verification failed for finding", {
+          event: "web_verify_finding_failed",
+          keyword: finding.keyword,
+          error: getErrorInfo(err).message,
+        });
+        return finding; // 失败时返回原始 finding
+      }
+    })
+  );
+
+  // 用验证后的 findings 替换原始的
+  const verifiedMap = new Map(verifiedFindings.map((f) => [f.keyword, f]));
+
+  // 更新 network_culture_risk 维度中的 findings
+  const networkAudit = merged.find((audit) => audit.id === "network_culture_risk");
+  if (networkAudit) {
+    networkAudit.findings = networkAudit.findings.map((f) => {
+      const verified = verifiedMap.get(f.keyword);
+      return verified || f;
+    });
+    networkAudit.level = getFindingsLevel(networkAudit.findings);
+  }
+
+  return merged;
+}
+
+/**
+ * 🆕 Verify a single local finding via web search
+ */
+async function verifyLocalFinding(
+  finding: any,
+  searchFn: WebSearchFunction,
+): Promise<any> {
+  const keyword = finding.keyword;
+  if (!keyword) return finding;
+
+  // 搜索关键词的网络含义
+  const searchResult = await searchFn(`${keyword} 含义 网络用语 梗`, {
+    maxResults: 2,
+  });
+
+  if (!searchResult.results || searchResult.results.length === 0) {
+    return finding;
+  }
+
+  // 分析搜索结果，判断是否确认风险
+  const webContext = searchResult.results
+    .map((r) => `${r.title}: ${r.snippet}`)
+    .join("\n");
+
+  // 根据搜索结果更新 finding
+  const verifiedFinding = { ...finding };
+
+  // 添加联网验证信息
+  verifiedFinding.webVerification = {
+    verified: true,
+    searchResults: searchResult.results.slice(0, 2),
+    verifiedAt: Date.now(),
+  };
+
+  // 如果搜索结果表明关键词有特殊含义，增强风险描述
+  if (webContext.includes(keyword) && (
+    webContext.includes("低俗") ||
+    webContext.includes("暗语") ||
+    webContext.includes("黑话") ||
+    webContext.includes("梗")
+  )) {
+    verifiedFinding.riskDescription = [
+      finding.riskDescription,
+      `\n[联网验证] 该词在网络上有已知的特殊含义：${searchResult.results[0]?.snippet || ""}`,
+    ].join("");
+  }
+
+  return verifiedFinding;
+}
+
 function getFindingsLevel(findings: any[]): string {
   let level = "🟢";
   for (const finding of findings) {
@@ -958,9 +1135,7 @@ function summarizePreAuditResults(
   ].join("\n");
 }
 
-function buildCoreRiskSummary(
-  risky: Array<{ name: string; findings: any[]; id?: string; level?: string }>,
-): string {
+function buildCoreRiskSummary(risky: Array<{ name: string; findings: any[]; id?: string; level?: string }>): string {
   // 提取所有高风险关键词
   const highRiskKeywords: string[] = [];
   const riskDescriptions: string[] = [];
@@ -1050,13 +1225,7 @@ async function handleInventoryCheck(
   await saveState(tmpDir, state);
   return toolResponse(
     state,
-    [
-      buildPreAuditSummaryBlock(state),
-      "",
-      "请选择下一步：",
-      "1. 进入复审",
-      "2. 平台合规检查（即将开放）",
-    ].join("\n"),
+    [buildPreAuditSummaryBlock(state), "", "请选择下一步：", "1. 进入复审", "2. 平台合规检查（即将开放）"].join("\n"),
   );
 }
 
@@ -1076,13 +1245,7 @@ async function handleReviewDecision(
   if (/^(2|平台合规检查|合规检查|平台检查)$/i.test(normalized)) {
     return toolResponse(
       state,
-      [
-        "该功能正在开发中，敬请期待。",
-        "",
-        "请选择下一步：",
-        "1. 进入复审",
-        "2. 平台合规检查（即将开放）",
-      ].join("\n"),
+      ["该功能正在开发中，敬请期待。", "", "请选择下一步：", "1. 进入复审", "2. 平台合规检查（即将开放）"].join("\n"),
     );
   }
 
@@ -1090,14 +1253,7 @@ async function handleReviewDecision(
   const wantsReview = /^(1|需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes)$/i.test(normalized);
 
   if (!wantsReview) {
-    return toolResponse(
-      state,
-      [
-        "请选择下一步：",
-        "1. 进入复审",
-        "2. 平台合规检查（即将开放）",
-      ].join("\n"),
-    );
+    return toolResponse(state, ["请选择下一步：", "1. 进入复审", "2. 平台合规检查（即将开放）"].join("\n"));
   }
 
   // 用户确认复审：执行评审员推荐

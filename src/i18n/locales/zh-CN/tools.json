@@ -5,7 +5,7 @@
     "sections": {
       "overview": "## 概述\n\nKevlar-4u 是一个评论区模拟器，可以在内容发布前模拟真实受众反应，帮助创作者发现表达问题、误解和传播风险。",
       "tools": "## 可用工具\n\n### 📋 内容评测\n- `review_content_wizard` - 多维度内容风险评测（推荐）\n\n### 👤 评审员管理\n- `list_personas` - 列出已有评审员\n- `create_persona_wizard` - 创建新评审员\n- `delete_persona_wizard` - 删除评审员\n\n### ⚙️ 系统配置\n- `configure_wizard` - 配置执行模式\n- `get_execution_modes` - 查看当前配置\n\n### 🌐 语言设置\n- `set_language` - 切换界面语言（中文/英文）",
-      "faq": "## 常见问题\n\n**Q: 如何开始评测内容？**\nA: 调用 `review_content_wizard` 工具，按照向导提示操作。\n\n**Q: 评审员是什么？**\nA: 评审员是模拟不同受众视角的 AI 角色，可以从特定角度评测内容。\n\n**Q: 如何切换语言？**\nA: 调用 `set_language` 工具，传入 'zh-CN'（中文）或 'en-US'（英文）。"
+      "faq": "## 常见问题\n\n**Q: 如何开始评测内容？**\nA: 调用 `review_content_wizard` 工具，传入待评测文本作为 userMessage。\n\n**Q: 工具返回协议文本怎么办？**\nA: 说明当前无独立 LLM 能力。你需要按照协议执行分析，输出纯 JSON，再调用本工具提交结果。具体步骤：\n1. 按 Step 0-3 执行分析\n2. 输出纯 JSON（不含 Markdown）\n3. 将 JSON 作为 userMessage 调用 review_content_wizard（保持 sessionId 不变）\n\n**Q: JSON 格式是什么样的？**\nA: 必须包含 dimensions 数组，每个维度包含 id、name、findings、level 字段。详见协议中的 Step 3 输出格式。\n\n**Q: 评审员是什么？**\nA: 评审员是模拟不同受众视角的 AI 角色，可以从特定角度评测内容。\n\n**Q: 如何切换语言？**\nA: 调用 `set_language` 工具，传入 'zh-CN'（中文）或 'en-US'（英文）。"
     }
   },
   "setLanguage": {

@@ -103,8 +103,15 @@ async function resolveMode(): Promise<ExecutionMode> {
   // 1. Check persisted config (user preference, highest priority)
   const config = readConfig();
   if (config.mode && config.mode !== "auto") {
-    logger.debug("Using persisted mode", { event: "mode_persist", mode: config.mode });
-    return config.mode;
+    if (!isValidMode(config.mode)) {
+      logger.warn("Invalid persisted mode, falling back to auto", {
+        event: "mode_invalid_config",
+        mode: config.mode,
+      });
+    } else {
+      logger.debug("Using persisted mode", { event: "mode_persist", mode: config.mode });
+      return config.mode;
+    }
   }
 
   // 2. Check KEVLAR_MODE env var (global default, overridden by config)
@@ -149,7 +156,14 @@ export function getModesInfo(): ModesInfo {
     }
   }
 
-  const resolved = currentMode === "auto" ? recommended : currentMode;
+  // Check if resolved mode is available
+  let resolved: ExecutionMode;
+  if (currentMode === "auto") {
+    resolved = recommended;
+  } else {
+    const handler = handlers.find((h) => h.mode === currentMode);
+    resolved = handler?.canExecute() ? currentMode : recommended;
+  }
 
   return {
     modes,

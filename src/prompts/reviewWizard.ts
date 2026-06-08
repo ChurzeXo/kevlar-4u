@@ -354,6 +354,10 @@ export function buildOrchestrationPrompt(
     `- 无发现时 findings 为空数组`,
     `- level 根据 findings 自动推算：含 🔴 则为 🔴，含 🟡 则为 🟡，均为空则为 🟢`,
     ``,
+    `### 提交指引`,
+    `执行完 Step 0-3 后，将最终 JSON 作为 userMessage 参数调用 review_content_wizard 工具。`,
+    `保持 sessionId 不变，userMessage 必须是纯 JSON 格式，不能包含 Markdown 标记或额外解释。`,
+    ``,
     `请严格执行以上流程并输出 JSON：`,
   ].join("\n");
 }
@@ -390,6 +394,7 @@ export function buildIsolatedSystemAuditorMessage(
   options?: {
     localFindings?: any[];
     timingContext?: string;
+    webContext?: string;
   },
 ): string {
   const localFindings = options?.localFindings ?? [];
@@ -412,6 +417,17 @@ export function buildIsolatedSystemAuditorMessage(
       ].join("\n")
     : "";
 
+  // 🆕 联网参考信息
+  const webContextSection = options?.webContext
+    ? [
+        `## 【联网参考信息】`,
+        `以下信息来自网络搜索，仅供参考，不可直接作为 findings 使用。请结合你的专业判断进行分析：`,
+        ``,
+        options.webContext,
+        ``,
+      ].join("\n")
+    : "";
+
   return [
     `## 【待测文案】`,
     `"""`,
@@ -420,6 +436,7 @@ export function buildIsolatedSystemAuditorMessage(
     ``,
     localFindingsSection,
     timingContextSection,
+    webContextSection,
     `## 【矩阵填空执行协议】`,
     `请严格按照以下协议流程进行逐项分析，最终只输出标准 JSON。`,
     ``,

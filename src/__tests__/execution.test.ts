@@ -377,8 +377,8 @@ describe("generateAggregatedReport", () => {
 describe("estimateTokenCost", () => {
   it("estimates based on content and persona count", () => {
     const cost = estimateTokenCost(3, 1000);
-    // (1000/3) + 3*10000 = 333 + 30000 = 30333
-    assert.equal(cost, 30333);
+    // (1000/3) + 3*15000 = 333 + 45000 = 45333
+    assert.equal(cost, 45333);
   });
 });
 

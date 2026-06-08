@@ -183,8 +183,8 @@ function resultsSummary(successful: PersonaResultWithMeta[]): string {
 // ── Token Budget ──────────────────────────────────────────────────────────────
 
 const DEFAULT_TOKEN_BUDGET = {
-  per_task: 50_000,
-  per_persona: 10_000,
+  per_task: 100_000,
+  per_persona: 15_000,
 };
 
 export function estimateTokenCost(

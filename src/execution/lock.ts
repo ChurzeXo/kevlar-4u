@@ -6,6 +6,8 @@
  * Includes TTL to prevent deadlocks on crash.
  */
 
+import { logger } from "../utils/logger.js";
+
 const LOCK_TTL_MS = 300_000; // 5 minutes
 
 interface LockEntry {
@@ -18,6 +20,12 @@ let reviewLock: LockEntry | null = null;
 export function acquireReviewLock(mode: string): boolean {
   if (reviewLock) {
     if (Date.now() - reviewLock.acquiredAt > LOCK_TTL_MS) {
+      logger.warn("Lock TTL expired, overriding lock", {
+        event: "lock_ttl_override",
+        previousMode: reviewLock.mode,
+        newMode: mode,
+        lockAge: Date.now() - reviewLock.acquiredAt,
+      });
       reviewLock = { mode, acquiredAt: Date.now() };
       return true;
     }

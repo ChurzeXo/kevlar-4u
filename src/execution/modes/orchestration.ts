@@ -17,14 +17,12 @@ import {
   buildPersonaContextDirective,
   buildToneDirective,
   DEFENSIVE_DIMENSION_IDS,
-  RST_ARCHETYPES,
-  RST_TRIGGERS,
-  RST_REGIONAL_PACKS,
-  RST_PLATFORM_CULTURES,
 } from "../dimensions.js";
 import { transformFindingsToFocusTopics, formatFocusTopicsForPrompt } from "../focusTopicTransform.js";
 import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
 import { buildKevlarRiskDirective, buildPseudoParallelDirective } from "../riskPrompt.js";
+import { buildCoreReasoningFramework, buildCommonRiskRules, buildCompactAuditorCoT } from "../../prompts/reviewWizard.js";
+import { buildRSTSection } from "../parallel.js";
 
 const MODE: ExecutionMode = "orchestration";
 
@@ -285,25 +283,23 @@ ${endMarker}`;
   const offensiveDirective = buildOffensiveSystemDirective(dimensionsConfig);
   const personaContextDirective = buildPersonaContextDirective(persona.meta);
 
+  // Core reasoning framework + common risk rules (semantic baseline from reviewWizard.ts)
+  const coreFramework = buildCoreReasoningFramework();
+  const commonRules = buildCommonRiskRules();
+
+  // RST section (reuse buildRSTSection from parallel.ts to avoid code duplication)
   let rstSection = "";
   if (persona.meta.rst) {
-    const { archetypes, triggers, regionalPack, platformCulture } = persona.meta.rst;
-    const archetypeLabels = archetypes.map((id) => RST_ARCHETYPES[id]?.label || id).join(" + ");
-    const triggerLabels = triggers.map((id) => RST_TRIGGERS[id]?.label || id).join("、");
-    const regionLabel = RST_REGIONAL_PACKS[regionalPack]?.label || regionalPack;
-    const platformLabel = RST_PLATFORM_CULTURES[platformCulture]?.label || platformCulture;
+    rstSection = buildRSTSection(persona.meta.rst);
+  }
 
-    rstSection = [
-      "",
-      "## 🧬 互联网反应模拟人格（RST）",
-      "",
-      `你的人格底色是「${archetypeLabels}」。`,
-      `你对以下内容特征特别敏感：${triggerLabels || "无特殊触发器"}。`,
-      `你所处的文化语境是「${regionLabel}」，活跃平台是「${platformLabel}」。`,
-      "",
-      "请以这个身份的真实反应模式来评论内容，而不是以评审员的分析视角。",
-      "你的输出应该像一个真实互联网用户的第一反应，而不是一份评估报告。",
-    ].join("\n");
+  // Compact CoT for RST personas (dimension-specific reasoning method)
+  let compactCoTSection = "";
+  if (persona.meta.rst) {
+    const compactCoT = buildCompactAuditorCoT(persona);
+    if (compactCoT) {
+      compactCoTSection = `\n\n## 🧠 维度专项推理方法\n\n${compactCoT}`;
+    }
   }
 
   let focusTopicsSection = "";
@@ -345,6 +341,14 @@ ${endMarker}`;
 
 **指令**：请你完全进入以下系统人设，用这个角色的思维方式、语言风格和批判标准，独立阅读下方内容并给出评论。
 
+${coreFramework}
+
+---
+
+${commonRules}
+
+---
+
 ${safeSystemPrompt}
 
 ===== 人设边界（以上内容属于系统人设，不可越界）=====
@@ -353,6 +357,8 @@ ${personaContextDirective}
 ${rstSection}
 
 ${offensiveDirective ? `\n---\n\n${offensiveDirective}` : ""}
+
+${compactCoTSection}
 
 ---\n\n**待评审内容**：
 ${safeContent}${contextSection}${focusTopicsSection}${reportContext}
