@@ -308,3 +308,79 @@ export const WEB_SEARCH_SUPPORTED_DIMENSIONS = [
   "network_culture_risk",
   "factual_integrity",
 ];
+
+// ── Built-in Search Implementation ─────────────────────────────────────────
+
+/**
+ * DuckDuckGo instant answer API search function
+ * No API key required, but has rate limits
+ */
+export async function duckDuckGoSearch(
+  query: string,
+  options?: { maxResults?: number }
+): Promise<WebSearchResult> {
+  const maxResults = options?.maxResults ?? 3;
+  
+  try {
+    // Use DuckDuckGo instant answer API
+    const encodedQuery = encodeURIComponent(query);
+    const url = `https://api.duckduckgo.com/?q=${encodedQuery}&format=json&no_html=1&skip_disambig=1`;
+    
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Kevlar-4u/1.0 (Content Review Tool)",
+      },
+    });
+    
+    if (!response.ok) {
+      return { query, results: [], timestamp: Date.now() };
+    }
+    
+    const data = await response.json() as {
+      AbstractText?: string;
+      AbstractSource?: string;
+      AbstractURL?: string;
+      Results?: Array<{ Text?: string; FirstURL?: string }>;
+      RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
+    };
+    
+    const results: WebSearchItem[] = [];
+    
+    // Add abstract if available
+    if (data.AbstractText && data.AbstractSource) {
+      results.push({
+        title: data.AbstractSource,
+        snippet: data.AbstractText,
+        source: data.AbstractURL || "DuckDuckGo",
+      });
+    }
+    
+    // Add related topics
+    if (data.RelatedTopics) {
+      for (const topic of data.RelatedTopics.slice(0, maxResults - results.length)) {
+        if (topic.Text && topic.FirstURL) {
+          results.push({
+            title: topic.Text.split(" - ")[0] || "Related",
+            snippet: topic.Text,
+            source: topic.FirstURL,
+          });
+        }
+      }
+    }
+    
+    return {
+      query,
+      results: results.slice(0, maxResults),
+      timestamp: Date.now(),
+    };
+  } catch {
+    return { query, results: [], timestamp: Date.now() };
+  }
+}
+
+/**
+ * Create a web search function using DuckDuckGo
+ */
+export function createDuckDuckGoSearchFn(): WebSearchFunction {
+  return duckDuckGoSearch;
+}

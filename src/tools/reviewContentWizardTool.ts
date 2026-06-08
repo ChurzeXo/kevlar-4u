@@ -117,6 +117,7 @@ export const reviewContentWizardModule: ToolModule = {
     if (!args) throw new Error("向导需要提供参数");
     const input = args as any;
     input.samplingFn = deps.resolveSamplingFn();
+    input.webSearchFn = deps.resolveWebSearchFn();
     return await handleReviewContentWizard(deps.skillsDir, deps.tmpDir, input);
   },
 };
