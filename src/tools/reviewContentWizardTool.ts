@@ -104,6 +104,7 @@ interface ReviewWizardState {
   preAuditReport?: any;
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
   webSearchConfig?: WebSearchConfig;
+  webSearchDimensions?: string[]; // 记录哪些维度使用了联网搜索
 }
 
 interface Recommendation {
@@ -357,6 +358,11 @@ async function executeLlmSystemAudit(
   // Round 2: 原文 → 所有维度执行（现有流程）
   const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings, webSearchConfig);
 
+  // 记录哪些维度使用了联网搜索
+  const webSearchDimensions = auditorResults
+    .filter((r) => r.webSearchUsed)
+    .map((r) => r.id);
+
   // Delta 分析：bareFindings 有但 fullFindings 没有 → 脱嵌型风险
   const bareKeywords = new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)));
   const fullKeywords = new Set(auditorResults.flatMap((r) => r.findings.map((f: any) => f.keyword)));
@@ -397,6 +403,7 @@ async function executeLlmSystemAudit(
     levelUpgrades: synergy.levelUpgrades,
   };
   report.deltaRisks = deltaRisks;
+  report.webSearchDimensions = webSearchDimensions;
 
   // 应用协同加权的 level 升级
   if (synergy.levelUpgrades.length > 0) {
@@ -411,6 +418,10 @@ async function executeLlmSystemAudit(
   return report;
 }
 
+interface SystemAuditorResult extends PreAuditDimensionResult {
+  webSearchUsed?: boolean;
+}
+
 async function runSystemAuditors(
   content: string,
   systemAuditors: Persona[],
@@ -418,7 +429,7 @@ async function runSystemAuditors(
   timingContext?: string,
   localFindings: any[] = [],
   webSearchConfig?: WebSearchConfig,
-): Promise<PreAuditDimensionResult[]> {
+): Promise<SystemAuditorResult[]> {
   return Promise.all(
     systemAuditors.map(async (auditor) => {
       try {
@@ -428,6 +439,7 @@ async function runSystemAuditors(
 
         // 🆕 联网搜索：针对支持的维度
         let webContext = "";
+        let webSearchUsed = false;
         if (webSearchConfig?.enabled && webSearchConfig.searchFn && isWebSearchSupported(auditor.meta.id)) {
           try {
             webContext = await getWebContextForAuditor(
@@ -436,6 +448,9 @@ async function runSystemAuditors(
               webSearchConfig.searchFn,
               { maxResults: webSearchConfig.maxResults }
             );
+            if (webContext) {
+              webSearchUsed = true;
+            }
           } catch (err) {
             logger.warn("Web search failed, continuing without web context", {
               event: "web_search_failed",
@@ -464,6 +479,7 @@ async function runSystemAuditors(
           id: auditor.meta.id,
           name: auditor.meta.name,
           findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+          webSearchUsed,
         };
       } catch (err) {
         logger.warn("System auditor failed", {
@@ -613,6 +629,7 @@ interface PreAuditReport {
     fullOnly: string[];
     stable: string[];
   };
+  webSearchDimensions?: string[];
 }
 
 async function finalizePreAuditReport(
@@ -1177,9 +1194,12 @@ function buildCoreRiskSummary(risky: Array<{ name: string; findings: any[]; id?:
 
 function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
   if (state.preAuditReport?.summary) {
+    const webSearchInfo = state.preAuditReport.webSearchDimensions?.length > 0
+      ? `\n\n🔍 联网验证维度：${state.preAuditReport.webSearchDimensions.join("、")}`
+      : "";
     return [
       "<!-- kevlar:verbatim-pre-audit:start -->",
-      `初审结果\n\n${state.preAuditReport.summary}`,
+      `初审结果\n\n${state.preAuditReport.summary}${webSearchInfo}`,
       "<!-- kevlar:verbatim-pre-audit:end -->",
     ].join("\n");
   }
