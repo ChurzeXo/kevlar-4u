@@ -395,6 +395,7 @@ async function executeLlmSystemAudit(
     caller,
     synergy,
     deltaRisks,
+    webSearchDimensions,
   );
 
   report.synergyFlags = {
@@ -512,12 +513,10 @@ async function handleOrchestrationAuditResult(
     const dimensions = normalizePreAuditDimensions(mergedResults, systemAuditors);
     const report: PreAuditReport = {
       dimensions,
-      summary:
-        typeof parsed.summary === "string" && parsed.summary.trim()
-          ? parsed.summary.trim()
-          : summarizePreAuditResults(dimensions),
+      summary: summarizePreAuditResults(dimensions),
       riskProfile: parsed.riskProfile ?? undefined,
       synergyFlags: parsed.synergyFlags ?? undefined,
+      attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
       deltaRisks: parsed.deltaRisks ?? buildEmptyDeltaRisks(),
     };
@@ -623,6 +622,7 @@ interface PreAuditReport {
       reason: string;
     }>;
   };
+  attackChainAnalysis?: string;
   worstCaseNarrative?: string;
   deltaRisks?: {
     bareOnly: string[];
@@ -641,6 +641,7 @@ async function finalizePreAuditReport(
   caller: AuditLlmCaller,
   synergy?: { triggered: string[]; overallMultiplier: number; details: Array<{ rule: any; matched: boolean }> },
   deltaRisks?: any,
+  webSearchDimensions?: string[],
 ): Promise<PreAuditReport> {
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
   try {
@@ -656,6 +657,7 @@ async function finalizePreAuditReport(
             crossValidatedResults, // Step 3
             synergy, // Phase 2.2: 协同加权结果
             deltaRisks, // 脱嵌 delta 信号
+            webSearchDimensions, // 联网验证生效的维度
           }),
         },
       ],
@@ -665,12 +667,10 @@ async function finalizePreAuditReport(
     const dimensions = normalizePreAuditDimensions(parsed.dimensions, systemAuditors);
     return {
       dimensions,
-      summary:
-        typeof parsed.summary === "string" && parsed.summary.trim()
-          ? parsed.summary.trim()
-          : summarizePreAuditResults(dimensions),
+      summary: summarizePreAuditResults(dimensions),
       riskProfile: parsed.riskProfile ?? undefined,
       synergyFlags: parsed.synergyFlags ?? undefined,
+      attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
       deltaRisks: parsed.deltaRisks ?? undefined,
     };
@@ -1102,6 +1102,16 @@ function formatRiskSection(result: { id?: string; name: string; findings: any[] 
   ];
 }
 
+function getOverallLevel(results: Array<{ level?: string; findings: any[] }>): string {
+  let hasYellow = false;
+  for (const r of results) {
+    const l = r.level || getFindingsLevel(r.findings);
+    if (l === "🔴") return "🔴 红色高危";
+    if (l === "🟡") hasYellow = true;
+  }
+  return hasYellow ? "🟡 黄色预警" : "🟢 绿色安全";
+}
+
 function summarizePreAuditResults(
   results: Array<{ id?: string; name: string; findings: any[]; level?: string }>,
 ): string {
@@ -1115,91 +1125,66 @@ function summarizePreAuditResults(
     }
   }
 
+  const overallLevel = getOverallLevel(results);
+
   // 全部通过
   if (risky.length === 0) {
     return [
-      "⚠️ 风险发现",
+      `综合风险等级：${overallLevel}`,
+      "扫描结果（表格）：",
+      "| 维度 | 等级 | 关键发现 |",
+      "| --- | --- | --- |",
+      ...results.map((r) => `| ${escapeMarkdownTableCell(r.name)} | 🟢 | 无 |`),
       "",
-      "| 维度 | 结果 |",
-      "| --- | --- |",
-      ...results.map((r) => `| ${escapeMarkdownTableCell(r.name)} | 🟢 通过 |`),
-      "",
-      "核心风险：无",
+      "核心风险点：",
+      "无",
     ].join("\n");
   }
 
-  // 有风险维度：只展示有风险的维度
-  const riskSummaryLines = risky.map((r) => {
+  // 有风险维度
+  const riskSummaryLines = results.map((r) => {
     const level = r.level || getFindingsLevel(r.findings);
-    const riskKeywords = r.findings
-      .map((f) => f.keyword || f.trigger)
-      .filter(Boolean)
-      .join("、");
-    return `| ${escapeMarkdownTableCell(r.name)} | ${level} ${riskKeywords} |`;
+    const riskKeywords = r.findings.length > 0
+      ? r.findings.map((f) => f.keyword || f.trigger).filter(Boolean).join("、")
+      : "无";
+    return `| ${escapeMarkdownTableCell(r.name)} | ${level} | ${escapeMarkdownTableCell(riskKeywords)} |`;
   });
 
-  // 核心风险总结：从所有 findings 中提取关键信息
-  const coreRisk = buildCoreRiskSummary(risky);
+  // 核心风险点（列表）
+  const coreRiskPoints: string[] = [];
+  let index = 1;
+  for (const r of risky) {
+    const dimLevel = r.level || getFindingsLevel(r.findings);
+    const findingDescriptions = r.findings
+      .map((f) => {
+        const keyword = f.keyword ? `"${f.keyword}"` : "";
+        const desc = f.riskDescription || f.trigger || "";
+        return keyword ? `${keyword}：${desc}` : desc;
+      })
+      .join("；");
+    coreRiskPoints.push(`${index}. ${r.name}（${dimLevel}）：${findingDescriptions}`);
+    index++;
+  }
 
   return [
-    "⚠️ 风险发现",
-    "",
-    "| 维度 | 风险内容 |",
-    "| --- | --- |",
+    `综合风险等级：${overallLevel}`,
+    "扫描结果（表格）：",
+    "| 维度 | 等级 | 关键发现 |",
+    "| --- | --- | --- |",
     ...riskSummaryLines,
     "",
-    "核心风险：",
-    coreRisk,
+    "核心风险点：",
+    ...coreRiskPoints,
   ].join("\n");
-}
-
-function buildCoreRiskSummary(risky: Array<{ name: string; findings: any[]; id?: string; level?: string }>): string {
-  // 提取所有高风险关键词
-  const highRiskKeywords: string[] = [];
-  const riskDescriptions: string[] = [];
-
-  for (const r of risky) {
-    for (const f of r.findings) {
-      if (f.suggestedLevel === "🔴" && f.keyword) {
-        highRiskKeywords.push(f.keyword);
-      }
-      if (f.riskDescription) {
-        riskDescriptions.push(f.riskDescription);
-      }
-    }
-  }
-
-  // 去重
-  const uniqueKeywords = [...new Set(highRiskKeywords)];
-
-  // 生成简洁的核心风险描述
-  if (uniqueKeywords.length > 0) {
-    const keywordStr = uniqueKeywords.join("、");
-    const base = `文案中「${keywordStr}」存在明确风险联想`;
-    if (riskDescriptions.length > 0) {
-      return `${base}。${riskDescriptions[0]}`;
-    }
-    return `${base}，存在被截图传播演变为舆情事件的可能。`;
-  }
-
-  // 降级：用 riskDescription 拼接
-  if (riskDescriptions.length > 0) {
-    return riskDescriptions[0];
-  }
-
-  return "存在潜在语义或传播风险，建议进入复审确认。";
 }
 
 // ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
 
 function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
   if (state.preAuditReport?.summary) {
-    const webSearchInfo = state.preAuditReport.webSearchDimensions?.length > 0
-      ? `\n\n🔍 联网验证维度：${state.preAuditReport.webSearchDimensions.join("、")}`
-      : "";
     return [
       "<!-- kevlar:verbatim-pre-audit:start -->",
-      `初审结果\n\n${state.preAuditReport.summary}${webSearchInfo}`,
+      `初审结果\n${state.preAuditReport.summary}`,
       "<!-- kevlar:verbatim-pre-audit:end -->",
     ].join("\n");
   }
