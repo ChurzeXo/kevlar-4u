@@ -513,12 +513,29 @@ async function executeLlmSystemAudit(
     : [];
 
   // ── Delta analysis ────────────────────────────────────────────────────────
-  const bareKeywords = new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)));
-  const fullKeywords = new Set(auditorResults.flatMap((r) => r.findings.map((f: any) => f.keyword)));
+  const bareKeywords = [...new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)))].filter(Boolean) as string[];
+  const fullKeywords = [...new Set(auditorResults.flatMap((r) => r.findings.map((f: any) => f.keyword)))].filter(Boolean) as string[];
+
+  const findOverlap = (kw: string, list: string[]): boolean => {
+    return list.some(
+      (item) =>
+        item.toLowerCase() === kw.toLowerCase() ||
+        item.toLowerCase().includes(kw.toLowerCase()) ||
+        kw.toLowerCase().includes(item.toLowerCase())
+    );
+  };
+
+  const bareOnly = bareKeywords.filter((kw) => !findOverlap(kw, fullKeywords));
+  const fullOnly = fullKeywords.filter((kw) => !findOverlap(kw, bareKeywords));
+  const stable = [
+    ...bareKeywords.filter((kw) => findOverlap(kw, fullKeywords)),
+    ...fullKeywords.filter((kw) => findOverlap(kw, bareKeywords) && !bareKeywords.includes(kw)),
+  ];
+
   const deltaRisks = {
-    bareOnly: [...bareKeywords].filter((kw) => !fullKeywords.has(kw)),
-    fullOnly: [...fullKeywords].filter((kw) => !bareKeywords.has(kw)),
-    stable: [...bareKeywords].filter((kw) => fullKeywords.has(kw)),
+    bareOnly,
+    fullOnly,
+    stable: [...new Set(stable)],
   };
 
   // ── Step 5: Pure code-based merge (no web search) ─────────────────────────
@@ -731,7 +748,7 @@ async function handleOrchestrationAuditResult(
 
         dimensionLevels[dim.id] = dim.level ?? "🟢";
       }
-      const timingFlag = mergedResults.some((d) => d.findings?.some((f: any) => f.timingWindowId)) ? ["timing_risk"] : [];
+      const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
       const synergy = calculateSynergy(dimensionLevels, timingFlag);
       report.synergyFlags = {
         triggered: synergy.triggered,
@@ -843,7 +860,12 @@ async function finalizePreAuditReport(
   crossValidatedResults: PreAuditDimensionResult[], // Step 3
   systemAuditors: Persona[],
   caller: AuditLlmCaller,
-  synergy?: { triggered: string[]; overallMultiplier: number; details: Array<{ rule: any; matched: boolean }> },
+  synergy?: {
+    triggered: string[];
+    overallMultiplier: number;
+    levelUpgrades?: Array<{ dimension: string; from: string; to: string; reason: string }>;
+    details: Array<{ rule: any; matched: boolean }>;
+  },
   deltaRisks?: any,
   webSearchDimensions?: string[],
 ): Promise<PreAuditReport> {
@@ -883,6 +905,14 @@ async function finalizePreAuditReport(
       event: "pre_audit_finalizer_failed",
       error: getErrorInfo(err).message,
     });
+    if (synergy?.levelUpgrades && synergy.levelUpgrades.length > 0) {
+      for (const upgrade of synergy.levelUpgrades) {
+        const dim = fallbackDimensions.find((d) => d.id === upgrade.dimension);
+        if (dim && dim.level === upgrade.from) {
+          dim.level = upgrade.to;
+        }
+      }
+    }
     return { dimensions: fallbackDimensions, summary: summarizePreAuditResults(fallbackDimensions) };
   }
 }
@@ -965,6 +995,24 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
       suggestedLevel: sm.suggestedLevel,
       source: "local_rule_engine",
       patternId: sm.patternId,
+    });
+  }
+
+  // ── Phase 0c：Multi-hop patterns 检测 ─────────────────────────────────
+  const multiHopMatches = repo.checkMultiHopPatterns(content);
+  for (const mhm of multiHopMatches) {
+    const key = `multihop::${mhm.category}::${mhm.pattern.join("-")}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    findings.push({
+      dimension: "网络文化误读",
+      keyword: mhm.matchedWords.join(" + "),
+      trigger: `多跳模式匹配 [${mhm.category}]：${mhm.pattern.join(" -> ")}`,
+      riskDescription: `检测到高关联度敏感词分散组合风险，潜在风险类型为: ${mhm.risk}。`,
+      propagationRisk: "词汇在文本中分散出现，可能被防不胜防地联想并合并解读。",
+      suggestedLevel: "🟡",
+      source: "local_rule_engine",
     });
   }
 
@@ -1118,23 +1166,25 @@ const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
     source: "network_culture_risk",
     validator: "context_distortion",
     question:
-      "以下内容被「暗语破译」标记为网络文化风险。请从「语境脱嵌」角度验证：这些风险点脱离原始语境后，是否真的容易被断章取义或恶意曲解？请只输出 JSON。",
+      "以下内容被「暗语破译」标记为网络文化风险。请从「语境脱嵌」角度进行交叉验证，判断它们在真实语境下是否确实容易被断章取义或恶意曲解。请对每一项进行判定并输出 JSON。结构要求：{\"findings\": [{\"keyword\": \"风险词\", \"status\": \"confirmed / downgraded / debunked\", \"reason\": \"说明判定理由\", \"suggestedLevel\": \"如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡\"}]}",
   },
   {
     source: "context_distortion",
     validator: "network_culture_risk",
     question:
-      "以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度验证：这些风险点是否确实在特定网络社区有恶意含义？请只输出 JSON。",
+      "以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度进行交叉验证，判断它们是否确实在网络社区存在低俗暗语或恶意梗的隐晦含义。请对每一项进行判定并输出 JSON。结构要求：{\"findings\": [{\"keyword\": \"风险词\", \"status\": \"confirmed / downgraded / debunked\", \"reason\": \"说明判定理由\", \"suggestedLevel\": \"如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡\"}]}",
   },
   {
     source: "social_risk",
     validator: "factual_integrity",
-    question: "以下内容被「社伦判官」标记为社会风险。这些风险点有事实依据吗？还是纯粹基于情绪联想？请只输出 JSON。",
+    question:
+      "以下内容被「社伦判官」标记为社会风险。请从「事实完整性」角度交叉验证：这些风险点是否有明确的事实硬伤或夸大陈述？还是纯粹基于情绪联想？请对每一项进行判定并输出 JSON。结构要求：{\"findings\": [{\"keyword\": \"风险词\", \"status\": \"confirmed / downgraded / debunked\", \"reason\": \"说明判定理由\", \"suggestedLevel\": \"如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡\"}]}",
   },
   {
     source: "legal_compliance",
     validator: "social_risk",
-    question: "以下内容被「合规哨兵」标记为合规风险。这些合规问题是否同时触发了社会对立？请只输出 JSON。",
+    question:
+      "以下内容被「合规哨兵」标记为合规风险。请从「社会风险」角度交叉验证：这些合规问题是否可能在当前社会语境中触发负面的舆论情绪对立？请对每一项进行判定并输出 JSON。结构要求：{\"findings\": [{\"keyword\": \"风险词\", \"status\": \"confirmed / downgraded / debunked\", \"reason\": \"说明判定理由\", \"suggestedLevel\": \"如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡\"}]}",
   },
 ];
 
@@ -1151,14 +1201,14 @@ async function crossValidateRiskyDimensions(
   const results = [...phase1Results.map((r) => ({ ...r, findings: [...r.findings] }))];
 
   for (const pair of CROSS_VALIDATION_PAIRS) {
-    const sourceDim = riskyDimensions.find((r) => r.id === pair.source);
+    const sourceDim = results.find((r) => r.id === pair.source);
     if (!sourceDim || sourceDim.findings.length === 0) continue;
 
     const validatorAuditor = validatorMap.get(pair.validator);
     if (!validatorAuditor) continue;
 
     const findingsSummary = sourceDim.findings
-      .map((f, i) => `${i + 1}. [${f.suggestedLevel}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`)
+      .map((f, i) => `${i + 1}. [${f.suggestedLevel || "🟡"}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`)
       .join("\n");
 
     try {
@@ -1184,14 +1234,49 @@ async function crossValidateRiskyDimensions(
       const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
 
       const validatorDim = results.find((r) => r.id === pair.validator);
-      if (validatorDim && validatedFindings.length > 0) {
+      if (validatedFindings.length > 0) {
         for (const vf of validatedFindings) {
-          const exists = validatorDim.findings.some((existing: any) => existing.keyword === vf.keyword);
-          if (!exists) {
-            validatorDim.findings.push(vf);
+          const status = String(vf.status || "").toLowerCase().trim();
+          const targetKeyword = String(vf.keyword || "").trim();
+
+          if (status === "debunked") {
+            // 剔除：从源维度中移除此项
+            sourceDim.findings = sourceDim.findings.filter(
+              (f) => String(f.keyword || "").trim() !== targetKeyword
+            );
+          } else if (status === "downgraded") {
+            // 降级：若源 findings 匹配该词，将其降级为 🟡
+            for (const f of sourceDim.findings) {
+              if (String(f.keyword || "").trim() === targetKeyword) {
+                f.suggestedLevel = "🟡";
+                f.trigger = `[交叉验证降级 (验证方: ${validatorAuditor.meta.name})] ${f.trigger}`;
+                f.riskDescription = `${f.riskDescription} (降级缘由: ${vf.reason || "未指明理由"})`;
+              }
+            }
+          } else if (status === "confirmed") {
+            // 确认：保持源维度风险，同时向验证维度注入确认信息
+            if (validatorDim) {
+              const exists = validatorDim.findings.some(
+                (existing: any) => String(existing.keyword || "").trim() === targetKeyword
+              );
+              if (!exists) {
+                validatorDim.findings.push({
+                  keyword: targetKeyword,
+                  trigger: `[交叉验证确认 (源自: ${sourceDim.name})] ${vf.reason || "确认存在关联风险"}`,
+                  riskDescription: vf.reason || "双向交叉验证增强确认",
+                  suggestedLevel: vf.suggestedLevel || "🟡",
+                  source: "cross_validation",
+                });
+              }
+            }
           }
         }
-        validatorDim.level = getFindingsLevel(validatorDim.findings);
+
+        // 重新计算两个维度的最终级别
+        sourceDim.level = getFindingsLevel(sourceDim.findings);
+        if (validatorDim) {
+          validatorDim.level = getFindingsLevel(validatorDim.findings);
+        }
       }
     } catch (err) {
       logger.warn("Cross-validation failed", {

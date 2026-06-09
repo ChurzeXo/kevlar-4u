@@ -716,6 +716,14 @@ function indexCategory(
 function normalizeConfusableVariant(variant: string): string {
   const confusables: Record<string, string> = {
     局: "菊",
+    橘: "菊",
+    沮: "菊",
+    桔: "菊",
+    瓣: "拌",
+    拌: "拌",
+    湿: "石",
+    势: "石",
+    诗: "石",
   };
 
   return [...variant].map((ch) => confusables[ch] ?? ch).join("");
