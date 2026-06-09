@@ -15,7 +15,8 @@ export type DefensiveDimensionId =
 	| "legal_compliance"
 	| "context_distortion"
 	| "factual_integrity"
-	| "network_culture_risk";
+	| "network_culture_risk"
+	| "cross_lingual_distortion";
 
 export type OffensiveDimensionId =
 	| "hook_retention"
@@ -155,6 +156,23 @@ export const DIMENSIONS: Record<DimensionId, DimensionDefinition> = {
 		},
 	},
 
+	cross_lingual_distortion: {
+		id: "cross_lingual_distortion",
+		layer: "defensive",
+		label: "跨语言曲解与恶意机翻",
+		description: "审查外文内容在本土网络语境下是否容易被恶意汉化、衍生出谐音梗或被强行附会低俗含义",
+		sentinelPoints: [
+			"外文的低俗中文谐音（如 Chinglish 式发音联想）",
+			"原意被网民恶意机翻或野生翻译（脱离品牌本意的语境折叠）",
+			"文化水土不服（在国外正常但在国内具有特定负面内涵的英文短语）",
+		],
+		criteria: {
+			green: "内容中无外文，或外文表达在本土语境中极其稳定，没有任何被谐音或恶意机翻的空间",
+			yellow: "存在可能被网友调侃或轻度玩梗的外文表达，但主要是娱乐性质，不会严重损害品牌形象",
+			red: "外文极易被强行翻译成国内现存的低俗热梗、敏感词或阶层对立黑话，可能引发大范围群嘲和品牌矮化",
+		},
+	},
+
 	// ── Offensive (user-selectable) ─────────────────────────────────────────
 
 	hook_retention: {
@@ -286,6 +304,7 @@ export const DEFENSIVE_DIMENSION_IDS: DefensiveDimensionId[] = [
 	"context_distortion",
 	"factual_integrity",
 	"network_culture_risk",
+	"cross_lingual_distortion",
 ];
 
 // ── Offensive dimension IDs (all, user-selectable) ──────────────────────────

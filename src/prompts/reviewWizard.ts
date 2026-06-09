@@ -8,7 +8,13 @@ export interface Step0Finding {
   attackChain: string;
 }
 
+export interface WildTranslation {
+  original: string;
+  wildTranslation: string;
+}
+
 export interface Step0Result {
+  wildTranslations: WildTranslation[]; // 外语提取与野生翻译
   blackAtoms: string[]; // 局部截取的黑料原子关键词
   attackCandidates: Step0Finding[]; // 情绪重构后的攻击点（含攻击链）
 }
@@ -298,6 +304,9 @@ export function buildGlobalStep0Prompt(): string {
     ``,
     JSON.stringify(
       {
+        wildTranslations: [
+          { original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }
+        ],
         blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
         attackCandidates: [
           {
@@ -311,7 +320,8 @@ export function buildGlobalStep0Prompt(): string {
     ),
     ``,
     `规则：`,
-    `- blackAtoms：从文案中提取的所有潜在可被武器化的关键词/词组（仅词汇，不含分析）`,
+    `- wildTranslations：从文案中提取所有外文/非母语词汇，并给出最能引发群嘲的“野生机翻”或谐音。若无外文则留空数组。`,
+    `- blackAtoms：从文案中提取的所有潜在可被武器化的关键词/词组（含外文，仅词汇，不含分析）`,
     `- attackCandidates：能推演出完整攻击链的攻击点，每项必须包含 keyword 和完整 attackChain`,
     `- 无法推演完整攻击链的候选点不得进入 attackCandidates`,
     `- 输出必须是纯 JSON，不包含任何 Markdown 标记或额外解释`,
@@ -330,10 +340,14 @@ export function buildGlobalStep0Message(content: string): string {
     `"""`,
     ``,
     `## 【执行指令】`,
-    `对上述文案执行「断章取义三步走」全局解码：`,
+    `对上述文案执行「断章取义三步走」全局解码（如果包含外文，请增加第0步）：`,
+    ``,
+    `**⓪ 语言边界判定（找外文与混排）**：`,
+    `- 提取文案中的所有外文或中外文混排短语。`,
+    `- 对提取出的外文，强行给出最恶俗、最具歧义的“野生机翻”或“谐音梗翻译”。`,
     ``,
     `**① 局部截取（找黑料原子）**：`,
-    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+    `- 放大敏感度，寻找任何能被「武器化」的句子或词组（包含前面提取的外文）。`,
     `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
     `- 列出所有潜在的黑料原子。`,
     ``,
@@ -394,6 +408,10 @@ export function buildOrchestrationStep0Prompt(
     localFindingsSection,
     `## 【执行指令：Step 0 全局解码】`,
     ``,
+    `**⓪ 语言边界判定（找外文与混排）**：`,
+    `- 提取文案中的所有外文或中外文混排短语。`,
+    `- 对提取出的外文，强行给出最恶俗、最具歧义的“野生机翻”或“谐音梗翻译”。`,
+    ``,
     `**① 局部截取（找黑料原子）**：`,
     `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
     `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
@@ -410,6 +428,9 @@ export function buildOrchestrationStep0Prompt(
     ``,
     JSON.stringify(
       {
+        wildTranslations: [
+          { original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }
+        ],
         blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
         attackCandidates: [
           {
@@ -772,6 +793,10 @@ export function buildIsolatedSystemAuditorMessage(
       ].join("\n")
     : [
         `### Step 0：职业黑粉逆向全局解码（降级模式，当前沙盒自行执行）`,
+        ``,
+        `**⓪ 语言边界判定（找外文与混排）**：`,
+        `- 提取文案中的所有外文或中外文混排短语。`,
+        `- 对提取出的外文，强行给出最恶俗、最具歧义的“野生机翻”或“谐音梗翻译”。`,
         ``,
         `**① 局部截取（找黑料原子）**：`,
         `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,

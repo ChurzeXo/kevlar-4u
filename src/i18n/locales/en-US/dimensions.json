@@ -70,6 +70,20 @@
       "red": "Fundamental factual errors exist—data fabrication or serious inaccuracies; common sense errors; pseudoscience/false efficacy claims; causal fallacies form foundation of core content arguments"
     }
   },
+  "cross_lingual_distortion": {
+    "label": "Cross-Lingual Distortion & Malicious Translation",
+    "description": "Review whether foreign language content is easily subjected to malicious localization, homophonic slang, or forced vulgar associations in the local network context",
+    "sentinelPoints": [
+      "Vulgar Chinese homophones of foreign words (e.g., Chinglish pronunciation associations)",
+      "Original meaning maliciously translated or 'wildly localized' by netizens (context collapse deviating from brand intent)",
+      "Cultural maladaptation (English phrases normal abroad but carrying specific negative connotations domestically)"
+    ],
+    "criteria": {
+      "green": "No foreign language in content, or foreign expressions are highly stable in local context with no room for homophonic or malicious translation",
+      "yellow": "Foreign expressions exist that might be playfully mocked or lightly memed by netizens, but mainly for entertainment and won't seriously damage brand image",
+      "red": "Foreign language is extremely susceptible to forced translation into existing vulgar internet slang, sensitive words, or class conflict jargon, potentially triggering large-scale mockery and brand degradation"
+    }
+  },
   "hook_retention": {
     "label": "Opening Hook & First Screen Retention",
     "description": "Review the eye-catching quality of content opening and first screen information density",

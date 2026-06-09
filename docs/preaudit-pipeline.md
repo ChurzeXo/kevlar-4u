@@ -14,10 +14,15 @@ Step 0a: 本地规则引擎
 Step 0b: 职业黑粉逆向全局解码
 ═══════════════════════════════════════════════════════════════════
   │  LLM 独立解码 (Sampling/Direct API) 或 宿主 Yield (Orchestration)
-  │  ├─ 局部截取（提取潜在武器化词汇）
-  │  └─ 情绪重构（扣帽与推演攻击链）
+  │  │
+  │  ─ [① 语言边界判定]（新增）
+  │  │    提取外文/混排短语 → 生成最具歧义的「野生机翻」
+  │  │    输出：wildTranslations [{ original, wildTranslation }]
+  │  │
+  │  ├─ [② 局部截取]（提取潜在武器化词汇，含外文）
+  │  └─ [③ 情绪重构]（扣帽与推演攻击链）
   │
-  │  输出：step0Result { blackAtoms, attackCandidates }
+  │  输出：step0Result { wildTranslations, blackAtoms, attackCandidates }
   ▼
 Step 0c: 统一并发联网检索
 ═══════════════════════════════════════════════════════════════════
@@ -44,11 +49,12 @@ Step 3: 全文审计
 ═══════════════════════════════════════════════════════════════════
   │  runSystemAuditors(full, [所有 system_auditors])
   │  ├─ 注入从 Turn 1c 获取的对应 webContextMap
-  │  ├─ social_risk        ─┐
-  │  ├─ legal_compliance    │ 并行执行
-  │  ├─ context_distortion  │ 每个维度独立推理
-  │  ├─ network_culture_risk│
-  │  └─ factual_integrity  ─┘
+  │  ├─ social_risk           ─┬
+  │  ├─ legal_compliance       │
+  │  ├─ context_distortion     │ 并行执行
+  │  ├─ network_culture_risk   │ 每个维度独立推理
+  │  ├─ factual_integrity      │
+  │  └─ cross_lingual_distortion─┘  ◄── 新增：跨界判官（恶意机翻与谐音检测）
   │
   │  输出：auditorResults[]
   ▼
@@ -109,11 +115,11 @@ Step 9: 结果展示
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
 | 0a | 代码 | 本地规则匹配 (localFindings) |
-| 0b | LLM | 职业黑粉逆向全局解码 (提取 Step 0 关键词) |
-| 0c | 代码 | 统一并发联网检索 (对 localFindings + Step 0 关键词统一搜索) |
+| 0b | LLM | 职业黑粉逆向全局解码：①语言边界判定 + 野生机翻提取（wildTranslations）、②提取黑料原子、③情绪重构 |
+| 0c | 代码 | 统一并发联网检索 (对 localFindings + Step 0 关键词 **+ wildTranslations 复合搜索词** 统一搜索) |
 | 1 | 代码 | 文本脱嵌处理 (物理脱嵌 bare/full) |
 | 2 | LLM | 裸文审计（2个维度，注入 Turn 1 联网上下文） |
-| 3 | LLM | 全文审计（所有维度，注入 Turn 1 联网上下文） |
+| 3 | LLM | 全文审计（**6 个维度**，含新增跨界判官，注入 Turn 1 联网上下文） |
 | 4 | 代码 | Delta 信号提取 |
 | 5 | 代码 | 结果合并 (无二次联网验证，纯内存合并) |
 | 6 | LLM | 交叉验证 |
@@ -144,7 +150,8 @@ Step 9: 结果展示
 
 在 Step 0a (本地规则匹配) 和 Step 0b (LLM 全局解码) 完成后，系统会收集：
 1. 本地规则引擎命中的高危/敏感词汇关键词。
-2. Step 0 全局解码输出的 `blackAtoms` (黑料原子词) 及 `attackCandidates` 关键词。
+2. Step 0 全局解码输出的 `blackAtoms`（黑料原子词）及 `attackCandidates` 关键词。
+3. **Step 0b 第⓪步**（语言边界判定）输出的 `wildTranslations`，提取外文原词并生成「野生机翻」——以 `{原文} {野生机翻} 梗` 的复合格式构造搜索词，精准命中国内网络舆论翻车现场。
 
 所有收集到的关键词（最大并发限制为 10 个）将在 **Step 0c** 阶段通过 `runUnifiedWebSearch()` 并发调用联网搜索，返回一个 `Record<string, string>` 映射表。
 
