@@ -15,11 +15,15 @@ import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
 import {
   TOOL_DESCRIPTION,
+  buildGlobalStep0Prompt,
+  buildGlobalStep0Message,
+  buildOrchestrationStep0Prompt,
   buildOrchestrationPrompt,
   buildPreAuditFinalizerPrompt,
   buildIsolatedSystemAuditorMessage,
   buildIsolatedSystemAuditorPrompt,
   type OrchestrationPreAuditContext,
+  type Step0Result,
 } from "../prompts/reviewWizard.js";
 import {
   getWebContextForAuditor,
@@ -28,13 +32,38 @@ import {
   type WebSearchFunction,
 } from "../execution/webSearch.js";
 
-const ORCHESTRATION_GUIDANCE = [
-  "⚠️ **当前无独立 LLM 能力，需要你执行评测协议**",
+
+const ORCHESTRATION_STEP0_GUIDANCE = [
+  "⚠️ **当前无独立 LLM 能力，需要你执行 Turn 1：Step 0 全局解码**",
   "",
   "请按以下步骤操作：",
-  "1. 阅读下方协议的 Step 0 → Step 3",
+  "1. 阅读下方 Step 0 协议，执行「断章取义三步走」全局解码",
+  "2. 输出纯 JSON（blackAtoms + attackCandidates），不含 Markdown",
+  "3. 将 JSON 作为 userMessage 再次调用本工具（Turn 1 提交）",
+  "",
+  "**调用示例**：",
+  "```",
+  "review_content_wizard(",
+  '  sessionId="wizard-review-xxxxx",',
+  '  userMessage="{\\"blackAtoms\\":[...],\\"attackCandidates\\":[...]}"',
+  ")",
+  "```",
+  "",
+  "**注意事项**：",
+  "- sessionId 必须与当前会话一致",
+  "- userMessage 必须是纯 JSON，包含 blackAtoms 和 attackCandidates",
+  "",
+  "---",
+  "",
+].join("\n");
+
+const ORCHESTRATION_AUDIT_GUIDANCE = [
+  "⚠️ **Turn 1 联网验证已完成，需要你执行 Turn 2：维度沙盒审计**",
+  "",
+  "请按以下步骤操作：",
+  "1. 阅读下方协议（Step 0 结果已注入），执行各维度沙盒推理",
   "2. 按协议执行分析，输出纯 JSON（不含 Markdown）",
-  "3. 将 JSON 作为 userMessage 再次调用本工具",
+  "3. 将 JSON 作为 userMessage 再次调用本工具（Turn 2 提交）",
   "",
   "**调用示例**：",
   "```",
@@ -46,12 +75,12 @@ const ORCHESTRATION_GUIDANCE = [
   "",
   "**注意事项**：",
   "- sessionId 必须与当前会话一致",
-  "- userMessage 必须是纯 JSON，不能包含 Markdown 标记",
-  "- JSON 结构必须包含 dimensions 数组",
+  "- userMessage 必须是纯 JSON，包含 dimensions 数组",
   "",
   "---",
   "",
 ].join("\n");
+
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
@@ -83,12 +112,14 @@ export interface ReviewWizardInput {
 
 type ReviewWizardStep =
   | "systemAudit"
-  | "waitingForOrchestrationAudit"
+  | "waitingForOrchestrationStep0"  // 宿主编排 Turn 1: 等待 Step 0 JSON
+  | "waitingForOrchestrationAudit"  // 宿主编排 Turn 2: 等待维度审计 JSON
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
-  | "waitingForReviewDecision" // 新增：初审完成后等待用户决定是否复审
+  | "waitingForReviewDecision"
   | "waitingForReviewerConfirmation"
   | "completed";
+
 
 interface ReviewWizardState {
   sessionId: string;
@@ -187,6 +218,9 @@ async function advanceWizard(
     case "systemAudit":
       return handleSystemAudit(skillsDir, tmpDir, state, personas, systemAuditors, samplingFn);
 
+    case "waitingForOrchestrationStep0":
+      return handleOrchestrationStep0Result(skillsDir, tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
+
     case "waitingForOrchestrationAudit":
       return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
 
@@ -251,7 +285,7 @@ async function handleSystemAudit(
   const caller = resolveSystemAuditCaller(samplingFn);
   if (!caller) {
     if (process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK === "1") {
-      const mergedResults = await mergeLocalFindingsIntoAuditsAsync(
+      const mergedResults = await mergeLocalFindingsIntoAudits(
         systemAuditors.map((auditor) => ({
           id: auditor.meta.id,
           name: auditor.meta.name,
@@ -259,7 +293,6 @@ async function handleSystemAudit(
           level: "🟢",
         })),
         localFindings,
-        state.webSearchConfig,
       );
       const results = normalizePreAuditDimensions(mergedResults, systemAuditors);
       state.preAuditReport = { dimensions: results, summary: summarizePreAuditResults(results) };
@@ -269,13 +302,15 @@ async function handleSystemAudit(
       return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
     }
 
-    state.step = "waitingForOrchestrationAudit";
-    state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
+    // No LLM caller — Orchestration Turn 1: emit Step 0 prompt to host AI
+    const stripped = stripContext(state.content);
+    state.step = "waitingForOrchestrationStep0";
+    state.orchestrationPreAuditContext = { localFindings, stripped };
     await saveState(tmpDir, state);
     return toolResponse(
       state,
-      ORCHESTRATION_GUIDANCE +
-        buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
+      ORCHESTRATION_STEP0_GUIDANCE +
+        buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
     );
   }
 
@@ -298,27 +333,95 @@ async function handleSystemAudit(
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {
-    logger.warn("LLM system audit failed, falling back to host orchestration", {
+    logger.warn("LLM system audit failed, falling back to host orchestration Turn 1", {
       event: "system_audit_llm_failed",
       error: getErrorInfo(err).message,
     });
-    state.step = "waitingForOrchestrationAudit";
-    state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(state.content, localFindings);
+    const stripped = stripContext(state.content);
+    state.step = "waitingForOrchestrationStep0";
+    state.orchestrationPreAuditContext = { localFindings, stripped };
     await saveState(tmpDir, state);
     return toolResponse(
       state,
-      ORCHESTRATION_GUIDANCE +
-        buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
+      ORCHESTRATION_STEP0_GUIDANCE +
+        buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
     );
   }
 }
 
-function buildOrchestrationPreAuditContext(content: string, localFindings: any[]): OrchestrationPreAuditContext {
+
+function buildOrchestrationPreAuditContext(
+  content: string,
+  localFindings: any[],
+  step0Result?: Step0Result,
+  webContextMap?: Record<string, string>,
+): OrchestrationPreAuditContext {
   return {
     localFindings,
     stripped: stripContext(content),
+    step0Result,
+    webContextMap,
   };
 }
+
+/**
+ * Handle orchestration Turn 1: parse Step 0 JSON from host AI,
+ * run unified web search, then emit Turn 2 (audit) prompt.
+ */
+async function handleOrchestrationStep0Result(
+  skillsDir: string,
+  tmpDir: string,
+  state: ReviewWizardState,
+  userPersonas: Persona[],
+  systemAuditors: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  try {
+    const step0Result: Step0Result = JSON.parse(stripCodeFence(userMessage.trim()));
+    if (!Array.isArray(step0Result.blackAtoms) || !Array.isArray(step0Result.attackCandidates)) {
+      throw new Error("Invalid Step 0 JSON: missing blackAtoms or attackCandidates");
+    }
+
+    const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+    const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
+
+    // Run unified web search on all Step 0 keywords + local rule keywords
+    const webContextMap = await runUnifiedWebSearch(
+      step0Result,
+      localFindings,
+      state.webSearchConfig,
+    );
+
+    // Build full orchestration pre-audit context for Turn 2
+    state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(
+      state.content,
+      localFindings,
+      step0Result,
+      webContextMap,
+    );
+    state.orchestrationPreAuditContext.stripped = stripped;
+    state.step = "waitingForOrchestrationAudit";
+    await saveState(tmpDir, state);
+
+    return toolResponse(
+      state,
+      ORCHESTRATION_AUDIT_GUIDANCE +
+        buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
+    );
+  } catch (err) {
+    const info = getErrorInfo(err);
+    return toolResponse(
+      state,
+      [
+        "❌ 无法解析宿主 AI 返回的 Turn 1 Step 0 JSON。",
+        `错误：${info.message}`,
+        "请让宿主 AI 仅返回包含 blackAtoms 和 attackCandidates 的合法 JSON，然后再次提交。",
+      ].join("\n"),
+    );
+  }
+}
+
 
 function resolveSystemAuditCaller(samplingFn?: MultiTurnSamplingFunction): AuditLlmCaller | undefined {
   if (samplingFn) return samplingFn;
@@ -343,27 +446,73 @@ async function executeLlmSystemAudit(
   timingContext?: string,
   webSearchConfig?: WebSearchConfig,
 ): Promise<PreAuditReport> {
-  // Phase 0.4: 物理脱嵌预处理 — 两轮投喂
+  // ── Turn 1a: Physical context stripping ───────────────────────────────────
   const stripped = stripContext(content);
 
-  // Round 1: 裸文 → 仅 context_distortion + network_culture_risk 执行
+  // ── Turn 1b: Global Step 0 LLM call ──────────────────────────────────────
+  // Run global Step 0 decoding as an isolated LLM call to extract
+  // blackAtoms and attackCandidates for the unified web search.
+  let step0Result: Step0Result | undefined;
+  try {
+    const step0Response = await caller({
+      systemPrompt: buildGlobalStep0Prompt(),
+      messages: [{ role: "user", content: buildGlobalStep0Message(content) }],
+      maxTokens: 1024,
+    });
+    step0Result = JSON.parse(stripCodeFence(step0Response.content.trim()));
+    if (!Array.isArray(step0Result?.blackAtoms) || !Array.isArray(step0Result?.attackCandidates)) {
+      step0Result = undefined;
+    }
+    logger.info("Global Step 0 decoding complete", {
+      event: "step0_complete",
+      blackAtoms: step0Result?.blackAtoms?.length ?? 0,
+      attackCandidates: step0Result?.attackCandidates?.length ?? 0,
+    });
+  } catch (err) {
+    logger.warn("Global Step 0 LLM call failed, continuing without Step 0 result", {
+      event: "step0_failed",
+      error: getErrorInfo(err).message,
+    });
+  }
+
+  // ── Turn 1c: Unified concurrent web search ─────────────────────────────────
+  // Gather all keywords (Step 0 + local rules) and search once concurrently.
+  const webContextMap = await runUnifiedWebSearch(step0Result, localFindings, webSearchConfig);
+
+  // ── Turn 2a: Bare text audit (context_distortion + network_culture_risk) ──
   const bareOnlyAuditors = systemAuditors.filter(
     (a) => a.meta.id === "context_distortion" || a.meta.id === "network_culture_risk",
   );
   const bareFindings =
     bareOnlyAuditors.length > 0
-      ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller, undefined, localFindings, webSearchConfig)
+      ? await runSystemAuditors(
+          stripped.bare,
+          bareOnlyAuditors,
+          caller,
+          undefined,
+          localFindings,
+          step0Result,
+          webContextMap,
+        )
       : [];
 
-  // Round 2: 原文 → 所有维度执行（现有流程）
-  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings, webSearchConfig);
+  // ── Turn 2b: Full text audit (all auditors) ────────────────────────────────
+  const auditorResults = await runSystemAuditors(
+    content,
+    systemAuditors,
+    caller,
+    timingContext,
+    localFindings,
+    step0Result,
+    webContextMap,
+  );
 
-  // 记录哪些维度使用了联网搜索
-  const webSearchDimensions = auditorResults
-    .filter((r) => r.webSearchUsed)
-    .map((r) => r.id);
+  // Record which dimensions used web search
+  const webSearchDimensions = Object.keys(webContextMap).length > 0
+    ? systemAuditors.map((a) => a.meta.id).filter((id) => isWebSearchSupported(id))
+    : [];
 
-  // Delta 分析：bareFindings 有但 fullFindings 没有 → 脱嵌型风险
+  // ── Delta analysis ────────────────────────────────────────────────────────
   const bareKeywords = new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)));
   const fullKeywords = new Set(auditorResults.flatMap((r) => r.findings.map((f: any) => f.keyword)));
   const deltaRisks = {
@@ -372,13 +521,14 @@ async function executeLlmSystemAudit(
     stable: [...bareKeywords].filter((kw) => fullKeywords.has(kw)),
   };
 
+  // ── Step 5: Pure code-based merge (no web search) ─────────────────────────
   const mergedResults = normalizePreAuditDimensions(
-    await mergeLocalFindingsIntoAuditsAsync(auditorResults, localFindings, webSearchConfig),
+    mergeLocalFindingsIntoAudits(auditorResults, localFindings),
     systemAuditors,
   );
   const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
 
-  // Phase 2.2: 协同风险加权计算（在 finalizer 之前）
+  // ── Synergy calculation ───────────────────────────────────────────────────
   const dimensionLevels: Record<string, string> = {};
   for (const dim of crossValidatedResults) {
     dimensionLevels[dim.id] = dim.level ?? "🟢";
@@ -406,7 +556,7 @@ async function executeLlmSystemAudit(
   report.deltaRisks = deltaRisks;
   report.webSearchDimensions = webSearchDimensions;
 
-  // 应用协同加权的 level 升级
+  // Apply synergy level upgrades
   if (synergy.levelUpgrades.length > 0) {
     for (const upgrade of synergy.levelUpgrades) {
       const dim = report.dimensions.find((d) => d.id === upgrade.dimension);
@@ -419,6 +569,65 @@ async function executeLlmSystemAudit(
   return report;
 }
 
+/**
+ * Run unified concurrent web search for all keywords from Step 0 and local rules.
+ * Returns a map of keyword -> web context string.
+ */
+async function runUnifiedWebSearch(
+  step0Result: Step0Result | undefined,
+  localFindings: any[],
+  webSearchConfig?: WebSearchConfig,
+): Promise<Record<string, string>> {
+  if (!webSearchConfig?.enabled || !webSearchConfig.searchFn) {
+    return {};
+  }
+
+  // Gather all unique keywords: Step 0 blackAtoms + local rule keywords
+  const keywordSet = new Set<string>();
+  for (const atom of step0Result?.blackAtoms ?? []) {
+    if (atom && typeof atom === "string") keywordSet.add(atom);
+  }
+  for (const atom of step0Result?.attackCandidates ?? []) {
+    if (atom.keyword && typeof atom.keyword === "string") keywordSet.add(atom.keyword);
+  }
+  for (const finding of localFindings) {
+    if (finding.keyword && typeof finding.keyword === "string") keywordSet.add(finding.keyword);
+  }
+
+  const keywords = [...keywordSet].slice(0, 10); // cap at 10 concurrent searches
+  if (keywords.length === 0) return {};
+
+  logger.info("Running unified concurrent web search", {
+    event: "unified_web_search",
+    keywordCount: keywords.length,
+  });
+
+  const results = await Promise.all(
+    keywords.map(async (keyword) => {
+      try {
+        const result = await webSearchConfig.searchFn!(`${keyword} 含义 网络用语 梗`, {
+          maxResults: webSearchConfig.maxResults ?? 2,
+        });
+        if (!result.results || result.results.length === 0) return [keyword, ""] as const;
+        const ctx = result.results
+          .slice(0, 2)
+          .map((r) => `- ${r.title}: ${r.snippet}`)
+          .join("\n");
+        return [keyword, ctx] as const;
+      } catch {
+        return [keyword, ""] as const;
+      }
+    }),
+  );
+
+  const map: Record<string, string> = {};
+  for (const [kw, ctx] of results) {
+    if (ctx) map[kw] = ctx;
+  }
+  return map;
+}
+
+
 interface SystemAuditorResult extends PreAuditDimensionResult {
   webSearchUsed?: boolean;
 }
@@ -429,35 +638,24 @@ async function runSystemAuditors(
   caller: AuditLlmCaller,
   timingContext?: string,
   localFindings: any[] = [],
-  webSearchConfig?: WebSearchConfig,
+  step0Result?: Step0Result,
+  webContextMap?: Record<string, string>,
 ): Promise<SystemAuditorResult[]> {
   return Promise.all(
     systemAuditors.map(async (auditor) => {
       try {
-        // 时机上下文仅注入给 social_risk 审计员
+        // Timing context injected only for social_risk
         const auditContent =
           timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
 
-        // 🆕 联网搜索：针对支持的维度
+        // Build consolidated web context for this auditor from pre-searched map
         let webContext = "";
-        let webSearchUsed = false;
-        if (webSearchConfig?.enabled && webSearchConfig.searchFn && isWebSearchSupported(auditor.meta.id)) {
-          try {
-            webContext = await getWebContextForAuditor(
-              auditor.meta.id,
-              auditContent,
-              webSearchConfig.searchFn,
-              { maxResults: webSearchConfig.maxResults }
-            );
-            if (webContext) {
-              webSearchUsed = true;
-            }
-          } catch (err) {
-            logger.warn("Web search failed, continuing without web context", {
-              event: "web_search_failed",
-              auditorId: auditor.meta.id,
-              error: getErrorInfo(err).message,
-            });
+        if (webContextMap && Object.keys(webContextMap).length > 0) {
+          const relevantEntries = Object.entries(webContextMap)
+            .filter(([, ctx]) => ctx.length > 0)
+            .map(([kw, ctx]) => `### 关键词「${kw}」\n${ctx}`);
+          if (relevantEntries.length > 0) {
+            webContext = `以下是针对本文案黑料原子的联网验证结果（Turn 1 已完成检索）：\n\n${relevantEntries.join("\n\n")}`;
           }
         }
 
@@ -468,8 +666,9 @@ async function runSystemAuditors(
               role: "user",
               content: buildIsolatedSystemAuditorMessage(auditContent, auditor, {
                 localFindings,
+                step0Result,
                 timingContext: timingContext && auditor.meta.id === "social_risk" ? timingContext : undefined,
-                webContext,
+                webContext: webContext || undefined,
               }),
             },
           ],
@@ -480,7 +679,7 @@ async function runSystemAuditors(
           id: auditor.meta.id,
           name: auditor.meta.name,
           findings: Array.isArray(parsed.findings) ? parsed.findings : [],
-          webSearchUsed,
+          webSearchUsed: webContext.length > 0,
         };
       } catch (err) {
         logger.warn("System auditor failed", {
@@ -494,6 +693,7 @@ async function runSystemAuditors(
   );
 }
 
+
 async function handleOrchestrationAuditResult(
   tmpDir: string,
   state: ReviewWizardState,
@@ -505,15 +705,18 @@ async function handleOrchestrationAuditResult(
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
-    const mergedResults = await mergeLocalFindingsIntoAuditsAsync(
-      normalizePreAuditDimensions(parsed.dimensions, systemAuditors),
-      localFindings,
-      state.webSearchConfig,
+    // Step 5: pure code-based merge (no web search in this path)
+    const mergedResults = normalizePreAuditDimensions(
+      mergeLocalFindingsIntoAudits(
+        normalizePreAuditDimensions(parsed.dimensions, systemAuditors),
+        localFindings,
+      ),
+      systemAuditors,
     );
-    const dimensions = normalizePreAuditDimensions(mergedResults, systemAuditors);
+
     const report: PreAuditReport = {
-      dimensions,
-      summary: summarizePreAuditResults(dimensions),
+      dimensions: mergedResults,
+      summary: parsed.summary || summarizePreAuditResults(mergedResults),
       riskProfile: parsed.riskProfile ?? undefined,
       synergyFlags: parsed.synergyFlags ?? undefined,
       attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
@@ -524,10 +727,11 @@ async function handleOrchestrationAuditResult(
     // Phase 2.2: 宿主编排路径也执行协同风险加权计算
     if (!report.synergyFlags) {
       const dimensionLevels: Record<string, string> = {};
-      for (const dim of dimensions) {
+      for (const dim of mergedResults) {
+
         dimensionLevels[dim.id] = dim.level ?? "🟢";
       }
-      const timingFlag = dimensions.some((d) => d.findings?.some((f: any) => f.timingWindowId)) ? ["timing_risk"] : [];
+      const timingFlag = mergedResults.some((d) => d.findings?.some((f: any) => f.timingWindowId)) ? ["timing_risk"] : [];
       const synergy = calculateSynergy(dimensionLevels, timingFlag);
       report.synergyFlags = {
         triggered: synergy.triggered,
@@ -667,7 +871,7 @@ async function finalizePreAuditReport(
     const dimensions = normalizePreAuditDimensions(parsed.dimensions, systemAuditors);
     return {
       dimensions,
-      summary: summarizePreAuditResults(dimensions),
+      summary: parsed.summary || summarizePreAuditResults(dimensions),
       riskProfile: parsed.riskProfile ?? undefined,
       synergyFlags: parsed.synergyFlags ?? undefined,
       attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
@@ -829,61 +1033,14 @@ function mergeLocalFindingsIntoAudits(
 async function mergeLocalFindingsIntoAuditsAsync(
   audits: PreAuditDimensionResult[],
   localFindings: any[],
-  webSearchConfig?: WebSearchConfig,
+  // webSearchConfig kept in signature for backwards compatibility but no longer used
+  _webSearchConfig?: WebSearchConfig,
 ): Promise<PreAuditDimensionResult[]> {
-  // 先执行同步合并
-  const merged = mergeLocalFindingsIntoAudits(audits, localFindings);
-
-  // 如果没有联网配置或没有本地规则发现，直接返回
-  if (!webSearchConfig?.enabled || !webSearchConfig.searchFn || localFindings.length === 0) {
-    return merged;
-  }
-
-  // 对高风险的本地规则 findings 进行联网验证
-  const highRiskFindings = localFindings.filter(
-    (f) => f.suggestedLevel === "🔴" || f.suggestedLevel === "🟡"
-  );
-
-  if (highRiskFindings.length === 0) {
-    return merged;
-  }
-
-  logger.info("Verifying local findings via web search", {
-    event: "web_verify_local_findings",
-    count: highRiskFindings.length,
-  });
-
-  // 并发验证所有高风险 findings
-  const verifiedFindings = await Promise.all(
-    highRiskFindings.map(async (finding) => {
-      try {
-        return await verifyLocalFinding(finding, webSearchConfig.searchFn!);
-      } catch (err) {
-        logger.warn("Web verification failed for finding", {
-          event: "web_verify_finding_failed",
-          keyword: finding.keyword,
-          error: getErrorInfo(err).message,
-        });
-        return finding; // 失败时返回原始 finding
-      }
-    })
-  );
-
-  // 用验证后的 findings 替换原始的
-  const verifiedMap = new Map(verifiedFindings.map((f) => [f.keyword, f]));
-
-  // 更新 network_culture_risk 维度中的 findings
-  const networkAudit = merged.find((audit) => audit.id === "network_culture_risk");
-  if (networkAudit) {
-    networkAudit.findings = networkAudit.findings.map((f) => {
-      const verified = verifiedMap.get(f.keyword);
-      return verified || f;
-    });
-    networkAudit.level = getFindingsLevel(networkAudit.findings);
-  }
-
-  return merged;
+  // Step 5 is now a pure synchronous code merge.
+  // All web searches were completed in Turn 1 (runUnifiedWebSearch).
+  return mergeLocalFindingsIntoAudits(audits, localFindings);
 }
+
 
 /**
  * 🆕 Verify a single local finding via web search
@@ -1135,9 +1292,6 @@ function summarizePreAuditResults(
       "| 维度 | 等级 | 关键发现 |",
       "| --- | --- | --- |",
       ...results.map((r) => `| ${escapeMarkdownTableCell(r.name)} | 🟢 | 无 |`),
-      "",
-      "核心风险点：",
-      "无",
     ].join("\n");
   }
 
@@ -1150,31 +1304,12 @@ function summarizePreAuditResults(
     return `| ${escapeMarkdownTableCell(r.name)} | ${level} | ${escapeMarkdownTableCell(riskKeywords)} |`;
   });
 
-  // 核心风险点（列表）
-  const coreRiskPoints: string[] = [];
-  let index = 1;
-  for (const r of risky) {
-    const dimLevel = r.level || getFindingsLevel(r.findings);
-    const findingDescriptions = r.findings
-      .map((f) => {
-        const keyword = f.keyword ? `"${f.keyword}"` : "";
-        const desc = f.riskDescription || f.trigger || "";
-        return keyword ? `${keyword}：${desc}` : desc;
-      })
-      .join("；");
-    coreRiskPoints.push(`${index}. ${r.name}（${dimLevel}）：${findingDescriptions}`);
-    index++;
-  }
-
   return [
     `综合风险等级：${overallLevel}`,
     "扫描结果（表格）：",
     "| 维度 | 等级 | 关键发现 |",
     "| --- | --- | --- |",
     ...riskSummaryLines,
-    "",
-    "核心风险点：",
-    ...coreRiskPoints,
   ].join("\n");
 }
 

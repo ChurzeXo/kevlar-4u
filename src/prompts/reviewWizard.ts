@@ -1,6 +1,18 @@
 import type { Persona } from "../utils/parser.js";
 import type { StrippedContent } from "../utils/stripContext.js";
 
+// ── Step 0 output types ──────────────────────────────────────────────────────
+
+export interface Step0Finding {
+  keyword: string;
+  attackChain: string;
+}
+
+export interface Step0Result {
+  blackAtoms: string[];           // 局部截取的黑料原子关键词
+  attackCandidates: Step0Finding[]; // 情绪重构后的攻击点（含攻击链）
+}
+
 export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 
 **功能**：基于"职业黑粉逆向解码"视角，对用户提交的文本进行攻击链推演与多维度社会语义风险评测。
@@ -9,16 +21,19 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 
 **输入**：纯文本（不支持图片或文档）
 
-**输出**：结构化 JSON 格式的初审报告
+**输出**：结构化数据与初步排版的初审报告
 
 **核心控制流程**：
 1. 调用本工具，传入待评测文本
-2. 工具返回初审报告后，直接展示给用户
+2. 工具返回初审报告后，请你根据返回的内容向用户展示最终评测报告。
 3. 等待用户明确指令（复审/平台检查），严禁自动推进
 
-**严格规则**：
-- 禁止提供任何修改建议、润色或重写意见
-- 禁止使用「你可以…」「建议你…」等句式`;
+**严格排版与发挥规则**：
+- 【固定底线】：你必须在回复的最开头，**原封不动地完整输出**工具返回的“综合风险等级”和“扫描结果（表格）”，绝对禁止修改表格的行列和内容。
+- 【自由发挥】：在表格之后，强烈鼓励你基于评测过程中产生的详细数据（如 attackChainAnalysis, worstCaseNarrative, synergyFlags），按照以下逻辑编排进行自然语言的深度推演与扩写：
+  🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 🚨 最坏情况推演。
+- 【禁止润色】：禁止提供任何修改建议、润色或重写原文的意见。
+- 【语气限制】：禁止使用「你可以…」「建议你…」等句式。`;
 
 export const PRE_AUDIT_OUTPUT_FORMAT = [
   `{`,
@@ -235,7 +250,167 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
 export interface OrchestrationPreAuditContext {
   localFindings: any[];
   stripped: StrippedContent;
+  step0Result?: Step0Result;
+  webContextMap?: Record<string, string>;
 }
+
+// ── Turn 1: Global Step 0 prompts ─────────────────────────────────────────────
+
+/**
+ * System prompt for the isolated global Step 0 LLM call.
+ * Used in Sampling/Direct API modes.
+ */
+export function buildGlobalStep0Prompt(): string {
+  return [
+    `# [SYSTEM PROTOCOL] 职业黑粉逆向解码协议（Turn 1 全局解码）`,
+    ``,
+    `## 【元规则】`,
+    `1. 运行环境：独立隔离推理沙盒，只负责 Step 0 全局解码，不执行任何维度审计`,
+    `2. 执行身份：非情感化的【黑料原子提取与攻击链推演引擎】`,
+    `3. 核心禁令：禁止输出任何修改建议；禁止直接定级；禁止执行维度分析`,
+    ``,
+    buildCommonRiskRules(),
+    ``,
+    buildCoreReasoningFramework(),
+    ``,
+    `## 【输出格式】`,
+    `必须输出纯 JSON，结构如下：`,
+    ``,
+    JSON.stringify(
+      {
+        blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
+        attackCandidates: [
+          {
+            keyword: "触发词或短语",
+            attackChain: "原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    ``,
+    `规则：`,
+    `- blackAtoms：从文案中提取的所有潜在可被武器化的关键词/词组（仅词汇，不含分析）`,
+    `- attackCandidates：能推演出完整攻击链的攻击点，每项必须包含 keyword 和完整 attackChain`,
+    `- 无法推演完整攻击链的候选点不得进入 attackCandidates`,
+    `- 输出必须是纯 JSON，不包含任何 Markdown 标记或额外解释`,
+  ].join("\n");
+}
+
+/**
+ * User message for the isolated global Step 0 LLM call.
+ * Used in Sampling/Direct API modes.
+ */
+export function buildGlobalStep0Message(content: string): string {
+  return [
+    `## 【待测文案】`,
+    `"""`,
+    content,
+    `"""`,
+    ``,
+    `## 【执行指令】`,
+    `对上述文案执行「断章取义三步走」全局解码：`,
+    ``,
+    `**① 局部截取（找黑料原子）**：`,
+    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+    `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
+    `- 列出所有潜在的黑料原子。`,
+    ``,
+    `**② 语境脱嵌（剥离防线）**：`,
+    `- 将每个黑料原子剥离所有前后文，孤立审视。`,
+    `- 这句话孤立存在时，直觉上会产生什么完全不同的歧义或恶劣反差？`,
+    ``,
+    `**③ 情绪重构（强行扣帽）**：`,
+    `- 结合当前社会痛点，给脱嵌的内容扣上煽动情绪的帽子。`,
+    `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
+    `- 只有能推演出完整攻击链的才进入 attackCandidates。`,
+    ``,
+    `请严格执行并输出纯 JSON：`,
+  ].join("\n");
+}
+
+/**
+ * Orchestration mode Turn 1 prompt.
+ * Instructs the host AI to run Step 0 and return JSON.
+ */
+export function buildOrchestrationStep0Prompt(
+  content: string,
+  localFindings: any[],
+  stripped: StrippedContent,
+): string {
+  const localFindingsSection =
+    localFindings.length > 0
+      ? [
+          `## 【代码预处理结果（必须作为事实输入）】`,
+          ``,
+          `以下是 Kevlar 本地规则引擎已完成的确定性匹配结果，你执行 Step 0 时必须将这些关键词视为已知黑料原子，直接纳入 blackAtoms。`,
+          ``,
+          `### 本地规则命中 localFindings`,
+          JSON.stringify(localFindings, null, 2),
+          ``,
+          `### 物理脱嵌输出`,
+          JSON.stringify({ bare: stripped.bare, replacements: stripped.replacements }, null, 2),
+          ``,
+        ].join("\n")
+      : "";
+
+  return [
+    `# [SYSTEM PROTOCOL] 职业黑粉逆向解码协议（宿主编排 Turn 1）`,
+    ``,
+    `## 【任务说明】`,
+    `这是初审流程的第一轮（Turn 1）。你需要执行 Step 0 全局解码，提取黑料原子和攻击点，然后**将结果以纯 JSON 格式通过调用 review_content_wizard 工具提交**。`,
+    `系统将在收到你的 JSON 后，自动完成联网验证，然后在 Turn 2 将验证结果反馈给你执行完整的维度审计。`,
+    ``,
+    buildCommonRiskRules(),
+    ``,
+    buildCoreReasoningFramework(),
+    ``,
+    `## 【待测文案】`,
+    `"""`,
+    content,
+    `"""`,
+    ``,
+    localFindingsSection,
+    `## 【执行指令：Step 0 全局解码】`,
+    ``,
+    `**① 局部截取（找黑料原子）**：`,
+    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+    `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
+    `- 列出所有潜在的黑料原子（已含本地规则命中词）。`,
+    ``,
+    `**② 语境脱嵌（剥离防线）**：`,
+    `- 将每个黑料原子剥离所有前后文，孤立审视。`,
+    ``,
+    `**③ 情绪重构（强行扣帽）**：`,
+    `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
+    ``,
+    `## 【Turn 1 输出格式】`,
+    `必须输出纯 JSON，结构如下：`,
+    ``,
+    JSON.stringify(
+      {
+        blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
+        attackCandidates: [
+          {
+            keyword: "触发词或短语",
+            attackChain: "原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    ``,
+    `## 【提交指引】`,
+    `执行完成后，将上述 JSON 作为 userMessage 参数调用 review_content_wizard 工具，保持 sessionId 不变。`,
+    `userMessage 必须是纯 JSON，不能包含 Markdown 标记或额外解释。`,
+    ``,
+    `请严格执行并输出 JSON：`,
+  ].join("\n");
+}
+
+// ── Turn 2: Sandbox auditing prompts ─────────────────────────────────────────
 
 export function buildOrchestrationPrompt(
   userContent: string,
@@ -262,8 +437,18 @@ export function buildOrchestrationPrompt(
         ``,
         `以下内容不是建议，而是 Kevlar 代码层已经完成的确定性预处理结果。你必须把它们作为矩阵扫描输入，不得忽略。`,
         ``,
-        `### Pipeline Step 0：本地规则引擎输出 localFindings`,
+        `### Pipeline Step 0a：本地规则引擎输出 localFindings`,
         preAuditContext.localFindings.length > 0 ? JSON.stringify(preAuditContext.localFindings, null, 2) : `[]`,
+        ``,
+        `### Pipeline Step 0b：LLM 全局解码结果（Turn 1 已完成）`,
+        preAuditContext.step0Result ? JSON.stringify(preAuditContext.step0Result, null, 2) : `{}`,
+        ``,
+        `### Pipeline Step 0c：联网验证上下文（Turn 1 已完成）`,
+        preAuditContext.webContextMap && Object.keys(preAuditContext.webContextMap).length > 0
+          ? Object.entries(preAuditContext.webContextMap)
+              .map(([kw, ctx]) => `#### 关键词「${kw}」的联网参考\n${ctx}`)
+              .join("\n\n")
+          : `（无联网验证结果）`,
         ``,
         `### Pipeline Step 1：物理脱嵌输出`,
         JSON.stringify(
@@ -276,6 +461,7 @@ export function buildOrchestrationPrompt(
         ),
         ``,
         `### 宿主执行要求`,
+        `- Step 0 已由 Turn 1 完成，本轮（Turn 2）直接使用上方 step0Result 作为全局解码基础，无需重新执行 Step 0。`,
         `- Step 2 裸文审计必须使用上方 bare 文本，只对 context_distortion 与 network_culture_risk 两个维度执行。`,
         `- Step 3 全文审计必须使用【待测文案】原文，对全部 system_auditor 维度执行。`,
         `- Step 4 必须根据裸文审计与全文审计结果生成 deltaRisks: bareOnly/fullOnly/stable。`,
@@ -309,34 +495,14 @@ export function buildOrchestrationPrompt(
     `## 【矩阵填空执行协议】`,
     `请严格按照以下协议流程进行逐项分析，最终只输出标准 JSON。`,
     ``,
-    `### Step 0：职业黑粉逆向全局解码（所有沙盒的推理基础）`,
+    `### Step 0（Turn 1 已完成）：全局解码结果已注入【代码预处理结果】`,
     ``,
-    `在进入任何维度沙盒之前，先对整段内容执行一次「断章取义三步走」全局解码：`,
+    `Step 0 已由系统 Turn 1 完成。上方【代码预处理结果】中的 step0Result 即为全局解码输出，包含 blackAtoms 和 attackCandidates。`,
+    `你无需重新执行 Step 0；直接将 step0Result 中的攻击点作为各沙盒推理的输入基础。`,
     ``,
-    `**① 局部截取（找黑料原子）**：`,
-    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
-    `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
-    `- 列出所有潜在的黑料原子`,
+    `### Step 1：五维度沙盒推理（基于 Step 0 输出）`,
     ``,
-    `**② 语境脱嵌（剥离防线）**：`,
-    `- 将每个黑料原子剥离所有前后文，孤立审视。`,
-    `- 这句话孤立存在时，直觉上会产生什么完全不同的歧义或恶劣反差？`,
-    ``,
-    `**③ 情绪重构（强行扣帽）**：`,
-    `- 结合当前社会痛点，给脱嵌的内容扣上煽动情绪的帽子（如「物化女性」「何不食肉糜」）。`,
-    `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向`,
-    `- 能扣上帽子的所有攻击点，直接进入候选 findings，不需要等待各维度沙盒确认`,
-    ``,
-    `<cot_global>`,
-    `执行上述「断章取义三步走」全局解码，输出：`,
-    `1. 局部截取的黑料原子列表`,
-    `2. 情绪重构的攻击点候选列表（含完整攻击链推演）`,
-    `</cot_global>`,
-    ``,
-    `### Step 1：五维度沙盒推理（基于 Step 0 的输出）`,
-    ``,
-    `重要提示：每个沙盒的推理必须以 Step 0 的输出为输入，而不是重新从零开始解读内容。`,
-    `Step 0 视角B已发现的攻击点，各沙盒负责判断它属于哪个维度并补充风险描述，不需要重新推演。`,
+    `重要提示：每个沙盒的推理必须以 step0Result.attackCandidates 为输入，判断攻击点属于哪个维度并补充风险描述，不需要重新推演攻击链。`,
     ``,
     sandboxSections,
     ``,
@@ -417,16 +583,34 @@ export function buildIsolatedSystemAuditorMessage(
   auditor: Persona,
   options?: {
     localFindings?: any[];
+    step0Result?: Step0Result;
     timingContext?: string;
     webContext?: string;
   },
 ): string {
   const localFindings = options?.localFindings ?? [];
+  const step0Result = options?.step0Result;
+
+  // Pre-computed Step 0 result injected as facts (Turn 1 output)
+  const step0Section = step0Result
+    ? [
+        `## 【全局解码结果（Turn 1 已完成，必须作为事实输入）】`,
+        `以下是系统 Turn 1 已完成的全局逆向解码结果。你无需重新执行 Step 0，直接将 attackCandidates 作为当前沙盒的推理基础：`,
+        ``,
+        JSON.stringify(step0Result, null, 2),
+        ``,
+      ].join("\n")
+    : [
+        `## 【说明】`,
+        `Turn 1 全局解码不可用（降级模式），当前沙盒需自行执行 Step 0 全局解码。`,
+        ``,
+      ].join("\n");
+
   const localFindingsSection =
     localFindings.length > 0
       ? [
-          `## 【本地规则引擎预警】`,
-          `以下发现来自确定性本地规则，只能作为风险候选输入，不可丢弃；请在当前维度相关时纳入 findings：`,
+          `## 【本地规则引擎预警（已纳入 blackAtoms）】`,
+          `以下发现来自确定性本地规则，已被 Turn 1 纳入解码基础；请在当前维度相关时纳入 findings：`,
           ``,
           JSON.stringify(localFindings, null, 2),
           ``,
@@ -437,16 +621,38 @@ export function buildIsolatedSystemAuditorMessage(
     ? [`## 【时机上下文】`, options.timingContext, ``].join("\n")
     : "";
 
-  // 🆕 联网参考信息
   const webContextSection = options?.webContext
     ? [
-        `## 【联网参考信息】`,
-        `以下信息来自网络搜索，仅供参考，不可直接作为 findings 使用。请结合你的专业判断进行分析：`,
+        `## 【联网验证参考（Turn 1 已完成联网检索）】`,
+        `以下信息来自 Turn 1 统一联网验证，已针对黑料原子关键词完成搜索，请结合专业判断进行分析：`,
         ``,
         options.webContext,
         ``,
       ].join("\n")
     : "";
+
+  // Step 0 instruction block: only shown when step0Result is NOT pre-computed (fallback mode)
+  const step0InstructionBlock = step0Result
+    ? [
+        `### Step 0（Turn 1 已完成）：直接使用上方全局解码结果`,
+        ``,
+        `无需重新执行 Step 0。以 step0Result.attackCandidates 为当前沙盒推理的输入基础。`,
+      ].join("\n")
+    : [
+        `### Step 0：职业黑粉逆向全局解码（降级模式，当前沙盒自行执行）`,
+        ``,
+        `**① 局部截取（找黑料原子）**：`,
+        `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+        `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
+        `- 列出所有潜在的黑料原子。`,
+        ``,
+        `**② 语境脱嵌（剥离防线）**：`,
+        `- 将每个黑料原子剥离所有前后文，孤立审视。`,
+        ``,
+        `**③ 情绪重构（强行扣帽）**：`,
+        `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
+        `- 能扣上帽子的攻击点直接进入候选 findings。`,
+      ].join("\n");
 
   return [
     `## 【待测文案】`,
@@ -454,44 +660,28 @@ export function buildIsolatedSystemAuditorMessage(
     content,
     `"""`,
     ``,
+    step0Section,
     localFindingsSection,
     timingContextSection,
     webContextSection,
     `## 【矩阵填空执行协议】`,
     `请严格按照以下协议流程进行逐项分析，最终只输出标准 JSON。`,
     ``,
-    `### Step 0：职业黑粉逆向全局解码（当前沙盒的推理基础）`,
+    step0InstructionBlock,
     ``,
-    `在进入维度专项沙盒之前，先对整段内容执行一次「断章取义三步走」全局解码：`,
-    ``,
-    `**① 局部截取（找黑料原子）**：`,
-    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
-    `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
-    `- 列出所有潜在的黑料原子。`,
-    ``,
-    `**② 语境脱嵌（剥离防线）**：`,
-    `- 将每个黑料原子剥离所有前后文，孤立审视。`,
-    `- 这句话孤立存在时，直觉上会产生什么完全不同的歧义或恶劣反差？`,
-    ``,
-    `**③ 情绪重构（强行扣帽）**：`,
-    `- 结合当前社会痛点，给脱嵌的内容扣上煽动情绪的帽子。`,
-    `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
-    `- 能扣上帽子的攻击点，直接进入当前沙盒的候选 findings，不需要等待常规检查项确认。`,
-    ``,
-    `### Step 1：当前维度沙盒推理（基于 Step 0 的输出）`,
+    `### Step 1：当前维度沙盒推理（基于 Step 0 输出）`,
     ``,
     `#### 沙盒：${auditor.meta.name}（${auditor.meta.id}）`,
     ``,
     buildCompactAuditorCoT(auditor),
     ``,
-    `重要提示：当前沙盒的推理必须以 Step 0 的输出为输入，而不是重新从零开始解读内容。`,
-    `Step 0 已发现的攻击点，当前沙盒负责判断它是否属于本维度并补充风险描述。`,
+    `重要提示：当前沙盒的推理必须以 Step 0 的输出（attackCandidates）为输入，判断攻击点是否属于本维度并补充风险描述，不需要重新推演攻击链。`,
     ``,
     `### Step 2：单沙盒仲裁与噪音过滤`,
     ``,
     `1. 逐一审查 Step 1 的发现，标记哪些属于过度联想（Noise）。`,
     `   判断标准：能否推演出完整攻击链？不能则为 Noise。`,
-    `2. 检查 Step 0 的候选列表：是否有被当前维度遗漏的攻击点？`,
+    `2. 检查 Step 0 的攻击点候选列表：是否有被当前维度遗漏的攻击点？`,
     `   有则补入 findings；不可因为「不在常规检查范围」而丢弃。`,
     `3. 确认最终发现列表中没有包含任何修改建议或文案优化意见。`,
     ``,
@@ -518,7 +708,7 @@ export function buildIsolatedSystemAuditorMessage(
     `其中：`,
     `- 无发现时 findings 必须为空数组`,
     `- suggestedLevel 只能使用 🔴 或 🟡`,
-    `- 只要 Step 0 或当前沙盒能推演出完整攻击链，必须进入 findings`,
+    `- 只要 Step 0 attackCandidates 或当前沙盒能推演出完整攻击链，必须进入 findings`,
     ``,
     `请严格执行以上流程并输出 JSON：`,
   ]

@@ -226,10 +226,10 @@ describe("handleReviewContentWizard state machine", () => {
 
     const text = textOf(started);
     assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
-    assert.ok(text.includes("| 维度 | 结果 |"));
-    assert.ok(text.includes("| 合规哨兵 | 🟢 通过 |"));
-    assert.ok(text.includes("| 语境猎手 | 🟢 通过 |"));
-    assert.ok(text.includes("| 事实判官 | 🟢 通过 |"));
+    assert.ok(text.includes("| 维度 | 等级 | 关键发现 |"));
+    assert.ok(text.includes("| 合规哨兵 | 🟢 | 无 |"));
+    assert.ok(text.includes("| 语境猎手 | 🟢 | 无 |"));
+    assert.ok(text.includes("| 事实判官 | 🟢 | 无 |"));
     assert.ok(!text.includes("审 查 维 度"));
   });
 
@@ -241,7 +241,7 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("⚠️ 风险发现"));
+    assert.ok(text.includes("综合风险等级：🔴 红色高危"));
     assert.ok(text.includes("本地规则引擎"));
     assert.ok(text.includes("| 本地规则引擎 | 🔴"));
     assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
@@ -269,7 +269,7 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("⚠️ 风险发现"));
+    assert.ok(text.includes("综合风险等级：🔴 红色高危"));
     assert.ok(text.includes("暗语破译"));
     assert.ok(text.includes("| 暗语破译 | 🔴"));
 
@@ -292,16 +292,33 @@ describe("handleReviewContentWizard state machine", () => {
     await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
     await writePersona("foodie", "美食达人", ["小红书", "美食"]);
 
+    // Turn 1: first call → returns waitingForOrchestrationStep0 with Step 0 prompt
     const started = await handleReviewContentWizard(skillsDir, tmpDir, {
       userMessage: "盒马菌菇星球，贵妇粉耳，颜值粉嫩",
     });
 
     const text = textOf(started);
-    assert.ok(text.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
+    assert.ok(text.includes("[SYSTEM PROTOCOL] 职业黑粉逆向解码协议"));
     assert.ok(text.includes("待测文案"));
-    assert.ok(text.includes("currentStep: waitingForOrchestrationAudit"));
+    assert.ok(text.includes("currentStep: waitingForOrchestrationStep0"));
 
+    // Turn 1 submit: host AI returns Step 0 JSON → system runs web search → returns waitingForOrchestrationAudit
     const sessionId = extractSessionId(text);
+    const afterStep0 = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        blackAtoms: ["粉耳", "贵妇", "颜值粉嫩"],
+        attackCandidates: [
+          { keyword: "粉耳", attackChain: "粉耳 → 去语境化 → 低俗联想 → 舆情发酵" },
+        ],
+      }),
+    });
+
+    const afterStep0Text = textOf(afterStep0);
+    assert.ok(afterStep0Text.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
+    assert.ok(afterStep0Text.includes("currentStep: waitingForOrchestrationAudit"));
+
+    // Turn 2 submit: host AI returns audit dimensions JSON → proceeds to inventory check
     const parsed = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: JSON.stringify({
@@ -323,7 +340,7 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(parsedText.includes("currentStep: waitingForReviewDecision"));
     assert.ok(parsedText.includes("宿主编排初审完成"));
 
-    // Step 3: confirm review → proceeds to reviewer confirmation
+    // Step: confirm review → proceeds to reviewer confirmation
     const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始复审",
@@ -331,6 +348,7 @@ describe("handleReviewContentWizard state machine", () => {
     const confirmText = textOf(confirmed);
     assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
   });
+
 
   it("uses orchestration-style isolated matrix prompts for sampling system auditors", async () => {
     writePrdRules();
@@ -353,12 +371,16 @@ describe("handleReviewContentWizard state machine", () => {
     });
 
     assert.ok(calls.length >= 1);
-    assert.ok(calls[0].systemPrompt.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
-    assert.ok(calls[0].systemPrompt.includes("真实隔离 LLM 沙盒"));
-    assert.ok(calls[0].systemPrompt.includes("严格遵守审查边界"));
-    assert.ok(calls[0].messages[0].content.includes("Step 0：职业黑粉逆向全局解码"));
-    assert.ok(calls[0].messages[0].content.includes("Step 1：当前维度沙盒推理"));
-    assert.ok(calls[0].messages[0].content.includes("本地规则命中"));
-    assert.ok(calls[0].messages[0].content.includes("粉耳 -> 木耳"));
+    // First call is the isolated global Step 0 decoding call
+    assert.ok(calls[0].systemPrompt.includes("[SYSTEM PROTOCOL] 职业黑粉逆向解码协议"));
+    assert.ok(calls[0].messages[0].content.includes("全局解码"));
+    // Sandbox calls follow (index >= 1): verify correct protocol headers
+    const sandboxCall = calls.find((c) => c.systemPrompt.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
+    assert.ok(sandboxCall, "Expected a sandbox audit call");
+    assert.ok(sandboxCall!.systemPrompt.includes("真实隔离 LLM 沙盒"));
+    assert.ok(sandboxCall!.systemPrompt.includes("严格遵守审查边界"));
+    // Sandbox message should have local rule findings injected
+    assert.ok(sandboxCall!.messages[0].content.includes("本地规则引擎预警"));
+    assert.ok(sandboxCall!.messages[0].content.includes("粉耳 -> 木耳"));
   });
 });
