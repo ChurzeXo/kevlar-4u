@@ -21,7 +21,7 @@ import {
 import { transformFindingsToFocusTopics, formatFocusTopicsForPrompt } from "../focusTopicTransform.js";
 import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
 import { buildKevlarRiskDirective, buildPseudoParallelDirective } from "../riskPrompt.js";
-import { buildCoreReasoningFramework, buildCommonRiskRules, buildCompactAuditorCoT } from "../../prompts/reviewWizard.js";
+import { buildCoreReasoningFramework, buildCoreFrameworkSteps, buildCommonRiskRules, buildCompactAuditorCoT } from "../../prompts/reviewWizard.js";
 import { buildRSTSection } from "../parallel.js";
 
 const MODE: ExecutionMode = "orchestration";
@@ -293,12 +293,13 @@ ${endMarker}`;
     rstSection = buildRSTSection(persona.meta.rst);
   }
 
-  // Compact CoT for RST personas (dimension-specific reasoning method)
+  // Core framework steps + compact CoT for RST personas (dimension-specific reasoning method)
   let compactCoTSection = "";
   if (persona.meta.rst) {
+    const coreSteps = buildCoreFrameworkSteps();
     const compactCoT = buildCompactAuditorCoT(persona);
     if (compactCoT) {
-      compactCoTSection = `\n\n## 🧠 维度专项推理方法\n\n${compactCoT}`;
+      compactCoTSection = `\n\n## 🧠 维度专项推理方法\n\n${coreSteps}\n\n${compactCoT}`;
     }
   }
 

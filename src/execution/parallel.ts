@@ -17,7 +17,7 @@ import { logger } from "../utils/logger.js";
 import { getErrorInfo } from "../utils/observability.js";
 import { wrapContent } from "../utils/sanitize.js";
 import { buildKevlarRiskDirective } from "./riskPrompt.js";
-import { buildCoreReasoningFramework, buildCommonRiskRules, buildCompactAuditorCoT } from "../prompts/reviewWizard.js";
+import { buildCoreReasoningFramework, buildCoreFrameworkSteps, buildCompactAuditorCoT } from "../prompts/reviewWizard.js";
 
 interface ParallelExecutionOptions {
   mode: ExecutionMode;
@@ -130,25 +130,22 @@ export function augmentSystemPrompt(
   // ① Core reasoning framework (职业黑粉/最恶毒评论区模拟模式) - semantic baseline
   parts.push(buildCoreReasoningFramework());
 
-  // ② Common risk rules (禁止修改建议等约束) - semantic baseline
-  parts.push(buildCommonRiskRules());
-
-  // ③ Persona identity (original system prompt)
+  // ② Persona identity (original system prompt)
   parts.push(persona.systemPrompt);
 
-  // ④ Persona context (structured metadata: age, gender, interests, etc.)
+  // ③ Persona context (structured metadata: age, gender, interests, etc.)
   const contextDirective = buildPersonaContextDirective(persona.meta);
   if (contextDirective.trim().length > "## 👤 评审员画像\n\n以下是你作为评审员的身份属性，请严格以此身份进行评审：\n".length) {
     parts.push(contextDirective);
   }
 
-  // ⑤ RST section — archetype description (if RST configured)
+  // ④ RST section — archetype description (if RST configured)
   if (persona.meta.rst) {
     const rstSection = buildRSTSection(persona.meta.rst);
     if (rstSection) parts.push(rstSection);
   }
 
-  // ⑥ Focus Topics — filtered + translated pre-audit findings (if available and RST configured)
+  // ⑤ Focus Topics — filtered + translated pre-audit findings (if available and RST configured)
   if (preAuditReport && persona.meta.rst) {
     const focusTopics = transformFindingsToFocusTopics(preAuditReport, persona.meta.rst);
     if (focusTopics.length > 0) {
@@ -156,24 +153,25 @@ export function augmentSystemPrompt(
     }
   }
 
-  // ⑦ Offensive dimensions only (defensive dimensions are handled by system auditors in pre-audit)
+  // ⑥ Offensive dimensions only (defensive dimensions are handled by system auditors in pre-audit)
   const offensiveDirective = buildOffensiveSystemDirective(dimsConfig);
   if (offensiveDirective) {
     parts.push(offensiveDirective);
   }
 
-  // ⑧ Dimension-specific reasoning method (if persona has RST config, inject compact CoT)
+  // ⑦ Dimension-specific reasoning method (if persona has RST config, inject core steps + compact CoT)
   if (persona.meta.rst) {
+    const coreSteps = buildCoreFrameworkSteps();
     const compactCoT = buildCompactAuditorCoT(persona);
     if (compactCoT) {
-      parts.push(`## 🧠 维度专项推理方法\n\n${compactCoT}`);
+      parts.push(`## 🧠 维度专项推理方法\n\n${coreSteps}\n\n${compactCoT}`);
     }
   }
 
-  // ⑨ PRD red-team association method
+  // ⑧ PRD red-team association method (includes common risk rules + sandbox isolation)
   parts.push(buildKevlarRiskDirective());
 
-  // ⑩ Tone constraint (last — constrains output style)
+  // ⑨ Tone constraint (last — constrains output style)
   if (persona.meta.tone) {
     const toneDirective = buildToneDirective(persona.meta.tone);
     if (toneDirective) {

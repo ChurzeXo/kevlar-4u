@@ -83,7 +83,8 @@ export const PRE_AUDIT_OUTPUT_FORMAT = [
 ].join("\n");
 
 export function buildSandboxSections(systemAuditors: Persona[]): string {
-  return systemAuditors
+  const coreFramework = buildCoreFrameworkSteps();
+  const sandboxBlocks = systemAuditors
     .map((auditor, index) => {
       const sandbox = auditor.meta.sandbox || {
         responsibility: "暂无配置",
@@ -106,6 +107,8 @@ export function buildSandboxSections(systemAuditors: Persona[]): string {
       ].join("\n");
     })
     .join("\n\n");
+
+  return coreFramework + "\n\n" + sandboxBlocks;
 }
 
 export function buildCommonRiskRules(): string {
@@ -146,16 +149,11 @@ export function buildCoreReasoningFramework(): string {
 }
 
 /**
- * Compact CoT checklist for each system auditor dimension.
- * Derived from each auditor's systemPrompt, adapted for single-inference
- * "matrix filling" mode — pure checklist execution, no role-playing.
+ * Core cold-read steps injected once before all sandbox sections.
+ * Extracted from buildCompactAuditorCoT to avoid N-fold duplication.
  */
-export function buildCompactAuditorCoT(auditor: Persona): string {
-  const id = auditor.meta.id;
-  const name = auditor.meta.name;
-
-  // 核心认知框架注入到每个维度的第一步
-  const coreFramework = [
+export function buildCoreFrameworkSteps(): string {
+  return [
     `【第一步：职业黑粉冷读（必须先于一切具体检查执行）】`,
     `以职业黑粉身份**冷读**整段内容，完成以下强制思考：`,
     ``,
@@ -167,13 +165,24 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
     `   原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向`,
     `   能推演出完整攻击链的，直接标记为 🔴 并进入 findings，不需要等到维度专项检查才确认。`,
   ].join("\n");
+}
 
-  // 各维度专项推理方法
+/**
+ * Compact CoT checklist for each system auditor dimension.
+ * Derived from each auditor's systemPrompt, adapted for single-inference
+ * "matrix filling" mode — pure checklist execution, no role-playing.
+ *
+ * NOTE: coreFramework is NOT included here. Callers should inject
+ * buildCoreFrameworkSteps() once before all sandbox sections.
+ */
+export function buildCompactAuditorCoT(auditor: Persona): string {
+  const id = auditor.meta.id;
+  const name = auditor.meta.name;
+
+  // 各维度专项推理方法（不含 coreFramework，由调用方统一注入一次）
   const DIMENSION_REASONING: Record<string, string[]> = {
     // ── 社会风险：网民直觉 ──────────────────────────────────────────────
     social_risk: [
-      coreFramework,
-      ``,
       `【第二步：社会风险深挖】`,
       ``,
       `□ 谁被说成是错的、谁被说成是惨的？——这段话在暗示谁是坏人、谁是受害者？`,
@@ -197,8 +206,6 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
 
     // ── 合规：网民直觉 ──────────────────────────────────────────────────
     legal_compliance: [
-      coreFramework,
-      ``,
       `【第二步：合规扫雷】`,
       ``,
       `□ 有没有"最好""第一""包治"这种字眼？——同行看到会直接截图举报的那种。`,
@@ -207,8 +214,6 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
 
     // ── 语境脱嵌：网民直觉 ─────────────────────────────────────────────
     context_distortion: [
-      coreFramework,
-      ``,
       `【第二步：去语境化测试】`,
       ``,
       `□ 同一个词在贴吧/微博/NGA 分别什么意思？——同一个词在不同平台可能是完全相反的意思。`,
@@ -217,8 +222,6 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
 
     // ── 网络文化：网民直觉 ─────────────────────────────────────────────
     network_culture_risk: [
-      coreFramework,
-      ``,
       `【第二步：圈层嗅觉】`,
       ``,
       `□ 有没有黑话、缩写、谐音、拼音首字母？——圈内人秒懂、圈外人一脸懵的那种。`,
@@ -240,8 +243,6 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
 
     // ── 事实完整性：网民直觉 ───────────────────────────────────────────
     factual_integrity: [
-      coreFramework,
-      ``,
       `【第二步：打假测试】`,
       ``,
       `□ 哪个数字被同行看到会直接截图打假？——夸大的数据、编造的案例，同行一眼看穿。`,
@@ -255,8 +256,6 @@ export function buildCompactAuditorCoT(auditor: Persona): string {
   if (!steps) {
     // 未知维度的通用框架
     return [
-      coreFramework,
-      ``,
       `【第二步：「${name}」维度专项推理】`,
       ``,
       `A. 基于「断章取义三步走」解码的结果，识别属于「${name}」维度的所有候选风险点`,
@@ -442,6 +441,7 @@ export function buildOrchestrationAuditPrompt(
   systemAuditors: Persona[],
   preAuditContext?: OrchestrationPreAuditContext,
 ): string {
+  const coreFramework = buildCoreFrameworkSteps();
   const sandboxSections = systemAuditors
     .map((auditor) => {
       return [
@@ -455,6 +455,8 @@ export function buildOrchestrationAuditPrompt(
       ].join("\n");
     })
     .join("\n\n");
+
+  const sandboxBlock = coreFramework + "\n\n" + sandboxSections;
 
   const deterministicContextSection = preAuditContext
     ? [
@@ -527,7 +529,7 @@ export function buildOrchestrationAuditPrompt(
     ``,
     `重要提示：每个沙盒的推理必须以 step0Result.attackCandidates 为输入，判断攻击点属于哪个维度并补充风险描述，不需要重新推演攻击链。`,
     ``,
-    sandboxSections,
+    sandboxBlock,
     ``,
     `### Step 2：交叉仲裁与噪音过滤`,
     ``,
@@ -802,6 +804,8 @@ export function buildIsolatedSystemAuditorMessage(
     `### Step 1：当前维度沙盒推理（基于 Step 0 输出）`,
     ``,
     `#### 沙盒：${auditor.meta.name}（${auditor.meta.id}）`,
+    ``,
+    buildCoreFrameworkSteps(),
     ``,
     buildCompactAuditorCoT(auditor),
     ``,

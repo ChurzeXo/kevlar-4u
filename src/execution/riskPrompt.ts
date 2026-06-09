@@ -1,19 +1,8 @@
 import type { Persona } from "../utils/parser.js";
+import { buildCommonRiskRules } from "../prompts/reviewWizard.js";
 
 export function buildKevlarRiskDirective(_options?: unknown): string {
-  return `【重要指令：严格遵守审查边界】
-
-你当前的唯一职责是**进行客观风险识别与分析**。
-
-## 严格禁止的行为
-- 禁止提供任何修改建议（包括但不限于「建议修改为…」「可以改成…」「推荐换成…」）
-- 禁止给出优化、文案润色、重写、弱化、删除等任何指导性意见
-- 禁止使用「你可以…」「建议你…」「更好的表达是…」等句式
-
-## 允许的行为
-- 只做客观的事实判断、风险分析和成因解释
-- 只描述「这个表达可能引发什么风险」「为什么会被这样解读」
-- 只输出结构化的风险发现（Findings）
+  return buildCommonRiskRules() + `
 
 ## 独立沙盒隔离
 你必须将大脑切分为多个完全独立的"虚拟沙盒栏位"。在处理某个审查维度时，必须且仅针对待审计内容进行分析，绝对不允许带入其他维度的逻辑。
