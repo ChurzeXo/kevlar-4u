@@ -318,7 +318,28 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(afterStep0Text.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
     assert.ok(afterStep0Text.includes("currentStep: waitingForOrchestrationAudit"));
 
-    // Turn 2 submit: host AI returns audit dimensions JSON → proceeds to inventory check
+    // Turn 2 submit: host AI returns audit dimensions JSON → proceeds to waitingForOrchestrationFinal
+    const turn2Response = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        dimensions: [
+          { id: "legal_compliance", name: "合规哨兵", findings: [], level: "🟢" },
+          {
+            id: "network_culture_risk",
+            name: "暗语破译",
+            findings: [{ keyword: "粉耳", trigger: "宿主编排确认", riskDescription: "存在黑话误读", propagationRisk: "评论区联想", suggestedLevel: "🟡" }],
+            level: "🟡",
+          },
+        ],
+        deltaRisks: { bareOnly: [], fullOnly: [], stable: [] },
+      }),
+    });
+
+    const turn2Text = textOf(turn2Response);
+    assert.ok(turn2Text.includes("currentStep: waitingForOrchestrationFinal"));
+    assert.ok(turn2Text.includes("交叉验证与最终仲裁"));
+
+    // Turn 3 submit: host AI returns final report JSON → proceeds to inventory check → waitingForReviewDecision
     const parsed = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: JSON.stringify({

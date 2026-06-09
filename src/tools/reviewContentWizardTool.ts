@@ -18,7 +18,8 @@ import {
   buildGlobalStep0Prompt,
   buildGlobalStep0Message,
   buildOrchestrationStep0Prompt,
-  buildOrchestrationPrompt,
+  buildOrchestrationAuditPrompt,
+  buildOrchestrationFinalizerPrompt,
   buildPreAuditFinalizerPrompt,
   buildIsolatedSystemAuditorMessage,
   buildIsolatedSystemAuditorPrompt,
@@ -26,7 +27,6 @@ import {
   type Step0Result,
 } from "../prompts/reviewWizard.js";
 import {
-  getWebContextForAuditor,
   isWebSearchSupported,
   type WebSearchConfig,
   type WebSearchFunction,
@@ -58,7 +58,7 @@ const ORCHESTRATION_STEP0_GUIDANCE = [
 ].join("\n");
 
 const ORCHESTRATION_AUDIT_GUIDANCE = [
-  "⚠️ **Turn 1 联网验证已完成，需要你执行 Turn 2：维度沙盒审计**",
+  "⚠️ **Turn 1 联网验证已完成，需要你执行 Turn 2：维度沙盒审计（仅 Steps 2-4）**",
   "",
   "请按以下步骤操作：",
   "1. 阅读下方协议（Step 0 结果已注入），执行各维度沙盒推理",
@@ -68,14 +68,39 @@ const ORCHESTRATION_AUDIT_GUIDANCE = [
   "**调用示例**：",
   "```",
   "review_content_wizard(",
-  '  sessionId="wizard-review-xxxxx",',
-  '  userMessage="{\\"dimensions\\":[...]}"',
+  '  sessionId=\"wizard-review-xxxxx\",',
+  '  userMessage=\"{\\\\\"dimensions\\\\\":[...],\\\\\"deltaRisks\\\\\":{...}}\"',
   ")",
   "```",
   "",
   "**注意事项**：",
   "- sessionId 必须与当前会话一致",
-  "- userMessage 必须是纯 JSON，包含 dimensions 数组",
+  "- userMessage 必须是纯 JSON，包含 dimensions 数组和 deltaRisks 对象",
+  "- 本轮不需要输出 summary/synergyFlags/worstCaseNarrative 等字段",
+  "",
+  "---",
+  "",
+].join("\n");
+
+const ORCHESTRATION_FINAL_GUIDANCE = [
+  "⚠️ **Turn 2 审计已完成，系统已完成 Step 5 合并 + Step 7 协同加权，需要你执行 Turn 3：交叉验证 + 最终仲裁**",
+  "",
+  "请按以下步骤操作：",
+  "1. 阅读下方协议，代码层确定性结果已注入",
+  "2. 执行 Step 6 交叉验证 + Step 8 最终仲裁",
+  "3. 输出纯 JSON（不含 Markdown），将 JSON 作为 userMessage 再次调用本工具（Turn 3 提交）",
+  "",
+  "**调用示例**：",
+  "```",
+  "review_content_wizard(",
+  '  sessionId=\"wizard-review-xxxxx\",',
+  '  userMessage=\"{\\\\\"dimensions\\\\\":[...],\\\\\"summary\\\\\":\\\\\"...\\\\\",\\\\\"worstCaseNarrative\\\\\":\\\\\"...\\\\\"}\"',
+  ")",
+  "```",
+  "",
+  "**注意事项**：",
+  "- sessionId 必须与当前会话一致",
+  "- userMessage 必须是纯 JSON，包含完整的 dimensions、summary、worstCaseNarrative 等字段",
   "",
   "---",
   "",
@@ -114,6 +139,7 @@ type ReviewWizardStep =
   | "systemAudit"
   | "waitingForOrchestrationStep0"  // 宿主编排 Turn 1: 等待 Step 0 JSON
   | "waitingForOrchestrationAudit"  // 宿主编排 Turn 2: 等待维度审计 JSON
+  | "waitingForOrchestrationFinal"  // 宿主编排 Turn 3: 等待交叉验证 + 最终仲裁 JSON
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
   | "waitingForReviewDecision"
@@ -134,6 +160,11 @@ interface ReviewWizardState {
   dimensions: DimensionsConfig;
   preAuditReport?: any;
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
+  orchestrationTurn2Results?: {  // Turn 2 审计结果，用于 Turn 3 的中间状态
+    mergedDimensions: PreAuditDimensionResult[];
+    synergyResult: { triggered: string[]; overallMultiplier: number; levelUpgrades: Array<{ dimension: string; from: string; to: string; reason: string }> };
+    deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] };
+  };
   webSearchConfig?: WebSearchConfig;
   webSearchDimensions?: string[]; // 记录哪些维度使用了联网搜索
 }
@@ -223,6 +254,9 @@ async function advanceWizard(
 
     case "waitingForOrchestrationAudit":
       return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
+
+    case "waitingForOrchestrationFinal":
+      return handleOrchestrationFinalResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
 
     case "checkPersonaInventory":
       return handleInventoryCheck(tmpDir, state, personas, samplingFn);
@@ -407,7 +441,7 @@ async function handleOrchestrationStep0Result(
     return toolResponse(
       state,
       ORCHESTRATION_AUDIT_GUIDANCE +
-        buildOrchestrationPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
+        buildOrchestrationAuditPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext),
     );
   } catch (err) {
     const info = getErrorInfo(err);
@@ -573,16 +607,6 @@ async function executeLlmSystemAudit(
   report.deltaRisks = deltaRisks;
   report.webSearchDimensions = webSearchDimensions;
 
-  // Apply synergy level upgrades
-  if (synergy.levelUpgrades.length > 0) {
-    for (const upgrade of synergy.levelUpgrades) {
-      const dim = report.dimensions.find((d) => d.id === upgrade.dimension);
-      if (dim && dim.level === upgrade.from) {
-        dim.level = upgrade.to;
-      }
-    }
-  }
-
   return report;
 }
 
@@ -619,16 +643,20 @@ async function runUnifiedWebSearch(
     keywordCount: keywords.length,
   });
 
+  const SEARCH_TIMEOUT_MS = 5000;
   const results = await Promise.all(
     keywords.map(async (keyword) => {
       try {
-        const result = await webSearchConfig.searchFn!(`${keyword} 含义 网络用语 梗`, {
-          maxResults: webSearchConfig.maxResults ?? 2,
-        });
-        if (!result.results || result.results.length === 0) return [keyword, ""] as const;
+        const result = await Promise.race<{ results: any[] } | null>([
+          webSearchConfig.searchFn!(`${keyword} 含义 网络用语 梗`, {
+            maxResults: webSearchConfig.maxResults ?? 2,
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), SEARCH_TIMEOUT_MS)),
+        ]);
+        if (!result?.results?.length) return [keyword, ""] as const;
         const ctx = result.results
           .slice(0, 2)
-          .map((r) => `- ${r.title}: ${r.snippet}`)
+          .map((r: any) => `- ${r.title}: ${r.snippet}`)
           .join("\n");
         return [keyword, ctx] as const;
       } catch {
@@ -722,8 +750,9 @@ async function handleOrchestrationAuditResult(
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
-    // Step 5: pure code-based merge (no web search in this path)
-    const mergedResults = normalizePreAuditDimensions(
+
+    // Step 5: code-layer deterministic merge
+    const mergedDimensions = normalizePreAuditDimensions(
       mergeLocalFindingsIntoAudits(
         normalizePreAuditDimensions(parsed.dimensions, systemAuditors),
         localFindings,
@@ -731,44 +760,127 @@ async function handleOrchestrationAuditResult(
       systemAuditors,
     );
 
+    // Step 7: code-layer deterministic synergy calculation
+    const dimensionLevels: Record<string, string> = {};
+    for (const dim of mergedDimensions) {
+      dimensionLevels[dim.id] = dim.level ?? "🟢";
+    }
+    const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
+    const synergyResult = calculateSynergy(dimensionLevels, timingFlag);
+
+    // Extract deltaRisks from Turn 2 (with fallback)
+    const deltaRisks = parsed.deltaRisks ?? buildEmptyDeltaRisks();
+
+    // Store Turn 2 results for Turn 3
+    state.orchestrationTurn2Results = {
+      mergedDimensions,
+      synergyResult,
+      deltaRisks,
+    };
+    state.step = "waitingForOrchestrationFinal";
+    await saveState(tmpDir, state);
+
+    logger.info("Orchestration Turn 2 processed, emitting Turn 3 prompt", {
+      event: "orchestration_turn2_processed",
+      dimensionCount: mergedDimensions.length,
+      synergyTriggered: synergyResult.triggered.length > 0,
+    });
+
+    // Emit Turn 3 prompt with code-layer deterministic results injected
+    const turn3Prompt = buildOrchestrationFinalizerPrompt(
+      state.content,
+      systemAuditors,
+      mergedDimensions,
+      synergyResult,
+      deltaRisks,
+      state.webSearchDimensions,
+    );
+
+    return toolResponse(
+      state,
+      ORCHESTRATION_FINAL_GUIDANCE + turn3Prompt,
+    );
+  } catch (err) {
+    const info = getErrorInfo(err);
+    return toolResponse(
+      state,
+      [
+        "❌ 无法解析宿主 AI 返回的 Turn 2 审计 JSON。",
+        `错误：${info.message}`,
+        "请让宿主 AI 仅返回包含 dimensions 和 deltaRisks 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
+      ].join("\n"),
+    );
+  }
+}
+
+/**
+ * Handle Orchestration Turn 3: cross-validation + final arbitration result.
+ */
+async function handleOrchestrationFinalResult(
+  tmpDir: string,
+  state: ReviewWizardState,
+  userPersonas: Persona[],
+  systemAuditors: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  try {
+    const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+    const turn2 = state.orchestrationTurn2Results;
+
+    if (!turn2) {
+      throw new Error("Missing Turn 2 intermediate results (orchestrationTurn2Results)");
+    }
+
+    // Build final report from Turn 3 output + code-layer deterministic results
+    const finalDimensions = normalizePreAuditDimensions(
+      parsed.dimensions ?? turn2.mergedDimensions,
+      systemAuditors,
+    );
+
+    // Apply synergy level upgrades (code-layer guarantee)
+    if (turn2.synergyResult.levelUpgrades.length > 0) {
+      for (const upgrade of turn2.synergyResult.levelUpgrades) {
+        const dim = finalDimensions.find((d) => d.id === upgrade.dimension);
+        if (dim && dim.level === upgrade.from) {
+          dim.level = upgrade.to;
+        }
+      }
+    }
+
     const report: PreAuditReport = {
-      dimensions: mergedResults,
-      summary: parsed.summary || summarizePreAuditResults(mergedResults),
+      dimensions: finalDimensions,
+      summary: parsed.summary || summarizePreAuditResults(finalDimensions),
       riskProfile: parsed.riskProfile ?? undefined,
-      synergyFlags: parsed.synergyFlags ?? undefined,
+      synergyFlags: {
+        triggered: turn2.synergyResult.triggered,
+        overallMultiplier: turn2.synergyResult.overallMultiplier,
+      },
       attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
-      deltaRisks: parsed.deltaRisks ?? buildEmptyDeltaRisks(),
+      deltaRisks: turn2.deltaRisks,
     };
-
-    // Phase 2.2: 宿主编排路径也执行协同风险加权计算
-    if (!report.synergyFlags) {
-      const dimensionLevels: Record<string, string> = {};
-      for (const dim of mergedResults) {
-
-        dimensionLevels[dim.id] = dim.level ?? "🟢";
-      }
-      const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
-      const synergy = calculateSynergy(dimensionLevels, timingFlag);
-      report.synergyFlags = {
-        triggered: synergy.triggered,
-        overallMultiplier: synergy.overallMultiplier,
-      };
-    }
 
     state.preAuditReport = report;
     state.orchestrationPreAuditContext = undefined;
+    state.orchestrationTurn2Results = undefined;
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
+
+    logger.info("Orchestration Turn 3 processed, pre-audit complete", {
+      event: "orchestration_turn3_processed",
+      dimensionCount: finalDimensions.length,
+    });
+
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {
     const info = getErrorInfo(err);
     return toolResponse(
       state,
       [
-        "❌ 无法解析宿主 AI 返回的系统初审 JSON。",
+        "❌ 无法解析宿主 AI 返回的 Turn 3 最终仲裁 JSON。",
         `错误：${info.message}`,
-        "请让宿主 AI 仅返回合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
+        "请让宿主 AI 仅返回包含 dimensions、summary、worstCaseNarrative 的合法 JSON，然后再次提交。",
       ].join("\n"),
     );
   }
@@ -1016,17 +1128,8 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
     });
   }
 
-  // ── Phase 0.1 升级：当 timing 命中时，将同一窗口内的 🟡 findings 升级为 🔴 ──
-  if (timingFinding) {
-    for (const finding of findings) {
-      if (finding.suggestedLevel === "🟡" && finding.source === "local_rule_engine") {
-        finding.suggestedLevel = "🔴";
-        finding.timingUpgrade = true;
-        finding.timingUpgradeReason = `时机窗口【${timingFinding.windowLabel}】命中，风险系数 ${timingFinding.riskMultiplier}x，自动升级`;
-      }
-    }
-  }
-
+  // 注意：时机窗口命中时的风险等级升级由 LLM 仲裁层（finalizePreAuditReport）决定，
+  // L1 本地层仅输出原始 findings，不自行定级。
   return findings;
 }
 
@@ -1075,70 +1178,7 @@ function mergeLocalFindingsIntoAudits(
   return merged;
 }
 
-/**
- * 🆕 Async version with web verification for high-risk local findings
- */
-async function mergeLocalFindingsIntoAuditsAsync(
-  audits: PreAuditDimensionResult[],
-  localFindings: any[],
-  // webSearchConfig kept in signature for backwards compatibility but no longer used
-  _webSearchConfig?: WebSearchConfig,
-): Promise<PreAuditDimensionResult[]> {
-  // Step 5 is now a pure synchronous code merge.
-  // All web searches were completed in Turn 1 (runUnifiedWebSearch).
-  return mergeLocalFindingsIntoAudits(audits, localFindings);
-}
 
-
-/**
- * 🆕 Verify a single local finding via web search
- */
-async function verifyLocalFinding(
-  finding: any,
-  searchFn: WebSearchFunction,
-): Promise<any> {
-  const keyword = finding.keyword;
-  if (!keyword) return finding;
-
-  // 搜索关键词的网络含义
-  const searchResult = await searchFn(`${keyword} 含义 网络用语 梗`, {
-    maxResults: 2,
-  });
-
-  if (!searchResult.results || searchResult.results.length === 0) {
-    return finding;
-  }
-
-  // 分析搜索结果，判断是否确认风险
-  const webContext = searchResult.results
-    .map((r) => `${r.title}: ${r.snippet}`)
-    .join("\n");
-
-  // 根据搜索结果更新 finding
-  const verifiedFinding = { ...finding };
-
-  // 添加联网验证信息
-  verifiedFinding.webVerification = {
-    verified: true,
-    searchResults: searchResult.results.slice(0, 2),
-    verifiedAt: Date.now(),
-  };
-
-  // 如果搜索结果表明关键词有特殊含义，增强风险描述
-  if (webContext.includes(keyword) && (
-    webContext.includes("低俗") ||
-    webContext.includes("暗语") ||
-    webContext.includes("黑话") ||
-    webContext.includes("梗")
-  )) {
-    verifiedFinding.riskDescription = [
-      finding.riskDescription,
-      `\n[联网验证] 该词在网络上有已知的特殊含义：${searchResult.results[0]?.snippet || ""}`,
-    ].join("");
-  }
-
-  return verifiedFinding;
-}
 
 function getFindingsLevel(findings: any[]): string {
   let level = "🟢";
