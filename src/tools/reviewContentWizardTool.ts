@@ -1036,7 +1036,7 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
 
   const findings: any[] = [];
 
-  // ── Phase 0.1：时机节点检测 ─────────────────────────────────────────
+  // ── 0.1 时机节点检测 ───────────────────────────────────────────────────
   // L1 本地层仅标记命中，不决定风险等级（由 LLM L2 层判定）
   const timingFinding = repo.checkTimingRisk(new Date(), content);
   if (timingFinding) {
@@ -1054,7 +1054,7 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
   }
   const seen = new Set<string>();
 
-  // ── Phase 0a：现有 2-4 gram 滑动窗口匹配 ──────────────────────────────
+  // ── 0.2 2-4 gram 滑动窗口匹配 ──────────────────────────────────────────
   const candidates = extractAuditCandidates(content);
 
   for (const candidate of candidates) {
@@ -1086,7 +1086,7 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
     }
   }
 
-  // ── Phase 0b：L2 结构模式检测 ─────────────────────────────────────────
+  // ── 0.3 L2 结构模式检测 ────────────────────────────────────────────────
   const structuralMatches = repo.checkStructuralPatterns(content);
   for (const sm of structuralMatches) {
     const key = `struct::${sm.patternId}::${sm.windowStart}`;
@@ -1110,7 +1110,7 @@ async function buildLocalRuleFindings(skillsDir: string, content: string): Promi
     });
   }
 
-  // ── Phase 0c：Multi-hop patterns 检测 ─────────────────────────────────
+  // ── 0.4 Multi-hop patterns 检测 ────────────────────────────────────────
   const multiHopMatches = repo.checkMultiHopPatterns(content);
   for (const mhm of multiHopMatches) {
     const key = `multihop::${mhm.category}::${mhm.pattern.join("-")}`;

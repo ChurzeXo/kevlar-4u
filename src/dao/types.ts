@@ -99,7 +99,7 @@ export interface RulesData {
   structural_patterns?: StructuralPattern[];
 }
 
-// ── Phase 0.1 时机节点 ────────────────────────────────────────────────────
+// ── 0.1 时机节点 ──────────────────────────────────────────────────────
 
 export interface SensitiveWindow {
   id: string;

@@ -344,7 +344,7 @@ export class LocalJsonRuleRepository implements IRuleRepository {
     return false;
   }
 
-  // ── Phase 0.1 时机节点检测 ────────────────────────────────────────────
+  // ── 0.1 时机节点检测 ────────────────────────────────────────────────────
 
   checkTimingRisk(date: Date, content: string): TimingFinding | null {
     for (const window of BUILTIN_SENSITIVE_WINDOWS) {
