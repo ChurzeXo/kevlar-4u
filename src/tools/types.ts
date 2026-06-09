@@ -11,6 +11,11 @@ export interface ToolDependencies {
   resolveSamplingFn: () => MultiTurnSamplingFunction | undefined;
   /** Resolve web search capability. Returns undefined when unsupported. */
   resolveWebSearchFn: () => WebSearchFunction | undefined;
+  /**
+   * Fire-and-forget progress notification to MCP client (via logging notification).
+   * Used to surface "审计进行中" hints without blocking execution.
+   */
+  sendProgress?: (message: string) => void;
 }
 
 export interface ToolModule {

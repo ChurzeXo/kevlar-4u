@@ -134,6 +134,20 @@ function buildToolDependencies(
       createFn: () => createMultiTurnSamplingFn(underlyingServer),
     }),
     resolveWebSearchFn: () => createDuckDuckGoSearchFn(),
+    sendProgress: (message: string) => {
+      try {
+        const result = underlyingServer.sendLoggingMessage({
+          level: "info",
+          logger: "kevlar-audit",
+          data: message,
+        });
+        if (result && typeof result.catch === 'function') {
+          result.catch(() => {/* fire-and-forget */});
+        }
+      } catch (err) {
+        // Ignore synchronous throws from MCP SDK if logging is not enabled
+      }
+    },
   };
 }
 

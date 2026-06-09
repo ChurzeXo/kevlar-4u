@@ -115,7 +115,7 @@ describe("handleReviewContentWizard state machine", () => {
 
     const startText = textOf(started);
     assert.ok(startText.includes("请选择下一步："));
-    assert.ok(startText.includes("1. 进入复审"));
+    assert.ok(startText.includes("1. 进入「复审」"));
     assert.ok(startText.includes("currentStep: waitingForReviewDecision"));
     assert.ok(!startText.includes("这份内容准备投放在哪些平台"));
     assert.ok(!startText.includes("Kevlar-4u 宿主辅助评测任务"));
