@@ -9,31 +9,52 @@ export interface Step0Finding {
 }
 
 export interface Step0Result {
-  blackAtoms: string[];           // 局部截取的黑料原子关键词
+  blackAtoms: string[]; // 局部截取的黑料原子关键词
   attackCandidates: Step0Finding[]; // 情绪重构后的攻击点（含攻击链）
 }
 
 export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 
-**功能**：基于"职业黑粉逆向解码"视角，对用户提交的文本进行攻击链推演与多维度社会语义风险评测。
+【核心功能】
+基于"职业黑粉逆向解码"视角，对用户提交的文本进行深度攻击链推演与多维度社会语义风险评测。
 
-**触发时机**：用户提交文本内容并要求评测风险、审稿、或类似表述时调用。
+【触发时机】
+当用户提交文本内容，并明确要求“评测风险”、“审稿”、“挑刺”、“排查翻车风险”或类似表述时调用。
 
-**输入**：纯文本（不支持图片或文档）
+【接口契约】
+- 输入：待评测的纯文本（不支持图片、音频或文档附件）。
+- 输出：包含结构化数据（表格、分析链）与初步排版的初审报告 payload。
 
-**输出**：结构化数据与初步排版的初审报告
+【核心控制生命周期】
+1. 捕获输入：调用本工具，传入待评测文本。
+2. 搬运渲染：工具返回初审报告后，你作为外壳，必须严格按照下方【排版与输出协议】向用户展示最终报告，不得私自截断或增删。
+3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进复审或平台检查流程。
 
-**核心控制流程**：
-1. 调用本工具，传入待评测文本
-2. 工具返回初审报告后，请你根据返回的内容向用户展示最终评测报告。
-3. 等待用户明确指令（复审/平台检查），严禁自动推进
+【排版与输出协议（硬性约束）】
+大模型在输出表现层时，必须严格执行以下四个格式区块，禁止调换顺序：
 
-**严格排版与发挥规则**：
-- 【固定底线】：你必须在回复的最开头，**原封不动地完整输出**工具返回的“综合风险等级”和“扫描结果（表格）”，绝对禁止修改表格的行列和内容。
-- 【自由发挥】：在表格之后，强烈鼓励你基于评测过程中产生的详细数据（如 attackChainAnalysis, worstCaseNarrative, synergyFlags），按照以下逻辑编排进行自然语言的深度推演与扩写：
-  🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 🚨 最坏情况推演。
-- 【禁止润色】：禁止提供任何修改建议、润色或重写原文的意见。
-- 【语气限制】：禁止使用「你可以…」「建议你…」等句式。`;
+1. [# 一级标题：风险等级]
+   - 必须在回复的绝对开头输出。
+   - 格式严格固定为：# [实际等级Emoji] [实际等级文字]（例如：# 🔴 红色高危）。
+   - 绝对禁止自行修改、替换或删减工具返回的 Emoji 和等级文字。
+
+2. [Markdown 表格：扫描结果]
+   - 紧接在风险等级标题下方输出。
+   - 必须原封不动、完整地渲染工具返回的"扫描结果（表格）"。
+   - 绝对禁止删减、修改、合并表格的任何行、列、表头或单元格内容。
+
+3. [自然语言：深度推演]
+   - 在表格下方，基于工具返回的详细字段（attackChainAnalysis, worstCaseNarrative, synergyFlags），严格按照以下逻辑链路进行自然语言的深度编排与扩写：
+     🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 🚨 最坏情况推演。
+
+4. [尾部状态询问]
+   - 在回复的最终末尾，必须单起一行，原样输出以下文本（连标点符号都不得更改）：
+     "是否需要进入「复审」或「模拟平台违禁限流排查」？"
+
+【绝对红线（反向约束）】
+- 禁止好心泛滥：绝对禁止提供任何修改建议、润色、重写意见或文案优化方向。
+- 禁止伪合规引导：绝对禁止使用「你可以…」、「建议你…」、「更好的表达是…」等任何具有建设性、引导性的祈使句式。
+- 保持冷酷：你只是一个检测器和协议搬运工，不是内容创作者。`;
 
 export const PRE_AUDIT_OUTPUT_FORMAT = [
   `{`,
@@ -577,7 +598,11 @@ export function buildOrchestrationFinalizerPrompt(
   userContent: string,
   systemAuditors: Persona[],
   mergedDimensions: Array<{ id: string; name: string; findings: any[]; level?: string }>,
-  synergyResult: { triggered: string[]; overallMultiplier: number; levelUpgrades: Array<{ dimension: string; from: string; to: string; reason: string }> },
+  synergyResult: {
+    triggered: string[];
+    overallMultiplier: number;
+    levelUpgrades: Array<{ dimension: string; from: string; to: string; reason: string }>;
+  },
   deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] },
   webSearchDimensions?: string[],
 ): string {
@@ -709,11 +734,7 @@ export function buildIsolatedSystemAuditorMessage(
         JSON.stringify(step0Result, null, 2),
         ``,
       ].join("\n")
-    : [
-        `## 【说明】`,
-        `Turn 1 全局解码不可用（降级模式），当前沙盒需自行执行 Step 0 全局解码。`,
-        ``,
-      ].join("\n");
+    : [`## 【说明】`, `Turn 1 全局解码不可用（降级模式），当前沙盒需自行执行 Step 0 全局解码。`, ``].join("\n");
 
   const localFindingsSection =
     localFindings.length > 0
