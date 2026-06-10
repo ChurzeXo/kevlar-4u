@@ -52,7 +52,7 @@ Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
 
 ### 2. 两阶段评审流水线
 
-**Stage 1 — 系统初审**：5 位专业系统审查员对以下五个防御维度进行扫描：
+**Stage 1 — 系统初审**：6 位专业系统审查员对以下六个防御维度进行扫描：
 
 | 审查员 (ID) | 审查焦点 |
 |---|---|
@@ -61,6 +61,7 @@ Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
 | 语境猎手 (`context_distortion`) | 截图脱语境化、断章取义、恶意曲解潜力 |
 | 暗语破译 (`network_culture_risk`) | 网络黑话撞车、亚文化用语、隐晦低俗含义 |
 | 事实判官 (`factual_integrity`) | 事实错误、常识背离、逻辑漏洞、数据可信度 |
+| 跨界判官 (`cross_lingual_distortion`) | 外文恶意机翻、谐音梗、文化水土不服、野生翻译风险 |
 
 当有独立 LLM 调用能力时（MCP Sampling / Direct API），每位审查员以独立 LLM 调用执行，隔离度最高。进入兜底模式（Orchestration）时，使用 **矩阵填空协议** 替代角色扮演——每个维度是一个独立 XML 沙盒槽位，填写完成后由仲裁沙盒交叉验证。详见[协议对比](#协议对比矩阵填空与伪并行与强化角色扮演)。
 
@@ -133,9 +134,9 @@ flowchart TD
   B --> C["Step 0a: 本地规则引擎匹配"]
   C --> D["Step 0b: LLM 全局解码（职业黑粉逆向分析）"]
   D --> E["Step 0c: 统一并发联网检索"]
-  E --> F["Step 1: 物理脱嵌（bare/full）"]
-  F --> G["Step 2: 裸文审计（2 个维度）"]
-  G --> H["Step 3: 全文审计（所有维度）"]
+  E --> F["Step 1: 物理脱嵌（original/bare/replacements）"]
+  F --> G["Step 2: 裸文审计（3 个维度）"]
+  G --> H["Step 3: 全文审计（6 个维度）"]
   H --> I["Step 4: Delta 分析"]
   I --> J["Step 5: 合并本地规则结果"]
   J --> K["Step 6: 交叉验证"]
@@ -200,9 +201,9 @@ flowchart TD
 
 | 模式 | 标识符 | 降级触发条件 | 初审策略 | 复审策略 |
 | --- | --- | --- | --- | --- |
-| MCP Sampling | `mcp_sampling` | 客户端声明 `sampling` 能力 | 5 个独立 LLM 调用，每维度一个 | 每人设独立 LLM 调用 |
-| 直接 API | `direct_api` | 设置了 `KEVLAR_API_KEY` 或 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | 5 个独立 LLM 调用，每维度一个 | 每人设独立 LLM 调用 |
-| 编排 (兜底) | `orchestration` | 既无 Sampling 又无 API Key | **V4 矩阵填空协议** — 单 prompt 含 5 个 XML 沙盒槽位 | **强化角色扮演** — 顺序执行人设，上下文重置门隔离 |
+| MCP Sampling | `mcp_sampling` | 客户端声明 `sampling` 能力 | 6 个独立 LLM 调用，每维度一个 | 每人设独立 LLM 调用 |
+| 直接 API | `direct_api` | 设置了 `KEVLAR_API_KEY` 或 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | 6 个独立 LLM 调用，每维度一个 | 每人设独立 LLM 调用 |
+| 编排 (兜底) | `orchestration` | 既无 Sampling 又无 API Key | **V4 矩阵填空协议** — 单 prompt 含 6 个 XML 沙盒槽位 | **强化角色扮演** — 顺序执行人设，上下文重置门隔离 |
 
 ### MCP Sampling 模式
 
@@ -265,7 +266,7 @@ flowchart TD
   I --> F
 ```
 
-**系统初审隔离**：使用 V4 矩阵填空协议——一次推理中模型填写结构化的 XML 沙盒槽位（每个防御维度一个），而非扮演独立角色。每个沙盒包含从审查员 `systemPrompt` 提取的维度专用 CoT 检查清单。然后 `<arbitration_sandbox>` 交叉验证和过滤噪声。最终输出纯 JSON `{ dimensions: [...] }`，摘要由代码自动生成以确保格式一致性。
+**系统初审隔离**：使用 V4 矩阵填空协议——一次推理中模型填写结构化的 XML 沙盒槽位（每个防御维度一个），而非扮演独立角色。每个沙盒包含从审查员 `systemPrompt` 提取的维度专用 CoT 检查清单（含跨语言曲解专项推理）。然后 `<arbitration_sandbox>` 交叉验证和过滤噪声。最终输出纯 JSON `{ dimensions: [...] }`，摘要由代码自动生成以确保格式一致性。
 
 **RST 复审隔离**：人设保留角色扮演模式（RST 需要"真实用户"风格的模拟），但每个人设块前插入 **上下文重置门**：`--- 隔离边界：上下文重置点。丢弃上一个审查员的全部推理和结论 ---`。这防止了后续人设软化或重复早期人设的长尾退化问题。
 
@@ -296,16 +297,16 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
-| 0a | 代码 | 本地规则匹配 — 时机节点检测、2-4 gram 滑动窗口、L2 结构模式 → `localFindings[]` |
-| 0b | LLM | 职业黑粉逆向全局解码 — 局部截取 + 情绪重构 → `step0Result { blackAtoms, attackCandidates }` |
-| 0c | 代码 | 统一并发联网检索 — 汇总本地命中词 + Step 0 词汇并发搜索（最大 10 词） → `webContextMap` |
-| 1 | 代码 | 物理脱嵌 — `stripContext()` 生成 bare（裸文）和 full（原文） |
-| 2 | LLM | 裸文审计 — `context_distortion` + `network_culture_risk` 两个维度，注入联网上下文 |
-| 3 | LLM | 全文审计 — 所有 5 个维度并行，每个维度独立推理，注入联网上下文 |
-| 4 | 代码 | Delta 分析 — 对比 bare vs full 发现，提取脱嵌放大型风险和全文特有风险 |
+| 0a | 代码 | 本地规则匹配 — 时机节点检测、2-4 gram 滑动窗口、L2 结构模式、Multi-hop patterns → `localFindings[]` |
+| 0b | LLM | 职业黑粉逆向全局解码 — 语言边界判定（wildTranslations）+ 局部截取 + 情绪重构 → `step0Result { wildTranslations, blackAtoms, attackCandidates }` |
+| 0c | 代码 | 统一并发联网检索 — 汇总本地命中词 + Step 0 词汇 + wildTranslations 复合搜索词并发搜索（最大 10 词） → `webContextMap` |
+| 1 | 代码 | 物理脱嵌 — `stripContext(raw, knownEntities?)` 生成 original、bare（裸文）和 replacements |
+| 2 | LLM | 裸文审计 — `context_distortion` + `network_culture_risk` + `cross_lingual_distortion` 三个维度，注入联网上下文 |
+| 3 | LLM | 全文审计 — 所有 6 个维度并行，每个维度独立推理，注入联网上下文 |
+| 4 | 代码 | Delta 分析 — 内联于 `executeLlmSystemAudit()`，对比 bare vs full 发现，提取脱嵌放大型风险和全文特有风险 |
 | 5 | 代码 | 合并 — 本地规则 findings 注入 `network_culture_risk` 维度（纯内存合并，无二次联网） |
-| 6 | LLM | 交叉验证 — 跨维度互验（network↔context, social→factual, legal→social） |
-| 7 | 代码 | 协同加权 — 检测跨维度组合风险，🟡→🔴 升级判定 |
+| 6 | LLM | 交叉验证 — 跨维度互验（6 对：network↔context, cross_lingual↔network, social→factual, legal→social） |
+| 7 | 代码 | 协同加权 — `calculateSynergy(dimensionLevels, extraFlags?)` 检测跨维度组合风险，🟡→🔴 升级判定 |
 | 8 | LLM | 最终仲裁 — 合并重复 findings、强化攻击链、生成 worstCaseNarrative |
 | 9 | 代码 | 结果展示 — 用户看到初审结果，选择进入复审或平台合规检查 |
 
@@ -316,19 +317,19 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 | Step 0a | `src/tools/reviewContentWizardTool.ts` | `buildLocalRuleFindings()` |
 | Step 0b | `src/prompts/reviewWizard.ts` | `buildGlobalStep0Prompt()` / `buildOrchestrationStep0Prompt()` |
 | Step 0c | `src/tools/reviewContentWizardTool.ts` | `runUnifiedWebSearch()` |
-| Step 1 | `src/utils/stripContext.ts` | `stripContext()` |
+| Step 1 | `src/utils/stripContext.ts` | `stripContext(raw, knownEntities?)` |
 | Step 2-3 | `src/tools/reviewContentWizardTool.ts` | `runSystemAuditors()` |
-| Step 4 | `src/tools/reviewContentWizardTool.ts` | `executeLlmSystemAudit()` |
+| Step 4 | `src/tools/reviewContentWizardTool.ts` | 内联于 `executeLlmSystemAudit()` |
 | Step 5 | `src/tools/reviewContentWizardTool.ts` | `mergeLocalFindingsIntoAudits()` |
 | Step 6 | `src/tools/reviewContentWizardTool.ts` | `crossValidateRiskyDimensions()` |
-| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy()` |
+| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy(dimensionLevels, extraFlags?)` |
 | Step 8 | `src/tools/reviewContentWizardTool.ts` | `finalizePreAuditReport()` / `buildPreAuditFinalizerPrompt()` |
 
 ### 联网验证说明
 
 联网搜索被集中在 **Turn 1（第一轮交互）** 统一进行，避免在沙盒执行和本地规则合并阶段多次发起碎片化的串行请求。
 
-- **Step 0c 统一并发联网检索**：收集本地规则命中的高危词汇 + Step 0 全局解码输出的 `blackAtoms` 和 `attackCandidates` 关键词，通过 `runUnifiedWebSearch()` 并发调用 DuckDuckGo 即时搜索 API（最大并发 10 词，超时 5000ms 降级返回空结果）。
+- **Step 0c 统一并发联网检索**：收集本地规则命中的高危词汇 + Step 0 全局解码输出的 `blackAtoms` 和 `attackCandidates` 关键词 + `wildTranslations` 复合搜索词（`{原文} {野生机翻} 梗`），通过 `runUnifiedWebSearch()` 并发调用 DuckDuckGo 即时搜索 API（最大并发 10 词，超时 5000ms 降级返回空结果）。
 - **Step 2-3 联网上下文注入**：`runSystemAuditors()` 根据 Step 0c 的搜索结果，为每个系统审计员构建 `webContext` 文本并注入审计提示词，审计员无需自行联网。
 - **Step 5 纯内存合并**：`mergeLocalFindingsIntoAudits()` 只需将本地规则匹配结果同步合并至最终审计维度，无需发起任何网络请求。
 
@@ -445,7 +446,7 @@ kevlar-4u/
 │   ├── registry.ts                        # MCP 客户端检测
 │   └── setup.ts                           # 零配置安装脚本
 ├── skills/                                # 评审员人设库
-│   ├── auditors.json                      # 系统初审员（5 位）
+│   ├── auditors.json                      # 系统初审员（6 位）
 │   ├── xiaohongshu.json                   # 平台：小红书
 │   ├── zhihu.json                         # 平台：知乎
 │   ├── wechat_official.json               # 平台：微信公众号

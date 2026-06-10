@@ -8,6 +8,7 @@ Step 0a: 本地规则引擎
   │  0.1 时机节点检测 ──────────────► timingFinding?
   │  0.2 2-4 gram 滑动窗口匹配 ────► variantMatches[]
   │  0.3 L2 结构模式检测 ──────────► structuralMatches[]
+  │  0.4 Multi-hop patterns 检测 ──► multiHopMatches[]
   │
   │  输出：localFindings[]
   ▼
@@ -35,9 +36,10 @@ Step 0c: 统一并发联网检索
   ▼
 Step 1: 物理脱嵌
 ═══════════════════════════════════════════════════════════════════
-  │  stripContext(content)
+  │  stripContext(raw, knownEntities?)
+  │  ├─ original（原文）
   │  ├─ bare（裸文：去掉品牌/链接/格式）
-  │  └─ full（原文）
+  │  └─ replacements（替换映射表）
   ▼
 Step 2: 裸文审计
 ═══════════════════════════════════════════════════════════════════
@@ -61,6 +63,7 @@ Step 3: 全文审计
   ▼
 Step 4: Delta 分析
 ═══════════════════════════════════════════════════════════════════
+  │  （内联逻辑于 executeLlmSystemAudit() 中）
   │  对比 bareFindings vs auditorResults
   │  ├─ bareOnly  ──► 脱嵌放大型风险（仅有裸文）
   │  ├─ fullOnly  ──► 全文特有风险
@@ -78,9 +81,9 @@ Step 5: 合并 (无联网验证)
   ▼
 Step 6: 交叉验证
 ═══════════════════════════════════════════════════════════════════
-  │  对有风险的维度进行互验：
+  │  对有风险的维度进行互验（6 对双向/单向验证）：
   │  ├─ network_culture_risk ◄──► context_distortion
-  │  ├─ cross_lingual_distortion ◄──► network_culture_risk  ◄── 新增
+  │  ├─ cross_lingual_distortion ◄──► network_culture_risk
   │  ├─ social_risk ──────────► factual_integrity
   │  └─ legal_compliance ────► social_risk
   │
@@ -88,7 +91,7 @@ Step 6: 交叉验证
   ▼
 Step 7: 协同加权
 ═══════════════════════════════════════════════════════════════════
-  │  calculateSynergy(dimensionLevels, timingFlag)
+  │  calculateSynergy(dimensionLevels, extraFlags?)
   │  ├─ 检测跨维度组合风险
   │  └─ 🟡 → 🔴 升级判定
   │
@@ -119,7 +122,7 @@ Step 9: 结果展示
 | 0a | 代码 | 本地规则匹配 (localFindings) |
 | 0b | LLM | 职业黑粉逆向全局解码：①语言边界判定 + 野生机翻提取（wildTranslations）、②提取黑料原子、③情绪重构 |
 | 0c | 代码 | 统一并发联网检索 (对 localFindings + Step 0 关键词 **+ wildTranslations 复合搜索词** 统一搜索) |
-| 1 | 代码 | 文本脱嵌处理 (物理脱嵌 bare/full) |
+| 1 | 代码 | 文本脱嵌处理 (stripContext: original/bare/replacements) |
 | 2 | LLM | 裸文审计（3个维度，含跨语言曲解，注入 Turn 1 联网上下文） |
 | 3 | LLM | 全文审计（**6 个维度**，含新增跨界判官，注入 Turn 1 联网上下文） |
 | 4 | 代码 | Delta 信号提取 |
@@ -136,12 +139,12 @@ Step 9: 结果展示
 | Step 0a | `src/tools/reviewContentWizardTool.ts` | `buildLocalRuleFindings()` |
 | Step 0b | `src/prompts/reviewWizard.ts` | `buildGlobalStep0Prompt()` / `buildOrchestrationStep0Prompt()` |
 | Step 0c | `src/tools/reviewContentWizardTool.ts` | `runUnifiedWebSearch()` |
-| Step 1 | `src/utils/stripContext.ts` | `stripContext()` |
+| Step 1 | `src/utils/stripContext.ts` | `stripContext(raw, knownEntities?)` |
 | Step 2-3 | `src/tools/reviewContentWizardTool.ts` | `runSystemAuditors()` |
-| Step 4 | `src/tools/reviewContentWizardTool.ts` | `executeLlmSystemAudit()` |
+| Step 4 | `src/tools/reviewContentWizardTool.ts` | 内联于 `executeLlmSystemAudit()` |
 | Step 5 | `src/tools/reviewContentWizardTool.ts` | `mergeLocalFindingsIntoAudits()` |
 | Step 6 | `src/tools/reviewContentWizardTool.ts` | `crossValidateRiskyDimensions()` |
-| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy()` |
+| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy(dimensionLevels, extraFlags?)` |
 | Step 8 | `src/tools/reviewContentWizardTool.ts` | `finalizePreAuditReport()` / `buildPreAuditFinalizerPrompt()` |
 
 ## 联网验证说明

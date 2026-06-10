@@ -486,12 +486,19 @@ export function buildOrchestrationAuditPrompt(
   preAuditContext?: OrchestrationPreAuditContext,
 ): string {
   const coreFramework = buildCoreFrameworkSteps();
+  const step0Result = preAuditContext?.step0Result;
   const sandboxSections = systemAuditors
     .map((auditor) => {
+      const crossLingualFastTrack =
+        auditor.meta.id === "cross_lingual_distortion" &&
+        (!step0Result?.wildTranslations || step0Result.wildTranslations.length === 0)
+          ? `\n\n⚡ 快速通道：wildTranslations 为空数组（文案无外文），跨语言曲解维度直接判定为 🟢 无风险，跳过后续推理。`
+          : "";
       return [
         `#### 沙盒：${auditor.meta.name}（${auditor.meta.id}）`,
         ``,
         buildCompactAuditorCoT(auditor),
+        crossLingualFastTrack,
         ``,
         `该维度分析结束后输出 JSON 发现：keyword（风险词汇）、trigger（触发原因）、`,
         `riskDescription（风险说明）、propagationRisk（传播风险）、suggestedLevel（🔴/🟡）。`,
@@ -857,7 +864,9 @@ export function buildIsolatedSystemAuditorMessage(
     ``,
     buildCompactAuditorCoT(auditor),
     ``,
-    `重要提示：当前沙盒的推理必须以 Step 0 的输出（attackCandidates）为输入，判断攻击点是否属于本维度并补充风险描述，不需要重新推演攻击链。`,
+    auditor.meta.id === "cross_lingual_distortion" && (!step0Result?.wildTranslations || step0Result.wildTranslations.length === 0)
+      ? `⚡ 快速通道：wildTranslations 为空数组（文案无外文），跨语言曲解维度直接判定为 🟢 无风险，跳过后续推理。`
+      : `重要提示：当前沙盒的推理必须以 Step 0 的输出（attackCandidates）为输入，判断攻击点是否属于本维度并补充风险描述，不需要重新推演攻击链。`,
     ``,
     `### Step 2：单沙盒仲裁与噪音过滤`,
     ``,
