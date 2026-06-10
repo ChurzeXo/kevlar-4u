@@ -197,6 +197,8 @@ function mapAuditorToDimensions(auditorId: string): OffensiveDimensionId[] {
 		network_culture_risk: ["differentiation", "virality_potential"],
 		factual_integrity: ["information_gap", "narrative_structure"],
 		social_risk: ["emotional_resonance", "virality_potential"],
+		social_risk_ethics: ["emotional_resonance", "virality_potential"],
+		cross_lingual_distortion: ["differentiation", "virality_potential"],
 	};
 	return mapping[auditorId] || [];
 }

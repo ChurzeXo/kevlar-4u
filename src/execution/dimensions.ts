@@ -1044,8 +1044,8 @@ export const RST_TRIGGERS: Record<TriggerId, TriggerDefinition> = {
 		label: "黑话密度敏感",
 		category: "expression",
 		description: "讨厌 jargon，反感行业术语堆砌",
-		retainedAuditors: ["network_culture_risk"],
-		retainedPatterns: ["黑话", "术语", "行话", "缩写"],
+		retainedAuditors: ["network_culture_risk", "cross_lingual_distortion"],
+		retainedPatterns: ["黑话", "术语", "行话", "缩写", "外文", "英文", "谐音", "机翻"],
 	},
 	ai_writing: {
 		id: "ai_writing",
@@ -1068,8 +1068,8 @@ export const RST_TRIGGERS: Record<TriggerId, TriggerDefinition> = {
 		label: "装腔感敏感",
 		category: "expression",
 		description: "反感故作深刻，讨厌'故意高级'",
-		retainedAuditors: ["social_risk"],
-		retainedPatterns: ["装", "做作", "故作", "矫情"],
+		retainedAuditors: ["social_risk", "cross_lingual_distortion"],
+		retainedPatterns: ["装", "做作", "故作", "矫情", "外文", "英文", "洋文"],
 	},
 	clickbait: {
 		id: "clickbait",
@@ -1116,8 +1116,8 @@ export const RST_TRIGGERS: Record<TriggerId, TriggerDefinition> = {
 		label: "身份政治敏感",
 		category: "social_issue",
 		description: "对群体标签敏感",
-		retainedAuditors: ["social_risk", "network_culture_risk"],
-		retainedPatterns: ["身份", "群体", "标签", "对立"],
+		retainedAuditors: ["social_risk", "network_culture_risk", "cross_lingual_distortion"],
+		retainedPatterns: ["身份", "群体", "标签", "对立", "外文", "英文", "翻译"],
 	},
 	corporate_responsibility: {
 		id: "corporate_responsibility",

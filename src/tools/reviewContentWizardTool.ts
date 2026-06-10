@@ -542,10 +542,13 @@ async function executeLlmSystemAudit(
   emit("🔍 [1/5] 正在进行联网关键词验证（Step 0c）...");
   const webContextMap = await runUnifiedWebSearch(step0Result, localFindings, webSearchConfig);
 
-  // ── Turn 2a: Bare text audit (context_distortion + network_culture_risk) ──
+  // ── Turn 2a: Bare text audit (context_distortion + network_culture_risk + cross_lingual_distortion) ──
   emit("🧪 [2/5] 正在执行裸文维度审计（Step 2）...");
   const bareOnlyAuditors = systemAuditors.filter(
-    (a) => a.meta.id === "context_distortion" || a.meta.id === "network_culture_risk",
+    (a) =>
+      a.meta.id === "context_distortion" ||
+      a.meta.id === "network_culture_risk" ||
+      a.meta.id === "cross_lingual_distortion",
   );
   const bareFindings =
     bareOnlyAuditors.length > 0
@@ -671,6 +674,13 @@ async function runUnifiedWebSearch(
   }
   for (const finding of localFindings) {
     if (finding.keyword && typeof finding.keyword === "string") keywordSet.add(finding.keyword);
+  }
+
+  // Build composite search queries from wildTranslations for cross-lingual risk detection
+  for (const wt of step0Result?.wildTranslations ?? []) {
+    if (wt.original && wt.wildTranslation) {
+      keywordSet.add(`${wt.original} ${wt.wildTranslation} 梗`);
+    }
   }
 
   const keywords = [...keywordSet].slice(0, 10); // cap at 10 concurrent searches
@@ -1251,6 +1261,18 @@ const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
     question:
       '以下内容被「合规哨兵」标记为合规风险。请从「社会风险」角度交叉验证：这些合规问题是否可能在当前社会语境中触发负面的舆论情绪对立？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
   },
+  {
+    source: "cross_lingual_distortion",
+    validator: "network_culture_risk",
+    question:
+      '以下内容被「跨界判官」标记为跨语言曲解风险。请从「网络文化」角度进行交叉验证：这些外文词在中文互联网上是否有现成的恶搞梗、表情包或黑话含义？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
+  },
+  {
+    source: "network_culture_risk",
+    validator: "cross_lingual_distortion",
+    question:
+      '以下内容被「暗语破译」标记为网络文化风险。请从「跨语言曲解」角度进行交叉验证：这些风险词是否涉及外文谐音、恶意机翻或文化水土不服？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
+  },
 ];
 
 async function crossValidateRiskyDimensions(
@@ -1365,7 +1387,7 @@ const CHINESE_DIMENSION_NAMES: Record<string, string> = {
   network_culture_risk: "网络文化",
   factual_integrity: "事实",
   social_risk: "社会风险",
-  cross_lingual_distortion: "跨语言",
+  cross_lingual_distortion: "跨语言曲解",
   local_rule_engine: "本地规则",
 };
 

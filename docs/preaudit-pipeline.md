@@ -28,6 +28,7 @@ Step 0c: 统一并发联网检索
 ═══════════════════════════════════════════════════════════════════
   │  runUnifiedWebSearch(step0Result, localFindings)
   │  ├─ 汇总本地命中词 + Step 0 词汇并发搜索
+  │  ├─ wildTranslations → "{原文} {野生机翻} 梗" 复合搜索词
   │  └─ 并发度限制：最大 10 个词
   │
   │  输出：webContextMap
@@ -40,7 +41,7 @@ Step 1: 物理脱嵌
   ▼
 Step 2: 裸文审计
 ═══════════════════════════════════════════════════════════════════
-  │  runSystemAuditors(bare, [context_distortion, network_culture_risk])
+  │  runSystemAuditors(bare, [context_distortion, network_culture_risk, cross_lingual_distortion])
   │  ├─ 注入从 Turn 1c 获取的对应 webContextMap
   │
   │  输出：bareFindings[]
@@ -79,6 +80,7 @@ Step 6: 交叉验证
 ═══════════════════════════════════════════════════════════════════
   │  对有风险的维度进行互验：
   │  ├─ network_culture_risk ◄──► context_distortion
+  │  ├─ cross_lingual_distortion ◄──► network_culture_risk  ◄── 新增
   │  ├─ social_risk ──────────► factual_integrity
   │  └─ legal_compliance ────► social_risk
   │
@@ -118,7 +120,7 @@ Step 9: 结果展示
 | 0b | LLM | 职业黑粉逆向全局解码：①语言边界判定 + 野生机翻提取（wildTranslations）、②提取黑料原子、③情绪重构 |
 | 0c | 代码 | 统一并发联网检索 (对 localFindings + Step 0 关键词 **+ wildTranslations 复合搜索词** 统一搜索) |
 | 1 | 代码 | 文本脱嵌处理 (物理脱嵌 bare/full) |
-| 2 | LLM | 裸文审计（2个维度，注入 Turn 1 联网上下文） |
+| 2 | LLM | 裸文审计（3个维度，含跨语言曲解，注入 Turn 1 联网上下文） |
 | 3 | LLM | 全文审计（**6 个维度**，含新增跨界判官，注入 Turn 1 联网上下文） |
 | 4 | 代码 | Delta 信号提取 |
 | 5 | 代码 | 结果合并 (无二次联网验证，纯内存合并) |

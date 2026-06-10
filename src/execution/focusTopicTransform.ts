@@ -41,6 +41,7 @@ const SYSTEM_AUDITOR_LABELS: Record<string, string> = {
 	context_distortion: "语境脱嵌与恶意曲解",
 	factual_integrity: "事实硬伤与常识背离",
 	network_culture_risk: "网络文化风险",
+	cross_lingual_distortion: "跨语言曲解与恶意机翻",
 };
 
 const MATRIX_TRANSLATION_MAP: Record<string, MatrixTranslationFn> = {
@@ -53,7 +54,9 @@ const MATRIX_TRANSLATION_MAP: Record<string, MatrixTranslationFn> = {
 	factual_integrity: (paragraph) =>
 		`该文本在第 ${paragraph} 段的推论存在逻辑漏洞。请发挥你找茬的本能，把这个逻辑死角揪出来，并用最直接的语言进行尖锐吐槽。`,
 	network_culture_risk: (paragraph) =>
-		`该文本在第 ${paragraph} 段疑似使用了未脱敏的网络黑话或烂梗。请站在你的圈层视角，审查作者是否在“盲目蹭热度”，并给出你的排斥性评论。`,
+		`该文本在第 ${paragraph} 段疑似使用了未脱敏的网络黑话或烂梗。请站在你的圈层视角，审查作者是否在「盲目蹭热度」，并给出你的排斥性评论。`,
+	cross_lingual_distortion: (paragraph) =>
+		`该文本在第 ${paragraph} 段包含外文表达，初审检测出存在被恶意汉化或野生翻译的风险。请以最挑剔的网民视角，审查这些外文是否容易被曲解成低俗梗或引发群嘲。`,
 };
 
 const TRANSLATION_MAP: Record<string, TranslationFn> = {
@@ -120,6 +123,18 @@ const TRANSLATION_MAP: Record<string, TranslationFn> = {
 	// factual_integrity + info_density_imbalance
 	"factual_integrity:info_density_imbalance": (kw, _rd) =>
 		`「${kw}」所在段落的信息密度存在问题，要么太空洞要么太密集。`,
+
+	// cross_lingual_distortion + jargon_density
+	"cross_lingual_distortion:jargon_density": (kw, _rd) =>
+		`文案中出现了外文词「${kw}」，容易被网友抓住进行恶意汉化或谐音曲解。`,
+
+	// cross_lingual_distortion + pretentious
+	"cross_lingual_distortion:pretentious": (kw, _rd) =>
+		`文案中夹杂外文「${kw}」有「故意装高级」之嫌，可能引发反感。`,
+
+	// cross_lingual_distortion + identity_politics
+	"cross_lingual_distortion:identity_politics": (kw, _rd) =>
+		`外文表达「${kw}」在国内舆论场可能存在文化水土不服，需要警惕被贴上标签。`,
 };
 
 // Fallback template when no specific mapping exists

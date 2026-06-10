@@ -75,6 +75,8 @@ export async function getWebContextForAuditor(
       return await getNetworkCultureContext(content, searchFn, options, timeoutMs);
     case "factual_integrity":
       return await getFactualContext(content, searchFn, options, timeoutMs);
+    case "cross_lingual_distortion":
+      return await getCrossLingualContext(content, searchFn, options, timeoutMs);
     default:
       return "";
   }
@@ -281,6 +283,69 @@ function formatFactualContext(results: WebSearchResult[]): string {
   return lines.join("\n");
 }
 
+// ── Cross-Lingual Distortion ──────────────────────────────────────────────
+
+/**
+ * Extract English words/phrases that might be subject to wild translation
+ */
+function extractForeignPhrases(content: string): string[] {
+  const phrases: string[] = [];
+  // Match English word sequences (2-5 words) that might form a phrase
+  const enWordPattern = /[A-Za-z][A-Za-z'-]+/g;
+  const words = content.match(enWordPattern);
+  if (!words) return phrases;
+
+  // Collect unique words (filter out very short/common ones)
+  const stopwords = new Set(["the", "a", "an", "is", "are", "it", "in", "on", "at", "to", "for", "of", "and", "or", "but"]);
+  for (const w of words) {
+    if (w.length >= 3 && !stopwords.has(w.toLowerCase())) {
+      phrases.push(w);
+    }
+  }
+  return [...new Set(phrases)].slice(0, 5);
+}
+
+/**
+ * Search for cross-lingual distortion risks: wild translations, homophonic slang, culture clashes
+ */
+async function getCrossLingualContext(
+  content: string,
+  searchFn: WebSearchFunction,
+  options?: { maxResults?: number; timeoutMs?: number },
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<string> {
+  const foreignTerms = extractForeignPhrases(content);
+  if (foreignTerms.length === 0) return "";
+
+  const searchResults = await Promise.all(
+    foreignTerms.map(async (term) => {
+      const searchPromise = searchFn(`${term} 翻译 梗 争议`, {
+        maxResults: options?.maxResults ?? 3,
+      });
+      return withTimeout(
+        searchPromise.catch(() => ({ query: term, results: [], timestamp: Date.now() })),
+        timeoutMs,
+        { query: term, results: [], timestamp: Date.now() },
+      );
+    }),
+  );
+
+  const validResults = searchResults.filter((r) => r.results.length > 0);
+  if (validResults.length === 0) return "";
+
+  const lines = ["以下是对文案中外文词汇的联网查询结果（野生翻译/梗文化方向），供跨语言审计时参考：\n"];
+
+  for (const result of validResults) {
+    lines.push(`### 外文词：「${result.query}」`);
+    for (const item of result.results.slice(0, 2)) {
+      lines.push(`- ${item.title}: ${item.snippet}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
 // ── Utility ────────────────────────────────────────────────────────────────
 
 /**
@@ -307,6 +372,7 @@ export function isWebSearchSupported(auditorId: string): boolean {
 export const WEB_SEARCH_SUPPORTED_DIMENSIONS = [
   "network_culture_risk",
   "factual_integrity",
+  "cross_lingual_distortion",
 ];
 
 // ── Built-in Search Implementation ─────────────────────────────────────────
