@@ -133,7 +133,7 @@ flowchart TD
   A["提交待评测内容"] --> B["Stage 1：系统初审"]
   B --> C["Step 0a: 本地规则引擎匹配"]
   C --> D["Step 0b+搜索: 宿主 AI 全局解码 + 联网搜索"]
-  E --> F["Step 1: 物理脱嵌（original/bare/replacements）"]
+  D --> F["Step 1: 物理脱嵌（original/bare/replacements）"]
   F --> G["Step 2: 裸文审计（3 个维度）"]
   G --> H["Step 3: 全文审计（6 个维度）"]
   H --> I["Step 4: Delta 分析"]
@@ -297,8 +297,7 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
 | 0a | 代码 | 本地规则匹配 — 时机节点检测、2-4 gram 滑动窗口、L2 结构模式、Multi-hop patterns → `localFindings[]` |
-| 0b | LLM | 职业黑粉逆向全局解码 — 语言边界判定（wildTranslations）+ 局部截取 + 情绪重构 → `step0Result { wildTranslations, blackAtoms, attackCandidates }` |
-| 0c | 代码 | 统一并发联网检索 — 汇总本地命中词 + Step 0 词汇 + wildTranslations 复合搜索词并发搜索（最大 10 词） → `webContextMap` |
+| 0b+搜索 | 宿主 AI | 职业黑粉逆向全局解码 + 联网搜索（合并为宿主 AI 单轮调用）→ `step0Result` + `webContextMap`。DuckDuckGo 依赖已移除 |
 | 1 | 代码 | 物理脱嵌 — `stripContext(raw, knownEntities?)` 生成 original、bare（裸文）和 replacements |
 | 2 | LLM | 裸文审计 — `context_distortion` + `network_culture_risk` + `cross_lingual_distortion` 三个维度，注入联网上下文 |
 | 3 | LLM | 全文审计 — 所有 6 个维度并行，每个维度独立推理，注入联网上下文 |
