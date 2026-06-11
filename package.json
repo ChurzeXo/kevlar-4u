@@ -2,14 +2,14 @@
   "name": "kevlar-4u",
   "version": "1.3.0",
   "description": "Kevlar-4u: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "bin": {
-    "kevlar-4u": "dist/index.js"
+    "kevlar-4u": "dist/src/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node dist/src/index.js",
     "setup": "tsx scripts/setup.ts",
     "kevlar-4u": "tsx scripts/cli.ts",
     "test": "tsx --test src/__tests__/*.test.ts",
@@ -47,7 +47,8 @@
     "chalk": "^5.4.1",
     "dotenv": "^17.4.2",
     "i18next": "^26.3.0",
-    "i18next-fs-backend": "^2.6.6"
+    "i18next-fs-backend": "^2.6.6",
+    "ora": "^9.4.0"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",
