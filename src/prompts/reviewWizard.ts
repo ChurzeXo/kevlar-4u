@@ -416,8 +416,8 @@ export function buildOrchestrationStep0Prompt(
     `# [SYSTEM PROTOCOL] 职业黑粉逆向解码协议（宿主编排 Turn 1）`,
     ``,
     `## 【任务说明】`,
-    `这是初审流程的第一轮（Turn 1）。你需要执行 Step 0 全局解码，提取黑料原子和攻击点，然后**将结果以纯 JSON 格式通过调用 review_content_wizard 工具提交**。`,
-    `系统将在收到你的 JSON 后，自动完成联网验证，然后在 Turn 2 将验证结果反馈给你执行完整的维度审计。`,
+    `这是初审流程的第一轮（Turn 1）。你需要执行 Step 0 全局解码（提取黑料原子和攻击点），**同时使用你的 web search 工具对提取的 blackAtoms 进行联网搜索**，然后将解码结果和搜索结果以纯 JSON 格式通过调用 review_content_wizard 工具提交。`,
+    `系统将在收到你的 JSON 后，在 Turn 2 将完整的验证结果反馈给你执行审计。`,
     ``,
     buildCommonRiskRules(),
     ``,
@@ -433,7 +433,7 @@ export function buildOrchestrationStep0Prompt(
     ``,
     `**⓪ 语言边界判定（找外文与混排）**：`,
     `- 提取文案中的所有外文或中外文混排短语。`,
-    `- 对提取出的外文，强行给出最恶俗、最具歧义的“野生机翻”或“谐音梗翻译”。`,
+    `- 对提取出的外文，强行给出最恶俗、最具歧义的"野生机翻"或"谐音梗翻译"。`,
     ``,
     `**① 局部截取（找黑料原子）**：`,
     `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
@@ -445,6 +445,20 @@ export function buildOrchestrationStep0Prompt(
     ``,
     `**③ 情绪重构（强行扣帽）**：`,
     `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
+    ``,
+    `### 联网搜索要求`,
+    `对于你提取的每个 blackAtoms，请使用你的 web search 工具搜索该关键词的中文网络语境。`,
+    `搜索样例：`,
+    `  - "{关键词} 含义 网络用语 梗"`,
+    `  - "{关键词} 内涵 圈层黑话"`,
+    ``,
+    `将搜索结果汇总为 webContextMap（Record<关键词, 搜索结果文本>），与 blackAtoms、`,
+    `attackCandidates、wildTranslations 一并返回。`,
+    ``,
+    `如果你没有可用的 web search 工具，则直接将 webContextMap 设为空对象 {}，继续执行解码任务。`,
+    `请勿编造搜索结果。`,
+    ``,
+    `搜索结果不展示给用户，仅作为后续审计分析时的参考上下文。`,
     ``,
     `## 【Turn 1 输出格式】`,
     `必须输出纯 JSON，结构如下：`,
@@ -461,6 +475,9 @@ export function buildOrchestrationStep0Prompt(
             attackChain: "原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
           },
         ],
+        webContextMap: {
+          "关键词1": "- 标题: 摘要内容\n- 标题2: 摘要内容",
+        },
       },
       null,
       2,
@@ -521,7 +538,7 @@ export function buildOrchestrationAuditPrompt(
         `### Pipeline Step 0b：LLM 全局解码结果（Turn 1 已完成）`,
         preAuditContext.step0Result ? JSON.stringify(preAuditContext.step0Result, null, 2) : `{}`,
         ``,
-        `### Pipeline Step 0c：联网验证上下文（Turn 1 已完成）`,
+        `### 联网验证上下文（Turn 1 已完成）`,
         preAuditContext.webContextMap && Object.keys(preAuditContext.webContextMap).length > 0
           ? Object.entries(preAuditContext.webContextMap)
               .map(([kw, ctx]) => `#### 关键词「${kw}」的联网参考\n${ctx}`)
@@ -657,7 +674,6 @@ export function buildOrchestrationFinalizerPrompt(
     levelUpgrades: Array<{ dimension: string; from: string; to: string; reason: string }>;
   },
   deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] },
-  webSearchDimensions?: string[],
 ): string {
   return [
     `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（Turn 3：交叉验证与最终仲裁）`,
@@ -690,14 +706,6 @@ export function buildOrchestrationFinalizerPrompt(
     `### Delta 分析结果`,
     JSON.stringify(deltaRisks, null, 2),
     ``,
-    webSearchDimensions && webSearchDimensions.length > 0
-      ? [
-          `### 联网验证维度`,
-          `以下维度的 findings 已通过搜索引擎得到事实或文化背景验证，仲裁时应给予更高置信度：`,
-          webSearchDimensions.map((d) => `- ${d}`).join("\n"),
-          ``,
-        ].join("\n")
-      : "",
     `## 【Turn 3 执行协议】`,
     ``,
     `### Step 6：交叉验证`,
@@ -931,7 +939,7 @@ export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[]): string 
     `## 【数据处理规则】`,
     `1. 协同加权（synergy）：若 synergy.overallMultiplier > 1.0，说明存在跨维度组合风险，应重点将相关维度的 🟡 升级为 🔴。`,
     `2. 脱嵌信号（deltaRisks）：裸文特有风险（bareOnly）代表典型的「脱语境放大风险」，应优先关注。`,
-    `3. 联网验证维度（webSearchDimensions）：若 findings 归属于该数组中列出的维度，说明这些风险已经通过搜索引擎得到了事实或文化背景的真实验证。在仲裁冲突或定级时，应给予其更高的置信度。`,
+    `3. 联网验证：Turn 1 已完成对 blackAtoms 的联网搜索，webContextMap 已注入各维度的审计上下文中。仲裁时可直接参考搜索结果作为判断依据。`,
     ``,
     `## 【必须包含以下系统审查员维度】`,
     ...systemAuditors.map((auditor) => `- ${auditor.meta.id} / ${auditor.meta.name}`),

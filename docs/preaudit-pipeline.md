@@ -12,27 +12,21 @@ Step 0a: 本地规则引擎
   │
   │  输出：localFindings[]
   ▼
-Step 0b: 职业黑粉逆向全局解码
+Step 0b + 联网搜索: 职业黑粉逆向全局解码 + 宿主搜索
 ═══════════════════════════════════════════════════════════════════
-  │  LLM 独立解码 (Sampling/Direct API) 或 宿主 Yield (Orchestration)
+  │  宿主 AI 执行（所有执行模式），合并 Step 0b 解码 + 联网搜索
   │  │
-  │  ─ [① 语言边界判定]（新增）
+  │  ─ [① 语言边界判定]
   │  │    提取外文/混排短语 → 生成最具歧义的「野生机翻」
   │  │    输出：wildTranslations [{ original, wildTranslation }]
   │  │
   │  ├─ [② 局部截取]（提取潜在武器化词汇，含外文）
-  │  └─ [③ 情绪重构]（扣帽与推演攻击链）
+  │  ├─ [③ 情绪重构]（扣帽与推演攻击链）
+  │  └─ [④ 联网搜索] 宿主使用自己的 web search 工具
+  │       对 blackAtoms 逐一搜索中文网络语境
   │
   │  输出：step0Result { wildTranslations, blackAtoms, attackCandidates }
-  ▼
-Step 0c: 统一并发联网检索
-═══════════════════════════════════════════════════════════════════
-  │  runUnifiedWebSearch(step0Result, localFindings)
-  │  ├─ 汇总本地命中词 + Step 0 词汇并发搜索
-  │  ├─ wildTranslations → "{原文} {野生机翻} 梗" 复合搜索词
-  │  └─ 并发度限制：最大 10 个词
-  │
-  │  输出：webContextMap
+  │        + webContextMap { keyword → 搜索结果文本 }
   ▼
 Step 1: 物理脱嵌
 ═══════════════════════════════════════════════════════════════════
@@ -120,8 +114,7 @@ Step 9: 结果展示
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
 | 0a | 代码 | 本地规则匹配 (localFindings) |
-| 0b | LLM | 职业黑粉逆向全局解码：①语言边界判定 + 野生机翻提取（wildTranslations）、②提取黑料原子、③情绪重构 |
-| 0c | 代码 | 统一并发联网检索 (对 localFindings + Step 0 关键词 **+ wildTranslations 复合搜索词** 统一搜索) |
+| 0b+搜索 | 宿主 AI | 职业黑粉逆向全局解码 + 联网搜索（宿主 AI 合并执行，输出 step0Result + webContextMap） |
 | 1 | 代码 | 文本脱嵌处理 (stripContext: original/bare/replacements) |
 | 2 | LLM | 裸文审计（3个维度，含跨语言曲解，注入 Turn 1 联网上下文） |
 | 3 | LLM | 全文审计（**6 个维度**，含新增跨界判官，注入 Turn 1 联网上下文） |
@@ -137,8 +130,8 @@ Step 9: 结果展示
 | 步骤 | 文件 | 函数 / 提示词 |
 |------|------|--------------|
 | Step 0a | `src/tools/reviewContentWizardTool.ts` | `buildLocalRuleFindings()` |
-| Step 0b | `src/prompts/reviewWizard.ts` | `buildGlobalStep0Prompt()` / `buildOrchestrationStep0Prompt()` |
-| Step 0c | `src/tools/reviewContentWizardTool.ts` | `runUnifiedWebSearch()` |
+| Step 0b+搜索 | `src/prompts/reviewWizard.ts` | `buildOrchestrationStep0Prompt()`（含联网搜索指令） |
+| Step 0c | 已移除 | 统一由宿主 AI 搜索替代，`runUnifiedWebSearch()` 已删除 |
 | Step 1 | `src/utils/stripContext.ts` | `stripContext(raw, knownEntities?)` |
 | Step 2-3 | `src/tools/reviewContentWizardTool.ts` | `runSystemAuditors()` |
 | Step 4 | `src/tools/reviewContentWizardTool.ts` | 内联于 `executeLlmSystemAudit()` |
@@ -149,29 +142,27 @@ Step 9: 结果展示
 
 ## 联网验证说明
 
-在重构后的 Pipeline 中，联网搜索被集中在 **Turn 1 (第一轮交互)** 统一进行，避免在沙盒执行（Step 2-3）和本地规则合并（Step 5）阶段多次发起碎片化的串行请求。
+在统一裁撤方案实施后，联网搜索不再由 kevlar 服务器自行调用 DuckDuckGo。Step 0b 与联网搜索**合并**为宿主 AI 的一轮交互。
 
-### 统一并发联网检索（Step 0c）
+### Step 0b+搜索：宿主 AI 合并执行
 
-在 Step 0a (本地规则匹配) 和 Step 0b (LLM 全局解码) 完成后，系统会收集：
-1. 本地规则引擎命中的高危/敏感词汇关键词。
-2. Step 0 全局解码输出的 `blackAtoms`（黑料原子词）及 `attackCandidates` 关键词。
-3. **Step 0b 第⓪步**（语言边界判定）输出的 `wildTranslations`，提取外文原词并生成「野生机翻」——以 `{原文} {野生机翻} 梗` 的复合格式构造搜索词，精准命中国内网络舆论翻车现场。
-
-所有收集到的关键词（最大并发限制为 10 个）将在 **Step 0c** 阶段通过 `runUnifiedWebSearch()` 并发调用联网搜索，返回一个 `Record<string, string>` 映射表。
+在 Step 0a (本地规则引擎) 完成后，工具返回给宿主 AI，宿主 AI 同时执行：
+1. **职业黑粉逆向解码**（Step 0b）：提取 `wildTranslations`、`blackAtoms`、`attackCandidates`。
+2. **联网搜索**：宿主 AI 使用自己的 web search 工具对每个 `blackAtoms` 搜索中文网络语境。
+3. **合并返回**：宿主 AI 在一次调用中返回 `step0Result` + `webContextMap`。
 
 ### 联网上下文注入（Step 2-3）
 
-在 Turn 2 执行沙盒审计时，`runSystemAuditors()` 会根据 Step 0c 的搜索结果，自动为每一个系统审计员（如 `network_culture_risk`）构建相关的 `webContext` 文本并注入到审计提示词中。审计员无需自行联网，即可在包含真实现实网络背景的情况下对文本进行研判。
+与之前一致：`runSystemAuditors()` 根据 `webContextMap` 为每个系统审计员构建 `webContext` 文本并注入审计提示词。
 
 ### 结果合并（Step 5）
 
-由于所有的联网验证和语境查询已经在 Turn 1 阶段完成，**Step 5 简化为纯代码内存合并**。`mergeLocalFindingsIntoAudits()` 只需将本地规则匹配结果同步合并至最终审计维度的 findings 中，无需发起任何网络请求。
+不变。纯代码内存合并。
 
-### 实现细节
+### 边界情况
 
-| 项目 | 说明 |
+| 场景 | 行为 |
 |------|------|
-| 搜索引擎 | DuckDuckGo 即时搜索 API（通过 `webSearchFn` 传入） |
-| 超时保护 | 5000ms 级别，超时后降级返回空结果 |
-| 结果标注 | 最终初审结果中会统计 `webSearchDimensions` 以记录生效的维度 |
+| 宿主 AI 搜索结果为空 | `webContextMap` 为 `{}`，Steps 2-9 跳过注入 |
+| 宿主 AI 无搜索工具 | Step 0b 解码正常执行，`webContextMap` 为空，降级为无联网分析 |
+| 本地规则命中为空 | Step 0a 输出空 `localFindings`，不影响流程 |

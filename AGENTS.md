@@ -39,8 +39,7 @@ The pre-audit is orchestrated from `src/tools/reviewContentWizardTool.ts`. Detai
 | Step | Executor | What |
 |------|----------|------|
 | 0a | Code | Local rule engine — `buildLocalRuleFindings()`: n-gram sliding window, L2 structural patterns, multi-hop matching against `skills/rules_free.json` |
-| 0b | LLM | 职业黑粉逆向全局解码 — `src/prompts/reviewWizard.ts` `buildGlobalStep0Prompt()`: ① language boundary detection + wild translation extraction ② black atom extraction ③ emotional reframing |
-| 0c | Code | Unified concurrent web search — `runUnifiedWebSearch()`: searches up to 10 keywords from Step 0a+0b via DuckDuckGo (5s timeout), builds `webContextMap` |
+| 0b+搜索 | Host AI | 职业黑粉逆向全局解码 + 联网搜索 — `src/prompts/reviewWizard.ts` `buildOrchestrationStep0Prompt()`: ① language boundary detection + wild translation extraction ② black atom extraction ③ emotional reframing ④ web search (host AI's own tool on blackAtoms). Outputs `step0Result` + `webContextMap`. DuckDuckGo dependency removed. |
 | 1 | Code | Decontextualization — `src/utils/stripContext.ts` `stripContext()`: splits into original/bare/replacements |
 | 2 | LLM | Bare-text audit — 3 dimensions: `context_distortion`, `network_culture_risk`, `cross_lingual_distortion` (injects `webContextMap`) |
 | 3 | LLM | Full-text audit — **6 system auditors** (see below, injects `webContextMap`) |

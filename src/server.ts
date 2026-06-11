@@ -15,7 +15,6 @@ import { formatErrorResponse } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
 import { setConfigPath } from "./execution/config.js";
-import { createDuckDuckGoSearchFn } from "./execution/webSearch.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
 
 // Priority:
@@ -133,7 +132,6 @@ function buildToolDependencies(
       getClientVersion: () => underlyingServer.getClientVersion(),
       createFn: () => createMultiTurnSamplingFn(underlyingServer),
     }),
-    resolveWebSearchFn: () => createDuckDuckGoSearchFn(),
     sendProgress: (message: string) => {
       try {
         const result = underlyingServer.sendLoggingMessage({

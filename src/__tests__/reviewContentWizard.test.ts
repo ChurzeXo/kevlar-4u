@@ -302,7 +302,7 @@ describe("handleReviewContentWizard state machine", () => {
     assert.ok(text.includes("待测文案"));
     assert.ok(text.includes("currentStep: waitingForOrchestrationStep0"));
 
-    // Turn 1 submit: host AI returns Step 0 JSON → system runs web search → returns waitingForOrchestrationAudit
+    // Turn 1 submit: host AI returns Step 0 JSON + webContextMap → returns waitingForOrchestrationAudit
     const sessionId = extractSessionId(text);
     const afterStep0 = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
@@ -371,7 +371,7 @@ describe("handleReviewContentWizard state machine", () => {
   });
 
 
-  it("uses orchestration-style isolated matrix prompts for sampling system auditors", async () => {
+  it("emits orchestration Turn 1 prompt (no direct LLM calls) for sampling system auditors", async () => {
     writePrdRules();
     await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
     await writePersona("foodie", "美食达人", ["小红书", "美食"]);
@@ -386,22 +386,145 @@ describe("handleReviewContentWizard state machine", () => {
       return { content: JSON.stringify({ findings: [] }), stopReason: "endTurn" };
     };
 
-    await handleReviewContentWizard(skillsDir, tmpDir, {
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
       userMessage: "盒马菌菇星球，贵妇粉耳，颜值粉嫩，耳片肥厚，质地柔软，鲜香清脆",
       samplingFn,
     });
 
-    assert.ok(calls.length >= 1);
-    // First call is the isolated global Step 0 decoding call
-    assert.ok(calls[0].systemPrompt.includes("[SYSTEM PROTOCOL] 职业黑粉逆向解码协议"));
-    assert.ok(calls[0].messages[0].content.includes("全局解码"));
-    // Sandbox calls follow (index >= 1): verify correct protocol headers
-    const sandboxCall = calls.find((c) => c.systemPrompt.includes("[SYSTEM PROTOCOL] 防御性风险矩阵扫描协议"));
-    assert.ok(sandboxCall, "Expected a sandbox audit call");
-    assert.ok(sandboxCall!.systemPrompt.includes("真实隔离 LLM 沙盒"));
-    assert.ok(sandboxCall!.systemPrompt.includes("严格遵守审查边界"));
-    // Sandbox message should have local rule findings injected
-    assert.ok(sandboxCall!.messages[0].content.includes("本地规则引擎预警"));
-    assert.ok(sandboxCall!.messages[0].content.includes("粉耳 -> 木耳"));
+    // No LLM calls are made by handleSystemAudit — it returns orchestration Turn 1 prompt
+    assert.equal(calls.length, 0);
+    const responseText = result.content[0]?.text || "";
+    // Should contain Step 0 instructions + web search requirements
+    assert.ok(responseText.includes("职业黑粉逆向解码"));
+    assert.ok(responseText.includes("联网搜索要求"));
+    // State should be waitingForOrchestrationStep0
+    assert.ok(responseText.includes("waitingForOrchestrationStep0"));
+  });
+
+  it("parses webContextMap from host AI and injects into Turn 2 prompt", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳",
+    });
+    const sessionId = extractSessionId(textOf(started));
+
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        blackAtoms: ["粉耳", "贵妇"],
+        attackCandidates: [{ keyword: "粉耳", attackChain: "粉耳 → 去语境化 → 低俗联想" }],
+        webContextMap: {
+          "粉耳": "- 百度贴吧: 木耳黑话\n- 知乎: 菌菇的别称",
+          "贵妇": "- 小红书: 高端用户群体",
+        },
+      }),
+    });
+    const resultText = textOf(result);
+    assert.ok(resultText.includes("联网验证上下文（Turn 1 已完成）"));
+    assert.ok(resultText.includes("关键词「粉耳」"));
+    assert.ok(resultText.includes("木耳黑话"));
+    assert.ok(resultText.includes("关键词「贵妇」"));
+    assert.ok(resultText.includes("高端用户群体"));
+  });
+
+  it("defaults webContextMap to empty when host AI omits it", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳",
+    });
+    const sessionId = extractSessionId(textOf(started));
+
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        blackAtoms: ["粉耳"],
+        attackCandidates: [{ keyword: "粉耳", attackChain: "test" }],
+      }),
+    });
+    const resultText = textOf(result);
+    assert.ok(resultText.includes("（无联网验证结果）"));
+  });
+
+  it("filters non-string values from webContextMap", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳",
+    });
+    const sessionId = extractSessionId(textOf(started));
+
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        blackAtoms: ["粉耳", "菌菇"],
+        attackCandidates: [{ keyword: "粉耳", attackChain: "test" }],
+        webContextMap: {
+          "粉耳": "- 正常的搜索结果",
+          "菌菇": { "title": "对象值应被过滤" },
+          "数字": 12345,
+        },
+      }),
+    });
+    const resultText = textOf(result);
+    // Valid string value should survive
+    assert.ok(resultText.includes("关键词「粉耳」"));
+    assert.ok(resultText.includes("正常的搜索结果"));
+    // Non-string values should be filtered out — their keys should not appear
+    assert.ok(!resultText.includes("关键词「菌菇」"));
+    assert.ok(!resultText.includes("关键词「数字」"));
+    assert.ok(!resultText.includes("对象值应被过滤"));
+    assert.ok(!resultText.includes("12345"));
+  });
+
+  it("handles null webContextMap gracefully", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳",
+    });
+    const sessionId = extractSessionId(textOf(started));
+
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        blackAtoms: ["粉耳"],
+        attackCandidates: [{ keyword: "粉耳", attackChain: "test" }],
+        webContextMap: null,
+      }),
+    });
+    const resultText = textOf(result);
+    assert.ok(resultText.includes("（无联网验证结果）"));
+  });
+
+  it("handles array webContextMap gracefully", async () => {
+    writePrdRules();
+    await writePersona("network_culture_risk", "暗语破译", ["system_auditor", "网络文化"]);
+    await writePersona("foodie", "美食达人", ["小红书", "美食"]);
+
+    const started = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "盒马菌菇星球，贵妇粉耳",
+    });
+    const sessionId = extractSessionId(textOf(started));
+
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId,
+      userMessage: JSON.stringify({
+        blackAtoms: ["粉耳"],
+        attackCandidates: [{ keyword: "粉耳", attackChain: "test" }],
+        webContextMap: ["粉耳", "木耳"],
+      }),
+    });
+    const resultText = textOf(result);
+    assert.ok(resultText.includes("（无联网验证结果）"));
   });
 });
