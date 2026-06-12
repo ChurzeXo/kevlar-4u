@@ -131,6 +131,12 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
         }
       }
     }
+    if (options.preAuditReport.precedents && options.preAuditReport.precedents.length > 0) {
+      report += `\n\n### 📌 ${t("report.precedents", { ns: "common", defaultValue: "Similar Precedents (for reference)" })}\n\n`;
+      for (const p of options.preAuditReport.precedents) {
+        report += `- ${p.event}${p.date ? `（${p.date}）` : ""}\n`;
+      }
+    }
   }
 
   // Individual reviews

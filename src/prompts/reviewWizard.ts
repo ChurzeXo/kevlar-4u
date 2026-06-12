@@ -90,7 +90,10 @@ export const PRE_AUDIT_OUTPUT_FORMAT = [
   `    "bareOnly": ["裸文特有风险列表"],`,
   `    "fullOnly": ["全文特有风险列表"],`,
   `    "stable": ["两轮共有的稳定风险"]`,
-  `  }`,
+  `  },`,
+  `  "precedents": [`,
+  `    { "event": "事件名称", "date": "2024-03" }`,
+  `  ]`,
   `}`,
 ].join("\n");
 
@@ -344,6 +347,9 @@ export function buildGlobalStep0Prompt(): string {
             attackChain: "原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
           },
         ],
+        precedents: [
+          { event: "2024年某品牌低俗广告事件", date: "2024-03" },
+        ],
       },
       null,
       2,
@@ -353,6 +359,7 @@ export function buildGlobalStep0Prompt(): string {
     `- wildTranslations：从文案中提取所有外文/非母语词汇，并给出最能引发群嘲的“野生机翻”或谐音。若无外文则留空数组。`,
     `- blackAtoms：从文案中提取的所有潜在可被武器化的关键词/词组（含外文，仅词汇，不含分析）`,
     `- attackCandidates：能推演出完整攻击链的攻击点，每项必须包含 keyword 和完整 attackChain`,
+    `- precedents：在完成 blackAtoms 提取后，额外搜索 1-3 个类似舆情事件先例（格式：event + 可选 date）。若无则留空数组。`,
     `- 无法推演完整攻击链的候选点不得进入 attackCandidates`,
     `- 输出必须是纯 JSON，不包含任何 Markdown 标记或额外解释`,
   ].join("\n");
@@ -389,6 +396,11 @@ export function buildGlobalStep0Message(content: string): string {
     `- 结合当前社会痛点，给脱嵌的内容扣上煽动情绪的帽子。`,
     `- 完整攻击链推演：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向。`,
     `- 只有能推演出完整攻击链的才进入 attackCandidates。`,
+    ``,
+    `**④ 类似事件先例检索**：`,
+    `- 搜索关键词："{品牌/产品名} + {风险类型} + 舆情 事件 翻车"`,
+    `- 示例："盒马 粉木耳 争议"、"品牌 低俗营销 翻车"`,
+    `- 返回 1-3 个最相关的历史事件，放入 precedents 字段。`,
     ``,
     `请严格执行并输出纯 JSON：`,
   ].join("\n");
@@ -693,6 +705,7 @@ export function buildOrchestrationFinalizerPrompt(
     levelUpgrades: Array<{ dimension: string; from: string; to: string; reason: string }>;
   },
   deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] },
+  precedents?: Precedent[],
 ): string {
   return [
     `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（Turn 3：交叉验证与最终仲裁）`,
@@ -725,6 +738,15 @@ export function buildOrchestrationFinalizerPrompt(
     `### Delta 分析结果`,
     JSON.stringify(deltaRisks, null, 2),
     ``,
+    precedents && precedents.length > 0
+      ? [
+          `### 类似事件先例（Turn 1 联网检索结果）`,
+          `以下历史舆情事件与当前内容的风险类型相似，请在生成 worstCaseNarrative 时参考其发酵路径和后果：`,
+          ``,
+          ...precedents.map((p) => `• ${p.event}${p.date ? `（${p.date}）` : ""}`),
+          ``,
+        ].join("\n")
+      : ``,
     `## 【Turn 3 执行协议】`,
     ``,
     `### Step 6：交叉验证`,
@@ -934,7 +956,7 @@ export function buildIsolatedSystemAuditorMessage(
     .join("\n");
 }
 
-export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[]): string {
+export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[], precedents?: Precedent[]): string {
   return [
     `你是 **Kevlar-4u 系统初审总仲裁官**。`,
     ``,
@@ -942,7 +964,7 @@ export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[]): string 
     `1. 合并去重：对所有系统审查员、本地规则及交叉验证的风险点进行最终聚合。`,
     `2. 风险定级：根据仲裁原则，对每个风险点重新校准风险等级（🔴/🟡/🟢）。`,
     `3. 协同升级：应用协同加权结果（synergy），处理跨维度的组合风险。`,
-    `4. 场景推演：生成最坏情况的舆情传播剧本（worstCaseNarrative）。`,
+    `4. 场景推演：生成最坏情况的舆情传播剧本（worstCaseNarrative），并在其中融入类似先例的历史教训。`,
     ``,
     `## 【最高仲裁原则】`,
     ``,
@@ -960,6 +982,15 @@ export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[]): string 
     `2. 脱嵌信号（deltaRisks）：裸文特有风险（bareOnly）代表典型的「脱语境放大风险」，应优先关注。`,
     `3. 联网验证：Turn 1 已完成对 blackAtoms 的联网搜索，webContextMap 已注入各维度的审计上下文中。仲裁时可直接参考搜索结果作为判断依据。`,
     ``,
+    precedents && precedents.length > 0
+      ? [
+          `## 【类似事件先例参考】`,
+          `以下是与当前内容风险类型相似的历史舆情事件，请在 worstCaseNarrative 中融入其发酵路径和后果作为推演依据：`,
+          ``,
+          ...precedents.map((p) => `• ${p.event}${p.date ? `（${p.date}）` : ""}`),
+          ``,
+        ].join("\n")
+      : ``,
     `## 【必须包含以下系统审查员维度】`,
     ...systemAuditors.map((auditor) => `- ${auditor.meta.id} / ${auditor.meta.name}`),
     ``,

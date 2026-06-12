@@ -389,14 +389,6 @@ async function handleOrchestrationStep0Result(
 ): Promise<ToolResult> {
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
-    const step0Result: Step0Result = {
-      wildTranslations: parsed.wildTranslations ?? [],
-      blackAtoms: parsed.blackAtoms ?? [],
-      attackCandidates: parsed.attackCandidates ?? [],
-    };
-    if (!Array.isArray(step0Result.blackAtoms) || !Array.isArray(step0Result.attackCandidates)) {
-      throw new Error("Invalid Step 0 JSON: missing blackAtoms or attackCandidates");
-    }
 
     // webContextMap is provided by host AI (from its own web search)
     const webContextMap: Record<string, string> = {};
@@ -419,6 +411,16 @@ async function handleOrchestrationStep0Result(
           });
         }
       }
+    }
+
+    const step0Result: Step0Result = {
+      wildTranslations: parsed.wildTranslations ?? [],
+      blackAtoms: parsed.blackAtoms ?? [],
+      attackCandidates: parsed.attackCandidates ?? [],
+      precedents,
+    };
+    if (!Array.isArray(step0Result.blackAtoms) || !Array.isArray(step0Result.attackCandidates)) {
+      throw new Error("Invalid Step 0 JSON: missing blackAtoms or attackCandidates");
     }
 
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
@@ -735,6 +737,7 @@ async function handleOrchestrationAuditResult(
       mergedDimensions,
       synergyResult,
       deltaRisks,
+      state.orchestrationPreAuditContext?.precedents,
     );
 
     return toolResponse(state, ORCHESTRATION_FINAL_GUIDANCE + turn3Prompt);
@@ -794,6 +797,7 @@ async function handleOrchestrationFinalResult(
       attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
       deltaRisks: turn2.deltaRisks,
+      precedents: parsed.precedents ?? state.orchestrationPreAuditContext?.precedents,
     };
 
     state.preAuditReport = report;
@@ -919,7 +923,7 @@ async function finalizePreAuditReport(
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
   try {
     const response = await caller({
-      systemPrompt: buildPreAuditFinalizerPrompt(systemAuditors),
+      systemPrompt: buildPreAuditFinalizerPrompt(systemAuditors, precedents),
       messages: [
         {
           role: "user",
@@ -960,7 +964,7 @@ async function finalizePreAuditReport(
         }
       }
     }
-    return { dimensions: fallbackDimensions, summary: summarizePreAuditResults(fallbackDimensions) };
+    return { dimensions: fallbackDimensions, summary: summarizePreAuditResults(fallbackDimensions), precedents };
   }
 }
 
@@ -1394,18 +1398,21 @@ function summarizePreAuditResults(
 // ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
 
 function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
+  const lines: string[] = ["<!-- kevlar:verbatim-pre-audit:start -->", "初审结果"];
   if (state.preAuditReport?.summary) {
-    return [
-      "<!-- kevlar:verbatim-pre-audit:start -->",
-      `初审结果\n${state.preAuditReport.summary}`,
-      "<!-- kevlar:verbatim-pre-audit:end -->",
-    ].join("\n");
+    lines.push(state.preAuditReport.summary);
+  } else {
+    lines.push("", "未找到系统审查员，跳过初审");
   }
-  return [
-    "<!-- kevlar:verbatim-pre-audit:start -->",
-    "初审结果\n\n未找到系统审查员，跳过初审",
-    "<!-- kevlar:verbatim-pre-audit:end -->",
-  ].join("\n");
+  if (state.preAuditReport?.precedents && state.preAuditReport.precedents.length > 0) {
+    lines.push("");
+    lines.push("📌 类似先例（供自行检索）：");
+    for (const p of state.preAuditReport.precedents) {
+      lines.push(`• ${p.event}${p.date ? `（${p.date}）` : ""}`);
+    }
+  }
+  lines.push("<!-- kevlar:verbatim-pre-audit:end -->");
+  return lines.join("\n");
 }
 
 // ── 初审完成：展示结果并询问是否复审 ─────────────────────────────────────────
