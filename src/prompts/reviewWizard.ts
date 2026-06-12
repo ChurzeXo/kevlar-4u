@@ -13,10 +13,16 @@ export interface WildTranslation {
   wildTranslation: string;
 }
 
+export interface Precedent {
+  event: string;  // 事件名称
+  date?: string;  // 事件时间（可选）
+}
+
 export interface Step0Result {
   wildTranslations: WildTranslation[]; // 外语提取与野生翻译
   blackAtoms: string[]; // 局部截取的黑料原子关键词
   attackCandidates: Step0Finding[]; // 情绪重构后的攻击点（含攻击链）
+  precedents?: Precedent[]; // 类似舆情事件先例
 }
 
 export const TOOL_DESCRIPTION = `内容风险评测向导工具。
@@ -301,6 +307,7 @@ export interface OrchestrationPreAuditContext {
   stripped: StrippedContent;
   step0Result?: Step0Result;
   webContextMap?: Record<string, string>;
+  precedents?: Precedent[]; // 类似舆情事件先例
 }
 
 // ── Turn 1: Global Step 0 prompts ─────────────────────────────────────────────
@@ -452,10 +459,16 @@ export function buildOrchestrationStep0Prompt(
     `  - "{关键词} 含义 网络用语 梗"`,
     `  - "{关键词} 内涵 圈层黑话"`,
     ``,
-    `将搜索结果汇总为 webContextMap（Record<关键词, 搜索结果文本>），与 blackAtoms、`,
-    `attackCandidates、wildTranslations 一并返回。`,
+    `### 类似事件先例检索`,
+    `在完成 blackAtoms 搜索后，请额外搜索类似舆情事件：`,
+    `  - 搜索关键词："{品牌/产品名} + {风险类型} + 舆情 事件 翻车"`,
+    `  - 示例："盒马 粉木耳 争议"、"品牌 低俗营销 翻车"`,
+    `  - 返回 1-3 个最相关的历史事件，格式见 precedents 字段`,
     ``,
-    `如果你没有可用的 web search 工具，则直接将 webContextMap 设为空对象 {}，继续执行解码任务。`,
+    `将搜索结果汇总为 webContextMap（Record<关键词, 搜索结果文本>），与 blackAtoms、`,
+    `attackCandidates、wildTranslations、precedents 一并返回。`,
+    ``,
+    `如果你没有可用的 web search 工具，则直接将 webContextMap 设为空对象 {}、precedents 设为空数组 []，继续执行解码任务。`,
     `请勿编造搜索结果。`,
     ``,
     `搜索结果不展示给用户，仅作为后续审计分析时的参考上下文。`,
@@ -478,6 +491,12 @@ export function buildOrchestrationStep0Prompt(
         webContextMap: {
           "关键词1": "- 标题: 摘要内容\n- 标题2: 摘要内容",
         },
+        precedents: [
+          {
+            event: "2024年某品牌低俗广告事件",
+            date: "2024-03",
+          },
+        ],
       },
       null,
       2,

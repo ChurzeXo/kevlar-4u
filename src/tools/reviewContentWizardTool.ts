@@ -22,6 +22,7 @@ import {
   buildIsolatedSystemAuditorMessage,
   buildIsolatedSystemAuditorPrompt,
   type OrchestrationPreAuditContext,
+  type Precedent,
   type Step0Result,
 } from "../prompts/reviewWizard.js";
 
@@ -362,12 +363,14 @@ function buildOrchestrationPreAuditContext(
   localFindings: any[],
   step0Result?: Step0Result,
   webContextMap?: Record<string, string>,
+  precedents?: Precedent[],
 ): OrchestrationPreAuditContext {
   return {
     localFindings,
     stripped: stripContext(content),
     step0Result,
     webContextMap,
+    precedents,
   };
 }
 
@@ -405,6 +408,19 @@ async function handleOrchestrationStep0Result(
       }
     }
 
+    // precedents is provided by host AI (from its own web search)
+    const precedents: Precedent[] = [];
+    if (Array.isArray(parsed.precedents)) {
+      for (const item of parsed.precedents) {
+        if (item && typeof item === "object" && typeof item.event === "string") {
+          precedents.push({
+            event: item.event,
+            date: typeof item.date === "string" ? item.date : undefined,
+          });
+        }
+      }
+    }
+
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
 
@@ -422,6 +438,7 @@ async function handleOrchestrationStep0Result(
         caller,
         step0Result,
         webContextMap,
+        precedents,
         timingContext,
         undefined, // sendProgress not available in orchestration path
       );
@@ -438,6 +455,7 @@ async function handleOrchestrationStep0Result(
       localFindings,
       step0Result,
       webContextMap,
+      precedents,
     );
     state.orchestrationPreAuditContext.stripped = stripped;
     state.step = "waitingForOrchestrationAudit";
@@ -483,6 +501,7 @@ async function executeLlmSystemAudit(
   caller: AuditLlmCaller,
   step0Result: Step0Result | undefined,
   webContextMap: Record<string, string>,
+  precedents?: Precedent[],
   timingContext?: string,
   sendProgress?: (message: string) => void,
 ): Promise<PreAuditReport> {
@@ -588,6 +607,7 @@ async function executeLlmSystemAudit(
     caller,
     synergy,
     deltaRisks,
+    precedents,
   );
 
   report.synergyFlags = {
@@ -877,6 +897,7 @@ interface PreAuditReport {
     fullOnly: string[];
     stable: string[];
   };
+  precedents?: Precedent[]; // 类似舆情事件先例
 }
 
 async function finalizePreAuditReport(
@@ -893,6 +914,7 @@ async function finalizePreAuditReport(
     details: Array<{ rule: any; matched: boolean }>;
   },
   deltaRisks?: any,
+  precedents?: Precedent[],
 ): Promise<PreAuditReport> {
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
   try {
@@ -923,6 +945,7 @@ async function finalizePreAuditReport(
       attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
       deltaRisks: parsed.deltaRisks ?? undefined,
+      precedents,
     };
   } catch (err) {
     logger.warn("Pre-audit finalizer failed, using deterministic summary", {
