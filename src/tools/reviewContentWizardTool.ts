@@ -31,21 +31,21 @@ const ORCHESTRATION_STEP0_GUIDANCE = [
   "⚠️ **当前无独立 LLM 能力，需要你执行 Turn 1：Step 0 全局解码**",
   "",
   "请按以下步骤操作：",
-  "1. 阅读下方 Step 0 协议，执行「断章取义三步走」全局解码",
-  "2. 输出纯 JSON（blackAtoms + attackCandidates），不含 Markdown",
+  "1. 阅读下方 Step 0 协议，执行「断章取义四步走」全局解码",
+  "2. 输出纯 JSON（blackAtoms + attackCandidates + wildTranslations + precedents），不含 Markdown",
   "3. 将 JSON 作为 userMessage 再次调用本工具（Turn 1 提交）",
   "",
   "**调用示例**：",
   "```",
   "review_content_wizard(",
   '  sessionId="wizard-review-xxxxx",',
-  '  userMessage="{\\"blackAtoms\\":[...],\\"attackCandidates\\":[...]}"',
+  '  userMessage="{\\"blackAtoms\\":[...],\\"attackCandidates\\":[...],\\"wildTranslations\\":[...],\\"precedents\\":[...]}"',
   ")",
   "```",
   "",
   "**注意事项**：",
   "- sessionId 必须与当前会话一致",
-  "- userMessage 必须是纯 JSON，包含 blackAtoms 和 attackCandidates",
+  "- userMessage 必须是纯 JSON，包含 blackAtoms、attackCandidates、wildTranslations 和 precedents",
   "",
   "---",
   "",
@@ -412,6 +412,13 @@ async function handleOrchestrationStep0Result(
         }
       }
     }
+    logger.info("Turn 1 step0Result parsed", {
+      event: "orchestration_step0_parsed",
+      blackAtomsCount: (parsed.blackAtoms ?? []).length,
+      attackCandidatesCount: (parsed.attackCandidates ?? []).length,
+      precedentsCount: precedents.length,
+      precedentsPreview: precedents.slice(0, 3).map((p) => p.event),
+    });
 
     const step0Result: Step0Result = {
       wildTranslations: parsed.wildTranslations ?? [],
@@ -800,16 +807,18 @@ async function handleOrchestrationFinalResult(
       precedents: parsed.precedents ?? state.orchestrationPreAuditContext?.precedents,
     };
 
+    logger.info("Orchestration Turn 3 processed, pre-audit complete", {
+      event: "orchestration_turn3_processed",
+      dimensionCount: finalDimensions.length,
+      precedentsCount: (report.precedents ?? []).length,
+      precedentsSource: parsed.precedents ? "parsed_from_host" : "fallback_to_context",
+    });
+
     state.preAuditReport = report;
     state.orchestrationPreAuditContext = undefined;
     state.orchestrationTurn2Results = undefined;
     state.step = "checkPersonaInventory";
     await saveState(tmpDir, state);
-
-    logger.info("Orchestration Turn 3 processed, pre-audit complete", {
-      event: "orchestration_turn3_processed",
-      dimensionCount: finalDimensions.length,
-    });
 
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {

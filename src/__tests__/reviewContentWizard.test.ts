@@ -394,9 +394,9 @@ describe("handleReviewContentWizard state machine", () => {
     // No LLM calls are made by handleSystemAudit — it returns orchestration Turn 1 prompt
     assert.equal(calls.length, 0);
     const responseText = result.content[0]?.text || "";
-    // Should contain Step 0 instructions + web search requirements
+    // Should contain Step 0 instructions + web search + precedents requirements
     assert.ok(responseText.includes("职业黑粉逆向解码"));
-    assert.ok(responseText.includes("联网搜索要求"));
+    assert.ok(responseText.includes("类似事件先例检索"));
     // State should be waitingForOrchestrationStep0
     assert.ok(responseText.includes("waitingForOrchestrationStep0"));
   });
