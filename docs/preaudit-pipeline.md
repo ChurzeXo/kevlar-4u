@@ -22,10 +22,11 @@ Step 0b + 联网搜索: 职业黑粉逆向全局解码 + 宿主搜索
   │  │
   │  ├─ [② 局部截取]（提取潜在武器化词汇，含外文）
   │  ├─ [③ 情绪重构]（扣帽与推演攻击链）
-  │  └─ [④ 联网搜索] 宿主使用自己的 web search 工具
+  │  └─ [④ 联网搜索 + 类似事件先例检索] 宿主使用自己的 web search 工具
   │       对 blackAtoms 逐一搜索中文网络语境
+  │       并基于风险方向关键词检索类似舆情翻车先例
   │
-  │  输出：step0Result { wildTranslations, blackAtoms, attackCandidates }
+  │  输出：step0Result { wildTranslations, blackAtoms, attackCandidates, precedents }
   │        + webContextMap { keyword → 搜索结果文本 }
   ▼
 Step 1: 物理脱嵌
@@ -114,7 +115,7 @@ Step 9: 结果展示
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
 | 0a | 代码 | 本地规则匹配 (localFindings) |
-| 0b+搜索 | 宿主 AI | 职业黑粉逆向全局解码 + 联网搜索（宿主 AI 合并执行，输出 step0Result + webContextMap） |
+| 0b+搜索 | 宿主 AI | 职业黑粉逆向全局解码 + 联网搜索 + 类似事件先例检索（宿主 AI 合并执行，输出 step0Result + webContextMap） |
 | 1 | 代码 | 文本脱嵌处理 (stripContext: original/bare/replacements) |
 | 2 | LLM | 裸文审计（3个维度，含跨语言曲解，注入 Turn 1 联网上下文） |
 | 3 | LLM | 全文审计（**6 个维度**，含新增跨界判官，注入 Turn 1 联网上下文） |
@@ -122,8 +123,8 @@ Step 9: 结果展示
 | 5 | 代码 | 结果合并 (无二次联网验证，纯内存合并) |
 | 6 | LLM | 交叉验证 |
 | 7 | 代码 | 协同加权计算 |
-| 8 | LLM | 最终仲裁聚合 |
-| 9 | 代码 | 展示给用户 |
+| 8 | LLM | 最终仲裁 — 合并重复 findings、强化攻击链、生成 worstCaseNarrative，并输出 precedents 供后续参考 |
+| 9 | 代码 | 结果展示 — 用户看到初审结果（含 📌 类似先例），选择进入复审或平台合规检查 |
 
 ## 核心文件
 
@@ -149,7 +150,8 @@ Step 9: 结果展示
 在 Step 0a (本地规则引擎) 完成后，工具返回给宿主 AI，宿主 AI 同时执行：
 1. **职业黑粉逆向解码**（Step 0b）：提取 `wildTranslations`、`blackAtoms`、`attackCandidates`。
 2. **联网搜索**：宿主 AI 使用自己的 web search 工具对每个 `blackAtoms` 搜索中文网络语境。
-3. **合并返回**：宿主 AI 在一次调用中返回 `step0Result` + `webContextMap`。
+3. **类似事件先例检索**：基于 localFindings 和 blackAtoms 推断风险方向，用风险关键词（非品牌名）搜索历史翻车案例，输出 `precedents`。
+4. **合并返回**：宿主 AI 在一次调用中返回 `step0Result` + `webContextMap`。
 
 ### 联网上下文注入（Step 2-3）
 
