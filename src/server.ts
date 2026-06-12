@@ -216,7 +216,6 @@ export function createKevlarServer(): McpServer {
     {
       capabilities: {
         tools: {},
-        prompts: {},
       },
     }
   );

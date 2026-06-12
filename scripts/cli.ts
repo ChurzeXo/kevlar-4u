@@ -195,8 +195,20 @@ const PW = 78; // panel content width
 
 function strWidth(s: string): number {
   let w = 0;
-  for (const ch of s.replace(/\u001b\[[\d;]*m/g, "")) {
-    const cp = ch.codePointAt(0)!;
+  const chars = [...s.replace(/\u001b\[[\d;]*m/g, "")];
+  for (let i = 0; i < chars.length; i++) {
+    const cp = chars[i].codePointAt(0)!;
+    // Regional Indicator Symbols (🇨🇳 🇺🇸 etc.): count pairs as width 2
+    if (cp >= 0x1f1e6 && cp <= 0x1f1ff) {
+      const nextCp = i + 1 < chars.length ? chars[i + 1].codePointAt(0)! : 0;
+      if (nextCp >= 0x1f1e6 && nextCp <= 0x1f1ff) {
+        w += 2;
+        i++; // skip next
+        continue;
+      }
+      w += 2;
+      continue;
+    }
     if (cp >= 0x4e00 && cp <= 0x9fff) w += 2;
     else if (cp >= 0x3400 && cp <= 0x4dbf) w += 2;
     else if (cp >= 0x3000 && cp <= 0x303f) w += 2;
@@ -623,19 +635,25 @@ async function runCLI() {
   console.log("\n" + useCasePanel() + "\n");
 
   // Language selection panel
+  const langOptions = `  [1] 🇨🇳  简体中文\n  [2] 🇺🇸  English`;
   console.log(doubleBoxTop(t("langSelect")));
-  console.log(doubleBoxMid(""));
-
-  const langChoice = await select({
-    message: `${centerPad()}${CYAN("λ")} ${t("langSelect")}`,
-    choices: [
-      { name: "🇨🇳  简体中文", value: "zh-CN" as SupportedLanguage },
-      { name: "🇺🇸  English", value: "en-US" as SupportedLanguage },
-    ],
-    default: savedLang,
-  });
-
+  console.log(doubleBoxMid(langOptions));
   console.log(doubleBoxBottom());
+
+  let langChoice: SupportedLanguage | null = null;
+  while (langChoice === null) {
+    const raw = await input({
+      message: `${centerPad()}${CYAN(">")} `,
+      default: savedLang === "zh-CN" ? "1" : "2",
+      theme: { prefix: "" },
+    });
+    const trimmed = raw.trim();
+    if (trimmed === "1") langChoice = "zh-CN";
+    else if (trimmed === "2") langChoice = "en-US";
+    else {
+      console.log(`${centerPad()}${RED("✗")}  ${currentLang === "zh-CN" ? "请输入 1 或 2" : "Please enter 1 or 2"}`);
+    }
+  }
 
   currentLang = langChoice;
   saveLanguage(langChoice);
