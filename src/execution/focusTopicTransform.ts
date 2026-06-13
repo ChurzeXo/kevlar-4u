@@ -300,7 +300,7 @@ export function formatFocusTopicsForPrompt(topics: FocusTopic[]): string {
 	if (!topics.length) return "";
 
 	const lines = [
-		"# 🎯 狙击手定点复审焦点（核心优化注入点）",
+		"# 🎯 狙击手定点复审焦点（核心火力集中点）",
 		"",
 		"系统在文本雷达扫描中发现了以下可疑点，请你作为狙击手，执行定向抗压测试：",
 		"",
