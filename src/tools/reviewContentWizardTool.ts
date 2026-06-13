@@ -429,6 +429,12 @@ async function handleOrchestrationStep0Result(
     if (!Array.isArray(step0Result.blackAtoms) || !Array.isArray(step0Result.attackCandidates)) {
       throw new Error("Invalid Step 0 JSON: missing blackAtoms or attackCandidates");
     }
+    if (Object.keys(webContextMap).length > 0 && precedents.length === 0) {
+      throw new Error(
+        "Invalid Step 0 JSON: webContextMap 非空（宿主 AI 已执行联网搜索）但 precedents 为空。" +
+        "类似先例检索是 Step 0 的强制步骤（④），请在 JSON 中补充 precedents 字段后重新提交。"
+      );
+    }
 
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);

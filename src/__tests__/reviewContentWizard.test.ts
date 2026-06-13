@@ -420,6 +420,7 @@ describe("handleReviewContentWizard state machine", () => {
           "粉耳": "- 百度贴吧: 木耳黑话\n- 知乎: 菌菇的别称",
           "贵妇": "- 小红书: 高端用户群体",
         },
+        precedents: [{ event: "某品牌低俗广告翻车事件", date: "2024-03" }],
       }),
     });
     const resultText = textOf(result);
@@ -471,6 +472,7 @@ describe("handleReviewContentWizard state machine", () => {
           "菌菇": { "title": "对象值应被过滤" },
           "数字": 12345,
         },
+        precedents: [{ event: "某品牌低俗广告翻车事件", date: "2024-03" }],
       }),
     });
     const resultText = textOf(result);
