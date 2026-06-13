@@ -96,9 +96,6 @@ npm run dev
 npm start
 ```
 
-> ⚠️ **构建输出路径说明**：`tsconfig.json` 中 `rootDir: "."` 且 `include: ["src/**/*", "scripts/**/*"]`，因此 `tsc` 编译产物位于 `dist/src/`（而非 `dist/`）。以下两个位置依赖此路径结构，如需改回旧的 `rootDir: "./src"`，必须同步修改：
-> - `src/server.ts:31` — `resolveSkillsDir()` 使用 `path.resolve(__dirname, "..", "..")` 两级回退回到项目根目录；若改回 `dist/` 输出则只需一级 `".."`
-> - `scripts/cli.ts` — 两处 MCP 入口路径探测均以 `dist/src/index.js` 为优先，`dist/index.js` 为旧版回退
 
 ---
 
@@ -379,7 +376,7 @@ Claude Desktop 示例：
   "mcpServers": {
     "kevlar-4u": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/kevlar-4u/dist/src/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/kevlar-4u/dist/index.js"],
       "env": {
         "KEVLAR_MODE": "auto",
         "KEVLAR_MAX_CONCURRENT": "3"
@@ -389,7 +386,7 @@ Claude Desktop 示例：
 }
 ```
 
-> 如果使用 `npm run kevlar-4u` 安装 CLI 自动配置，脚本会自动探测正确的入口路径。手动配置时注意路径为 `dist/src/index.js`（`rootDir: "."` 编译结构）。
+> 如果使用 `npm run kevlar-4u` 安装 CLI 自动配置，脚本会自动探测正确的入口路径。手动配置时注意路径为 `dist/index.js`。
 
 自定义人设目录：
 

@@ -27,7 +27,7 @@ function resolveSkillsDir(): string {
   }
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
-  // dist/ after compilation; go up one level to repo root
+  // dist/*.js after compilation (rootDir: "./src"); go up one level to repo root
   const repoRoot = path.resolve(__dirname, "..");
   return path.join(repoRoot, "skills");
 }

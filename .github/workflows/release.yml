@@ -36,11 +36,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      # ── 5. Inject shebang so dist/index.js is directly executable ───────
-      - name: Make entry executable
-        run: |
-          sed -i '1s|^|#!/usr/bin/env node\n|' dist/index.js
-          chmod +x dist/index.js
+
 
       # ── 6. Extract version from tag (e.g. refs/tags/v1.2.3 → 1.2.3) ────
       - name: Extract version
@@ -57,6 +53,7 @@ jobs:
             dist/ \
             skills/ \
             config/ \
+            scripts/ \
             package.json \
             README.md
 
@@ -67,6 +64,7 @@ jobs:
             dist/ \
             skills/ \
             config/ \
+            scripts/ \
             package.json \
             README.md \
             -x "node_modules/*"

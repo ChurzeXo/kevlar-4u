@@ -212,9 +212,9 @@ Claude Desktopの例：
 ```json
 {
   "mcpServers": {
-    "kevlar": {
+    "kevlar-4u": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/kevlar/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/kevlar-4u/dist/index.js"],
       "env": {
         "KEVLAR_MODE": "auto",
         "KEVLAR_MAX_CONCURRENT": "3"
