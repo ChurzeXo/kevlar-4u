@@ -813,7 +813,13 @@ async function handleOrchestrationFinalResult(
       attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
       worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
       deltaRisks: turn2.deltaRisks,
-      precedents: parsed.precedents ?? state.orchestrationPreAuditContext?.precedents,
+      // 优先使用 Turn 1 保存在 context 里的先例（权威来源）。
+      // parsed.precedents 来自宿主 AI 的 Turn 3 JSON 输出，若其返回空数组 [] 会覆盖
+      // 真实先例，因此只在 context 为空时才回退到 parsed 的值。
+      precedents:
+        (state.orchestrationPreAuditContext?.precedents ?? []).length > 0
+          ? state.orchestrationPreAuditContext?.precedents
+          : (parsed.precedents ?? []),
     };
 
     logger.info("Orchestration Turn 3 processed, pre-audit complete", {
@@ -1438,16 +1444,25 @@ function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
   } else {
     lines.push("", "未找到系统审查员，跳过初审");
   }
-  if (state.preAuditReport?.precedents && state.preAuditReport.precedents.length > 0) {
+
+  // 类似先例：始终渲染此段（无则输出"无"），保证链路完整
+  if (state.preAuditReport) {
+    const precedents = state.preAuditReport.precedents;
     lines.push("");
     lines.push("📌 类似先例（供自行检索）：");
-    for (const p of state.preAuditReport.precedents) {
-      lines.push(`• ${p.event}${p.date ? `（${p.date}）` : ""}`);
+    if (precedents && precedents.length > 0) {
+      for (const p of precedents) {
+        lines.push(`• ${p.event}${p.date ? `（${p.date}）` : ""}`);
+      }
+    } else {
+      lines.push("暂未检索到类似案例");
     }
   }
+
   lines.push("<!-- kevlar:verbatim-pre-audit:end -->");
   return lines.join("\n");
 }
+
 
 // ── 初审完成：展示结果并询问是否复审 ─────────────────────────────────────────
 //

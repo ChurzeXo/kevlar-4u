@@ -117,9 +117,10 @@ export function buildFinalRenderInstructions(): string {
 3. **[自然语言：深度推演]**
    - 在表格下方，基于 attackChainAnalysis, worstCaseNarrative, synergyFlags, precedents 字段，严格按照以下逻辑链路进行自然语言的深度编排与扩写：
      🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 📌 类似先例（供自行检索） -> 🚨 最坏情况推演。
-   - 如果 JSON 中包含 precedents 数组且非空，在 ⚡ 协同放大效应之后、🚨 最坏情况推演之前，单起一段输出：
+   - 在 ⚡ 协同放大效应之后、🚨 最坏情况推演之前，必须单起一段输出：
        "📌 类似先例（供自行检索）："
-       后接 bullet 列表，每项格式为："• {event}（{date}）"，date 缺失时省略括号。
+     如果 JSON 中 precedents 数组非空，后接 bullet 列表，每项格式为："• {event}（{date}）"，date 缺失时省略括号。
+      如果 JSON 中 precedents 数组为空或不存在，输出："暂未检索到类似案例"。
 
 4. **[尾部状态询问]**
    - 在回复的最终末尾，必须单起一行，原样输出以下文本（连标点符号都不得更改）：
@@ -821,8 +822,9 @@ export function buildOrchestrationFinalizerPrompt(
           ``,
           ...precedents.map((p) => `• ${p.event}${p.date ? `（${p.date}）` : ""}`),
           ``,
+          `⚠️ 强制要求：上述先例必须原样输出到最终 JSON 的 precedents 字段中，不得自行复写、清空或替换。`,
         ].join("\n")
-      : ``,
+      : `### 类似事件先例\n本次 Turn 1 未检索到先例，请在最终 JSON 中输出 \"precedents\": []`,
     `## 【Turn 3 执行协议】`,
     ``,
     `### Step 6：交叉验证`,
