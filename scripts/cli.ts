@@ -369,9 +369,11 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
 if (process.argv.includes("--stdio")) {
   const projectRoot = pkg.__path ? path.dirname(pkg.__path) : path.resolve(__dirname, "..");
 
-  const serverPath = fs.existsSync(path.join(projectRoot, "dist/index.js"))
-    ? path.join(projectRoot, "dist/index.js")
-    : path.join(projectRoot, "src/index.ts");
+  const serverPath = fs.existsSync(path.join(projectRoot, "dist/src/index.js"))
+    ? path.join(projectRoot, "dist/src/index.js")
+    : fs.existsSync(path.join(projectRoot, "dist/index.js"))
+      ? path.join(projectRoot, "dist/index.js")
+      : path.join(projectRoot, "src/index.ts");
 
   const child = spawn("node", [serverPath, ...process.argv.slice(2)], {
     stdio: "inherit",
@@ -613,9 +615,11 @@ async function runCLI() {
     : {
         cmd: "node",
         args: [
-          fs.existsSync(path.join(projectRoot, "dist/index.js"))
-            ? path.join(projectRoot, "dist/index.js")
-            : path.join(projectRoot, "src/index.ts"),
+          fs.existsSync(path.join(projectRoot, "dist/src/index.js"))
+            ? path.join(projectRoot, "dist/src/index.js")
+            : fs.existsSync(path.join(projectRoot, "dist/index.js"))
+              ? path.join(projectRoot, "dist/index.js")
+              : path.join(projectRoot, "src/index.ts"),
           "--stdio",
         ],
       };
