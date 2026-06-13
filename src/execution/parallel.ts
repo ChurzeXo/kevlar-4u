@@ -17,7 +17,7 @@ import { logger } from "../utils/logger.js";
 import { getErrorInfo } from "../utils/observability.js";
 import { wrapContent } from "../utils/sanitize.js";
 import { buildKevlarRiskDirective } from "./riskPrompt.js";
-import { buildCoreReasoningFramework, buildCoreFrameworkSteps, buildCompactAuditorCoT } from "../prompts/reviewWizard.js";
+import { buildCoreReasoningFramework, buildCoreFrameworkSteps, buildCompactAuditorCoT, buildCommonRiskRules } from "../prompts/reviewWizard.js";
 
 interface ParallelExecutionOptions {
   mode: ExecutionMode;
@@ -129,6 +129,9 @@ export function augmentSystemPrompt(
 
   // ① Core reasoning framework (职业黑粉/最恶毒评论区模拟模式) - semantic baseline
   parts.push(buildCoreReasoningFramework());
+
+  // ①.5 Common risk rules (semantic baseline)
+  parts.push(buildCommonRiskRules());
 
   // ② Persona identity (original system prompt)
   parts.push(persona.systemPrompt);

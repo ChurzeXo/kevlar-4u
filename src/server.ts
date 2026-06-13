@@ -16,6 +16,7 @@ import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
 import { setConfigPath } from "./execution/config.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
+import { SERVER_INSTRUCTIONS } from "./prompts/instructions.js";
 
 // Priority:
 //   1. KEVLAR_SKILLS_DIR environment variable (absolute path)
@@ -217,6 +218,7 @@ export function createKevlarServer(): McpServer {
       capabilities: {
         tools: {},
       },
+      instructions: SERVER_INSTRUCTIONS,
     }
   );
 

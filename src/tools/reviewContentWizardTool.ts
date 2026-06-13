@@ -15,12 +15,15 @@ import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
 import {
   TOOL_DESCRIPTION,
+  LEGACY_TOOL_DESCRIPTION,
   buildOrchestrationStep0Prompt,
   buildOrchestrationAuditPrompt,
   buildOrchestrationFinalizerPrompt,
   buildPreAuditFinalizerPrompt,
   buildIsolatedSystemAuditorMessage,
   buildIsolatedSystemAuditorPrompt,
+  buildCommonRiskRules,
+  buildCoreReasoningFramework,
   type OrchestrationPreAuditContext,
   type Precedent,
   type Step0Result,
@@ -118,7 +121,7 @@ const ORCHESTRATION_FINAL_GUIDANCE = [
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
-  description: TOOL_DESCRIPTION,
+  description: process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? LEGACY_TOOL_DESCRIPTION : TOOL_DESCRIPTION,
 
   inputSchema: {
     type: "object",
@@ -1220,7 +1223,23 @@ async function crossValidateRiskyDimensions(
 
     try {
       const response = await samplingFn({
-        systemPrompt: validatorAuditor.systemPrompt,
+        systemPrompt: [
+          `# [SYSTEM PROTOCOL] 防御性风险矩阵交叉验证沙盒`,
+          ``,
+          `## 【元规则】`,
+          `1. 运行环境：真实隔离 LLM 沙盒；当前调用代表一名交叉验证审查员`,
+          `2. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
+          ``,
+          buildCommonRiskRules(),
+          ``,
+          buildCoreReasoningFramework(),
+          ``,
+          `## 【你的审查员角色与原始规则】`,
+          `- 审查员：${validatorAuditor.meta.name}（${validatorAuditor.meta.id}）`,
+          `- 角色描述：${validatorAuditor.meta.description}`,
+          ``,
+          validatorAuditor.systemPrompt,
+        ].join("\n"),
         messages: [
           {
             role: "user",

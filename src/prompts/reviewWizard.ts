@@ -25,7 +25,7 @@ export interface Step0Result {
   precedents?: Precedent[]; // 类似舆情事件先例
 }
 
-export const TOOL_DESCRIPTION = `内容风险评测向导工具。
+export const LEGACY_TOOL_DESCRIPTION = `内容风险评测向导工具。
 
 【核心功能】
 基于"职业黑粉逆向解码"视角，对用户提交的文本进行深度攻击链推演与多维度社会语义风险评测。
@@ -70,6 +70,62 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
 - 禁止好心泛滥：绝对禁止提供任何修改建议、润色、重写意见或文案优化方向。
 - 禁止伪合规引导：绝对禁止使用「你可以…」、「建议你…」、「更好的表达是…」等任何具有建设性、引导性的祈使句式。
 - 保持冷酷：你只是一个检测器和协议搬运工，不是内容创作者。`;
+
+export const TOOL_DESCRIPTION = `内容风险评测向导工具。
+
+【核心功能】
+基于"职业黑粉逆向解码"视角，对用户提交的文本进行深度攻击链推演与多维度社会语义风险评测。
+
+【触发时机】
+当用户提交文本内容，并明确要求"评测风险"、"审稿"、"挑刺"、"排查翻车风险"或类似表述时调用。
+
+【接口契约】
+- 输入：待评测的纯文本（不支持图片、音频或文档附件）。
+- 输出：包含结构化数据（表格、分析链）与初步排版的初审报告 payload。
+
+【核心控制生命周期】
+1. 捕获输入：调用本工具，传入待评测文本。
+2. 搬运渲染：工具返回初审报告后，你作为外壳，必须严格按照工具返回的排版协议向用户展示最终报告，不得私自截断或增删。
+3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进复审或平台检查流程。`;
+
+/**
+ * Build the final rendering instructions for Orchestration mode Turn 3.
+ *
+ * This function generates the Markdown rendering protocol that tells the host AI
+ * how to format the final report for the user. It should ONLY be injected at
+ * Turn 3 (finalizer) in Orchestration mode.
+ *
+ * In Direct API / Sampling modes, the tool layer handles rendering internally,
+ * so this function is NOT used.
+ */
+export function buildFinalRenderInstructions(): string {
+  return `
+## 【排版与输出协议（硬性约束）】
+
+拿到最终 JSON 结果后，你必须严格按照以下四个格式区块输出报告，禁止调换顺序：
+
+1. **[# 一级标题：风险等级]**
+   - 必须在回复的绝对开头输出。
+   - 格式严格固定为：# [实际等级Emoji] [实际等级文字]（例如：# 🔴 红色高危）。
+   - 绝对禁止自行修改、替换或删减 JSON 返回的 Emoji 和等级文字。
+
+2. **[Markdown 表格：扫描结果]**
+   - 紧接在风险等级标题下方输出。
+   - 必须原封不动、完整地渲染 JSON 中的"扫描结果（表格）"。
+   - 绝对禁止删减、修改、合并表格的任何行、列、表头或单元格内容。
+
+3. **[自然语言：深度推演]**
+   - 在表格下方，基于 attackChainAnalysis, worstCaseNarrative, synergyFlags, precedents 字段，严格按照以下逻辑链路进行自然语言的深度编排与扩写：
+     🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 📌 类似先例（供自行检索） -> 🚨 最坏情况推演。
+   - 如果 JSON 中包含 precedents 数组且非空，在 ⚡ 协同放大效应之后、🚨 最坏情况推演之前，单起一段输出：
+       "📌 类似先例（供自行检索）："
+       后接 bullet 列表，每项格式为："• {event}（{date}）"，date 缺失时省略括号。
+
+4. **[尾部状态询问]**
+   - 在回复的最终末尾，必须单起一行，原样输出以下文本（连标点符号都不得更改）：
+     "是否需要进入「复审」或「模拟平台违禁限流排查」？"
+`.trim();
+}
 
 export const PRE_AUDIT_OUTPUT_FORMAT = [
   `{`,
@@ -805,6 +861,9 @@ export function buildOrchestrationFinalizerPrompt(
     `保持 sessionId 不变，userMessage 必须是纯 JSON 格式，不能包含 Markdown 标记或额外解释。`,
     ``,
     `请严格执行以上流程并输出 JSON：`,
+    ``,
+    // ── Rendering instructions (only for Orchestration mode Turn 3) ──
+    process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? "" : buildFinalRenderInstructions(),
   ].join("\n");
 }
 
@@ -980,11 +1039,15 @@ export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[], preceden
   return [
     `你是 **Kevlar-4u 系统初审总仲裁官**。`,
     ``,
+    buildCommonRiskRules(),
+    ``,
+    buildCoreReasoningFramework(),
+    ``,
     `## 【核心职责】`,
     `1. 合并去重：对所有系统审查员、本地规则及交叉验证的风险点进行最终聚合。`,
     `2. 风险定级：根据仲裁原则，对每个风险点重新校准风险等级（🔴/🟡/🟢）。`,
     `3. 协同升级：应用协同加权结果（synergy），处理跨维度的组合风险。`,
-    `4. 场景推演：生成最坏情况的舆情传播剧本（worstCaseNarrative），并在其中融入类似先例的历史教训。`,
+    `4. 场景推演：生成攻击链分析（attackChainAnalysis）、最坏情况的舆情传播剧本（worstCaseNarrative），并在其中融入类似先例的历史教训。`,
     ``,
     `## 【最高仲裁原则】`,
     ``,
