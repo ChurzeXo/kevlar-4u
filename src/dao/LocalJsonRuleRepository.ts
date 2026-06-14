@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { IRuleRepository } from "./IRuleRepository.js";
+import { isPro } from "../subscription/tier.js";
 import type {
   AssociationPattern,
   AssociativeRule,
@@ -109,12 +110,7 @@ export class LocalJsonRuleRepository implements IRuleRepository {
    * 是否为付费用户（可通过配置、环境变量或 token 判断）
    */
   private isProUser(): boolean {
-    // 支持多种判断方式，优先级从高到低
-    if (process.env.KEVLAR_PRO_TOKEN) return true;
-    if (process.env.KEVLAR_TIER === "pro") return true;
-    
-    // 后续可扩展：从 kevlar-config.json 读取 subscription 信息
-    return false;
+    return isPro();
   }
 
   async loadRules(): Promise<boolean> {

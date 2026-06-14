@@ -9,6 +9,8 @@ import type { DimensionsConfig } from "./dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions } from "./dimensions.js";
 import { t, getCurrentLanguage } from "../i18n/index.js";
 import { getModeLabel } from "../i18n/tools-i18n.js";
+import { isPro } from "../subscription/tier.js";
+import { DEFAULT_FREE_PROMPTS, type PromptSegments } from "../subscription/promptTypes.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
@@ -90,6 +92,7 @@ interface AggregatedReportOptions {
   personas: PersonaResultWithMeta[];
   dimensions?: DimensionsConfig;
   preAuditReport?: any;
+  prompts?: PromptSegments;
 }
 
 export function generateAggregatedReport(options: AggregatedReportOptions): string {
@@ -132,9 +135,15 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
       }
     }
     if (options.preAuditReport.precedents && options.preAuditReport.precedents.length > 0) {
+      const segs = options.prompts ?? DEFAULT_FREE_PROMPTS;
       report += `\n\n### 📌 ${t("report.precedents", { ns: "common", defaultValue: "Similar Precedents (for reference)" })}\n\n`;
-      for (const p of options.preAuditReport.precedents) {
-        report += `- ${p.event}${p.date ? `（${p.date}）` : ""}\n`;
+      if (isPro()) {
+        for (const p of options.preAuditReport.precedents) {
+          report += `- ${p.event}${p.date ? `（${p.date}）` : ""}\n`;
+        }
+      } else {
+        const lockText = locale === "zh-CN" ? segs.precedentLockedCn : segs.precedentLockedEn;
+        report += `${lockText}\n`;
       }
     }
   }

@@ -1,5 +1,7 @@
 import type { Persona } from "../utils/parser.js";
 import type { StrippedContent } from "../utils/stripContext.js";
+import type { PromptSegments } from "../subscription/promptTypes.js";
+import { DEFAULT_FREE_PROMPTS } from "../subscription/promptTypes.js";
 
 // ── Step 0 output types ──────────────────────────────────────────────────────
 
@@ -98,7 +100,7 @@ export const TOOL_DESCRIPTION = `内容风险评测向导工具。
  * In Direct API / Sampling modes, the tool layer handles rendering internally,
  * so this function is NOT used.
  */
-export function buildFinalRenderInstructions(): string {
+export function buildFinalRenderInstructions(prompts: PromptSegments): string {
   return `
 ## 【排版与输出协议（硬性约束）】
 
@@ -118,10 +120,8 @@ export function buildFinalRenderInstructions(): string {
    - 在表格下方，基于 attackChainAnalysis, worstCaseNarrative, synergyFlags, precedents 字段，严格按照以下逻辑链路进行自然语言的深度编排与扩写：
      🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 📌 类似先例（供自行检索） -> 🚨 最坏情况推演。
    - 在 ⚡ 协同放大效应之后、🚨 最坏情况推演之前，必须单起一段输出：
-       "📌 类似先例（供自行检索）："
-     如果 JSON 中 precedents 数组非空，后接 bullet 列表，每项格式为："• {event}（{date}）"，date 缺失时省略括号。
-      如果 JSON 中 precedents 数组为空或不存在，输出："暂未检索到类似案例"。
-
+       "${prompts.precedentSectionHeader}："
+     ${prompts.finalRenderPrecedentInstruction}
 4. **[尾部状态询问]**
    - 在回复的最终末尾，必须单起一行，原样输出以下文本（连标点符号都不得更改）：
      "是否需要进入「复审」或「模拟平台违禁限流排查」？"
@@ -783,6 +783,7 @@ export function buildOrchestrationFinalizerPrompt(
   },
   deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] },
   precedents?: Precedent[],
+  prompts: PromptSegments = DEFAULT_FREE_PROMPTS,
 ): string {
   return [
     `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（Turn 3：交叉验证与最终仲裁）`,
@@ -791,7 +792,7 @@ export function buildOrchestrationFinalizerPrompt(
     `1. 运行环境：单次推理孤岛状态，无外部状态机`,
     `2. 执行身份：非情感化的【Kevlar-4u 系统初审总仲裁官】`,
     `3. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
-    `4. 本轮职责：执行 Step 6（交叉验证）+ Step 8（最终仲裁），基于代码层已完成的 Step 5（合并）+ Step 7（协同加权）结果`,
+    prompts.orchestrationMetaRuleItem4,
     ``,
     buildCommonRiskRules(),
     ``,
@@ -848,7 +849,7 @@ export function buildOrchestrationFinalizerPrompt(
     `1. **合并去重**：对所有维度的风险点进行最终聚合，消除重复`,
     `2. **风险定级**：根据交叉验证和协同加权结果，对每个维度重新校准 level（🔴/🟡/🟢）`,
     `3. **协同升级应用**：synergy.levelUpgrades 中标记的升级必须被应用（如 🟡→🔴）`,
-    `4. **场景推演**：生成攻击链分析（attackChainAnalysis）、最坏情况的舆情传播剧本（worstCaseNarrative），以及类似事件先例列表（precedents，若 Turn 1 已检索到则必须输出）`,
+    prompts.orchestrationStep8Item4,
     ``,
     `### 最终 JSON 输出`,
     `请输出以下格式的纯 JSON，不包含任何 Markdown 标记或额外解释：`,
@@ -865,7 +866,7 @@ export function buildOrchestrationFinalizerPrompt(
     `请严格执行以上流程并输出 JSON：`,
     ``,
     // ── Rendering instructions (only for Orchestration mode Turn 3) ──
-    process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? "" : buildFinalRenderInstructions(),
+    process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? "" : buildFinalRenderInstructions(prompts),
   ].join("\n");
 }
 
@@ -1037,7 +1038,11 @@ export function buildIsolatedSystemAuditorMessage(
     .join("\n");
 }
 
-export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[], precedents?: Precedent[]): string {
+export function buildPreAuditFinalizerPrompt(
+  systemAuditors: Persona[],
+  precedents?: Precedent[],
+  prompts: PromptSegments = DEFAULT_FREE_PROMPTS,
+): string {
   return [
     `你是 **Kevlar-4u 系统初审总仲裁官**。`,
     ``,
@@ -1049,7 +1054,7 @@ export function buildPreAuditFinalizerPrompt(systemAuditors: Persona[], preceden
     `1. 合并去重：对所有系统审查员、本地规则及交叉验证的风险点进行最终聚合。`,
     `2. 风险定级：根据仲裁原则，对每个风险点重新校准风险等级（🔴/🟡/🟢）。`,
     `3. 协同升级：应用协同加权结果（synergy），处理跨维度的组合风险。`,
-    `4. 场景推演：生成攻击链分析（attackChainAnalysis）、最坏情况的舆情传播剧本（worstCaseNarrative），并在其中融入类似先例的历史教训。`,
+    prompts.finalizerCoreItem4,
     ``,
     `## 【最高仲裁原则】`,
     ``,

@@ -16,6 +16,7 @@ import {
   buildCoreReasoningFramework,
 } from "../prompts/reviewWizard.js";
 import { SERVER_INSTRUCTIONS } from "../prompts/instructions.js";
+import { DEFAULT_FREE_PROMPTS } from "../subscription/promptTypes.js";
 
 let tmpDir: string;
 
@@ -91,7 +92,7 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
 
   describe("Rendering instructions isolation", () => {
     it("buildFinalRenderInstructions contains full rendering protocol", () => {
-      const instructions = buildFinalRenderInstructions();
+      const instructions = buildFinalRenderInstructions(DEFAULT_FREE_PROMPTS);
       assert.ok(instructions.includes("排版与输出协议"), "Should contain rendering protocol title");
       assert.ok(instructions.includes("一级标题"), "Should contain heading instructions");
       assert.ok(instructions.includes("Markdown 表格"), "Should contain table instructions");
@@ -105,14 +106,16 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
         [],
         [],
         { triggered: [], overallMultiplier: 1.0, levelUpgrades: [] },
-        { bareOnly: [], fullOnly: [], stable: [] }
+        { bareOnly: [], fullOnly: [], stable: [] },
+        undefined,
+        DEFAULT_FREE_PROMPTS,
       );
       assert.ok(prompt.includes("排版与输出协议"), "Turn 3 prompt should include rendering instructions");
       assert.ok(prompt.includes("一级标题"), "Turn 3 prompt should include heading instructions");
     });
 
     it("buildPreAuditFinalizerPrompt does NOT include rendering instructions", () => {
-      const prompt = buildPreAuditFinalizerPrompt([]);
+      const prompt = buildPreAuditFinalizerPrompt([], undefined, DEFAULT_FREE_PROMPTS);
       assert.ok(!prompt.includes("排版与输出协议"), "Direct API/Sampling finalizer should NOT include rendering instructions");
     });
   });

@@ -10,6 +10,9 @@ import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { ToolModule } from "./types.js";
 import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
+import { isPro } from "../subscription/tier.js";
+import { SaaSClient } from "../utils/saasClient.js";
+import { DEFAULT_FREE_PROMPTS, type PromptSegments } from "../subscription/promptTypes.js";
 import { callConfiguredDirectApi, hasApiKey } from "../execution/modes/direct_api.js";
 import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
@@ -377,6 +380,12 @@ function buildOrchestrationPreAuditContext(
   };
 }
 
+async function resolvePromptSegments(): Promise<PromptSegments> {
+  if (!isPro()) return { ...DEFAULT_FREE_PROMPTS };
+  const serverPrompts = await SaaSClient.fetchSubscriptionPrompts();
+  return serverPrompts ?? { ...DEFAULT_FREE_PROMPTS };
+}
+
 /**
  * Handle orchestration Turn 1: parse Step 0 JSON from host AI,
  * run unified web search, then emit Turn 2 (audit) prompt.
@@ -616,6 +625,7 @@ async function executeLlmSystemAudit(
   const synergy = calculateSynergy(dimensionLevels, timingFlag);
 
   emit("⚖️ [4/4] 正在进行最终仲裁（Step 8）...");
+  const prompts = await resolvePromptSegments();
   const report = await finalizePreAuditReport(
     content,
     localFindings,
@@ -626,6 +636,7 @@ async function executeLlmSystemAudit(
     synergy,
     deltaRisks,
     precedents,
+    prompts,
   );
 
   report.synergyFlags = {
@@ -746,6 +757,8 @@ async function handleOrchestrationAuditResult(
       synergyTriggered: synergyResult.triggered.length > 0,
     });
 
+    const prompts = await resolvePromptSegments();
+
     // Emit Turn 3 prompt with code-layer deterministic results injected
     const turn3Prompt = buildOrchestrationFinalizerPrompt(
       state.content,
@@ -754,6 +767,7 @@ async function handleOrchestrationAuditResult(
       synergyResult,
       deltaRisks,
       state.orchestrationPreAuditContext?.precedents,
+      prompts,
     );
 
     return toolResponse(state, ORCHESTRATION_FINAL_GUIDANCE + turn3Prompt);
@@ -943,11 +957,12 @@ async function finalizePreAuditReport(
   },
   deltaRisks?: any,
   precedents?: Precedent[],
+  prompts: PromptSegments = DEFAULT_FREE_PROMPTS,
 ): Promise<PreAuditReport> {
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
   try {
     const response = await caller({
-      systemPrompt: buildPreAuditFinalizerPrompt(systemAuditors, precedents),
+      systemPrompt: buildPreAuditFinalizerPrompt(systemAuditors, precedents, prompts),
       messages: [
         {
           role: "user",
@@ -1437,7 +1452,8 @@ function summarizePreAuditResults(
 
 // ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
 
-function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
+function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSegments): string {
+  const segs = prompts ?? DEFAULT_FREE_PROMPTS;
   const lines: string[] = ["<!-- kevlar:verbatim-pre-audit:start -->", "初审结果"];
   if (state.preAuditReport?.summary) {
     lines.push(state.preAuditReport.summary);
@@ -1449,13 +1465,17 @@ function buildPreAuditSummaryBlock(state: ReviewWizardState): string {
   if (state.preAuditReport) {
     const precedents = state.preAuditReport.precedents;
     lines.push("");
-    lines.push("📌 类似先例（供自行检索）：");
-    if (precedents && precedents.length > 0) {
-      for (const p of precedents) {
-        lines.push(`• ${p.event}${p.date ? `（${p.date}）` : ""}`);
+    lines.push(`${segs.precedentSectionHeader}：`);
+    if (isPro()) {
+      if (precedents && precedents.length > 0) {
+        for (const p of precedents) {
+          lines.push(`• ${p.event}${p.date ? `（${p.date}）` : ""}`);
+        }
+      } else {
+        lines.push(segs.precedentNoneMessage);
       }
     } else {
-      lines.push("暂未检索到类似案例");
+      lines.push(segs.precedentLockedMessage);
     }
   }
 
@@ -1477,6 +1497,8 @@ async function handleInventoryCheck(
   personas: Persona[],
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
+  const prompts = await resolvePromptSegments();
+
   // 无评审员：提示创建，流程暂停
   if (personas.length === 0) {
     state.step = "waitingForPersonaCreation";
@@ -1486,7 +1508,7 @@ async function handleInventoryCheck(
     return toolResponse(
       state,
       [
-        buildPreAuditSummaryBlock(state),
+        buildPreAuditSummaryBlock(state, prompts),
         "",
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
@@ -1501,7 +1523,7 @@ async function handleInventoryCheck(
   return toolResponse(
     state,
     [
-      buildPreAuditSummaryBlock(state),
+      buildPreAuditSummaryBlock(state, prompts),
       "",
       "请选择下一步：",
       "1. 进入「复审」",
