@@ -1909,12 +1909,35 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
   };
 }
 
-async function saveState(tmpDir: string, state: ReviewWizardState): Promise<void> {
+async function saveState(tmpDir: string, state: ReviewWizardState, backup = true): Promise<void> {
   await fs.promises.mkdir(tmpDir, { recursive: true });
   const statePath = getStatePath(tmpDir, state.sessionId);
+
+  // Create backup before overwriting (MECP §6.3 state rollback)
+  if (backup && fs.existsSync(statePath)) {
+    try {
+      await fs.promises.copyFile(statePath, statePath + ".bak");
+    } catch {
+      // non-fatal: best-effort backup
+    }
+  }
+
   const tmpPath = statePath + ".tmp";
   await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
   await fs.promises.rename(tmpPath, statePath);
+}
+
+/** Rollback wizard state to last backup (MECP §6.3). */
+async function rollbackState(tmpDir: string, sessionId: string): Promise<boolean> {
+  const statePath = getStatePath(tmpDir, sessionId);
+  const bakPath = statePath + ".bak";
+  if (!fs.existsSync(bakPath)) return false;
+  try {
+    await fs.promises.copyFile(bakPath, statePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function cleanupState(tmpDir: string, sessionId: string): Promise<void> {

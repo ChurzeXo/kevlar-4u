@@ -60,7 +60,7 @@ export const LEGACY_TOOL_DESCRIPTION = `内容风险评测向导工具。
 3. [自然语言：深度推演]
    - 在表格下方，基于工具返回的详细字段（attackChainAnalysis, worstCaseNarrative, synergyFlags, precedents），严格按照以下逻辑链路进行自然语言的深度编排与扩写：
      🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 📌 类似先例（供自行检索） -> 🚨 最坏情况推演。
-   - 如果工具返回的 payload 中包含 precedents 数组且非空，在 ⚡ 协同放大效应之后、🚨 最坏情况推演之前，单起一段输出：
+   - precedents 非空时，📌 类似先例 段按以下格式单起一段输出：
        "📌 类似先例（供自行检索）："
        后接 bullet 列表，每项格式为："• {event}（{date}）"，date 缺失时省略括号。
 
@@ -119,7 +119,7 @@ export function buildFinalRenderInstructions(prompts: PromptSegments): string {
 3. **[自然语言：深度推演]**
    - 在表格下方，基于 attackChainAnalysis, worstCaseNarrative, synergyFlags, precedents 字段，严格按照以下逻辑链路进行自然语言的深度编排与扩写：
      🔴 核心风险（详细拆解攻击链） -> 🟡 次要风险 -> 🟢 无风险维度 -> ⚡ 协同放大效应 -> 📌 类似先例（供自行检索） -> 🚨 最坏情况推演。
-   - 在 ⚡ 协同放大效应之后、🚨 最坏情况推演之前，必须单起一段输出：
+   - precedents 非空时，📌 类似先例 段按以下格式单起一段输出：
        "${prompts.precedentSectionHeader}："
      ${prompts.finalRenderPrecedentInstruction}
 4. **[尾部状态询问]**

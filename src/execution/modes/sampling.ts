@@ -5,7 +5,7 @@
  * achieving true parallel multi-agent execution.
  */
 
-import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode, SamplingFunction } from "../base.js";
+import type { ExecutionContext, ExecutionHandler, ExecutionResult, ExecutionMode, SamplingFunction, UsageInfo } from "../base.js";
 import type { Persona } from "../../utils/parser.js";
 import { isSamplingSupported } from "../client.js";
 import { DEFAULT_DIMENSIONS_CONFIG } from "../dimensions.js";
@@ -21,7 +21,7 @@ async function callSamplingApi(
   systemPrompt: string,
   userMessage: string,
   maxTokens = 4096
-): Promise<{ content: string; stopReason?: string }> {
+): Promise<{ content: string; stopReason?: string; usage?: UsageInfo }> {
   logger.debug("Sampling call initiated", {
     event: "sampling_call",
     systemPromptLength: systemPrompt.length,
@@ -35,9 +35,17 @@ async function callSamplingApi(
       maxTokens,
     });
 
+    const usageLog: Record<string, unknown> = {
+      contentLength: result.content.length,
+    };
+    if (result.usage) {
+      usageLog.inputTokens = result.usage.inputTokens;
+      usageLog.outputTokens = result.usage.outputTokens;
+    }
+
     logger.debug("Sampling call succeeded", {
       event: "sampling_success",
-      contentLength: result.content.length,
+      ...usageLog,
     });
 
     return result;
@@ -104,6 +112,15 @@ async function executePersonaReview(
     augmentSystemPrompt(persona, dimensions, preAuditReport),
     userMessage
   );
+
+  if (response.usage) {
+    logger.debug("Persona review usage", {
+      event: "persona_usage",
+      personaId: persona.meta.id,
+      inputTokens: response.usage.inputTokens,
+      outputTokens: response.usage.outputTokens,
+    });
+  }
 
   return response.content;
 }

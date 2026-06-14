@@ -2,11 +2,12 @@
  * Lightweight observability utilities for local-first tools.
  *
  * Designed for MCP servers and CLI tools that don't need OTel.
- * Provides structured error info, duration tracking, and logger re-export.
+ * Provides structured error info, duration tracking, trace IDs,
+ * and logger re-export.
  *
  * ── Usage ─────────────────────────────────────────────────────────────
  *
- *   import { logger, getErrorInfo, withDuration } from "./observability.js";
+ *   import { logger, getErrorInfo, withDuration, generateTraceId, generateSpanId } from "./observability.js";
  *
  *   // 1. Structured logging
  *   logger.info("Review started", { event: "review_start", mode: "direct_api", personas: 5 });
@@ -16,9 +17,6 @@
  *   // 2. Extract structured error info (replaces ad-hoc instanceof checks)
  *   try { ... } catch (err) {
  *     const info = getErrorInfo(err);
- *     // info.code → "VALIDATION_ERROR" | "INTERNAL_ERROR" | ...
- *     // info.message → human-readable message
- *     // info.recoverable → true | false
  *     logger.error("Operation failed", { event: "op_failed", error: info.code, message: info.message, recoverable: info.recoverable });
  *     return { content: [{ type: "text", text: `❌ ${info.message}` }], isError: true };
  *   }
@@ -26,6 +24,11 @@
  *   // 3. Measure duration
  *   const { result, durationMs } = await withDuration(() => someAsyncWork());
  *   logger.info("Work done", { event: "work_complete", durationMs });
+ *
+ *   // 4. Distributed tracing (MECP §8.3)
+ *   const traceId = generateTraceId();
+ *   const spanId = generateSpanId();
+ *   logger.info("Trace started", { event: "trace_start", traceId, spanId });
  */
 
 export { logger } from "./logger.js";
@@ -82,6 +85,21 @@ export async function withDuration<T>(
   const start = Date.now();
   const result = await fn();
   return { result, durationMs: Date.now() - start };
+}
+
+// ── Trace & Span ID Generation (MECP §8.3) ────────────────────────────────────
+
+export function generateTraceId(): string {
+  return `trace-${crypto.randomUUID()}`;
+}
+
+export function generateSpanId(): string {
+  return `span-${crypto.randomUUID()}`;
+}
+
+/** Prefix a traceId and spanId onto a structured log context object. */
+export function withTraceContext<T extends Record<string, unknown>>(ctx: T, traceId: string, spanId: string, parentSpanId?: string): T & { traceId: string; spanId: string; parentSpanId?: string } {
+  return { ...ctx, traceId, spanId, ...(parentSpanId ? { parentSpanId } : {}) } as T & { traceId: string; spanId: string; parentSpanId?: string };
 }
 
 // ── Internal (avoid circular dep with errors.ts) ──────────────────────────────

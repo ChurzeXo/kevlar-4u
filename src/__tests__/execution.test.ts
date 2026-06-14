@@ -678,7 +678,7 @@ describe("executePersonasInParallel", () => {
   });
 
   it("respects maxConcurrency from config", async () => {
-    delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
     let maxConcurrent = 0;
     let current = 0;
 

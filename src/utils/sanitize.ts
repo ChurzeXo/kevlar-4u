@@ -22,6 +22,21 @@ export function scanForCredentials(text: string): string[] {
 }
 
 /**
+ * Redact sensitive credential patterns in text by replacing them with masked versions.
+ * MECP §7.2: Keep first 4 + last 4 chars, mask the middle.
+ */
+export function sanitizeOutput(output: string): string {
+  let safe = output;
+  for (const pattern of KEY_PATTERNS) {
+    safe = safe.replace(pattern, (match) => {
+      if (match.length <= 12) return "[REDACTED]";
+      return match.slice(0, 4) + "*".repeat(match.length - 8) + match.slice(-4);
+    });
+  }
+  return safe;
+}
+
+/**
  * Patterns that match the orchestration template's structural markers.
  * Injected content containing these could break out of the persona block.
  */
@@ -41,6 +56,36 @@ export function stripPromptBoundaries(text: string): string {
     result = result.replace(pattern, "");
   }
   return result.trim();
+}
+
+/**
+ * Sanitize user content before injecting into orchestration prompt boundaries.
+ *
+ * MECP §7.1: Prevents delimiter breakout by escaping XML entities and
+ * replacing reserved boundary tokens.
+ *
+ * 1. Escape XML entities (& < >) to prevent tag injection.
+ * 2. Replace known orchestration template boundary tokens with a safe marker.
+ */
+const BOUNDARY_TOKENS = [
+  "<!-- KEVLAR_PERSONA_END:",
+  "===== 人设边界",
+  "===== 内容边界",
+  "--- 隔离边界",
+];
+
+export function sanitizeForBoundary(content: string): string {
+  let result = content
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  for (const token of BOUNDARY_TOKENS) {
+    const escaped = token.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+    result = result.replace(new RegExp(escaped, "gi"), "[RESERVED_BOUNDARY_TOKEN]");
+  }
+
+  return result;
 }
 
 export function wrapContent(content: string, tag = "content"): string {

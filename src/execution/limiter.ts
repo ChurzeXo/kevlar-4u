@@ -198,4 +198,75 @@ export function getRateLimiter(config?: RateLimitConfig): RateLimiter {
   return new RateLimiter(config);
 }
 
+// ── Circuit Breaker ────────────────────────────────────────────────────────────
+
+export class CircuitBreakerOpenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CircuitBreakerOpenError";
+  }
+}
+
+interface CircuitBreakerEvent {
+  timestamp: number;
+  success: boolean;
+}
+
+export class CircuitBreaker {
+  private events: CircuitBreakerEvent[] = [];
+  private windowMs: number;
+  private failureThreshold: number;
+  private minCalls: number;
+  private open = false;
+
+  constructor(options?: { windowMs?: number; failureThreshold?: number; minCalls?: number }) {
+    this.windowMs = options?.windowMs ?? 120_000;
+    this.failureThreshold = options?.failureThreshold ?? 0.5;
+    this.minCalls = options?.minCalls ?? 5;
+  }
+
+  recordSuccess(): void {
+    this.prune();
+    this.events.push({ timestamp: Date.now(), success: true });
+    this.updateState();
+  }
+
+  recordFailure(): void {
+    this.prune();
+    this.events.push({ timestamp: Date.now(), success: false });
+    this.updateState();
+  }
+
+  isOpen(): boolean {
+    this.prune();
+    return this.open;
+  }
+
+  check(): void {
+    if (this.isOpen()) {
+      throw new CircuitBreakerOpenError(
+        "Direct API circuit breaker is open — failure rate exceeds threshold. Downgrading to orchestration mode."
+      );
+    }
+  }
+
+  private prune(): void {
+    const cutoff = Date.now() - this.windowMs;
+    this.events = this.events.filter(e => e.timestamp >= cutoff);
+  }
+
+  private updateState(): void {
+    if (this.events.length < this.minCalls) return;
+    const failures = this.events.filter(e => !e.success).length;
+    this.open = failures / this.events.length > this.failureThreshold;
+  }
+
+  reset(): void {
+    this.events = [];
+    this.open = false;
+  }
+}
+
+export const apiCircuitBreaker = new CircuitBreaker();
+
 

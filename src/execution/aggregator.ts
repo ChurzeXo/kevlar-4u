@@ -4,7 +4,7 @@
  * Combines results from multiple personas into a unified report.
  */
 
-import type { ExecutionMode } from "./base.js";
+import type { ExecutionMode, BudgetPolicy } from "./base.js";
 import type { DimensionsConfig } from "./dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaInstructions } from "./dimensions.js";
 import { t, getCurrentLanguage } from "../i18n/index.js";
@@ -23,6 +23,8 @@ interface PersonaResult {
 
 interface PersonaResultWithMeta extends PersonaResult {
   completedAt: Date;
+  /** Confidence score 0-1 based on review thoroughness (MECP §4.1 item 2). */
+  confidence?: number;
 }
 
 // ── Partial Result Container ───────────────────────────────────────────────────
@@ -40,9 +42,11 @@ export class ResultAggregator {
   private failedCount = 0;
 
   addSuccess(result: PersonaResult): void {
+    const confidence = estimateConfidence(result.review);
     this.results.push({
       ...result,
       completedAt: new Date(),
+      confidence,
     });
   }
 
@@ -180,6 +184,18 @@ ${resultsSummary(successful)}`;
   return report;
 }
 
+/**
+ * Estimate confidence (0-1) based on review thoroughness (MECP §4.1 item 2).
+ * Longer, more detailed reviews → higher confidence.
+ */
+function estimateConfidence(review: string): number {
+  if (!review || review.length < 20) return 0.3;
+  if (review.length < 100) return 0.5;
+  if (review.length < 500) return 0.6;
+  if (review.length < 1000) return 0.75;
+  return 0.9;
+}
+
 function resultsSummary(successful: PersonaResultWithMeta[]): string {
   if (successful.length === 0) return t("report.noReviewers", { ns: "common", defaultValue: "No reviewers successfully completed the review." });
 
@@ -188,14 +204,87 @@ function resultsSummary(successful: PersonaResultWithMeta[]): string {
   const ellipsis = locale === "zh-CN" ? "…" : "...";
 
   const lines: string[] = [];
-  for (const p of successful) {
-    const firstLine = p.review.split("\n")[0]?.replace(/^[#*\s]+/, "").slice(0, 80) || "";
-    lines.push(`- **${p.personaName}**${colon}${firstLine}${firstLine.length >= 80 ? ellipsis : ""}`);
+  const groups = deduplicateSimilarReviews(successful);
+  // Sort groups by max confidence descending (MECP §4.1 weighted consensus)
+  groups.sort((a, b) => {
+    const aMax = Math.max(...a.map(p => p.confidence ?? 0.5));
+    const bMax = Math.max(...b.map(p => p.confidence ?? 0.5));
+    return bMax - aMax;
+  });
+  for (const group of groups) {
+    if (group.length === 1) {
+      const p = group[0];
+      const firstLine = p.review.split("\n")[0]?.replace(/^[#*\s]+/, "").slice(0, 80) || "";
+      lines.push(`- **${p.personaName}** (${(p.confidence ?? 0.5).toFixed(2)})${colon}${firstLine}${firstLine.length >= 80 ? ellipsis : ""}`);
+    } else {
+      const names = group.map(p => p.personaName).join(locale === "zh-CN" ? "、" : ", ");
+      const firstLine = group[0].review.split("\n")[0]?.replace(/^[#*\s]+/, "").slice(0, 80) || "";
+      const avgConf = (group.reduce((s, p) => s + (p.confidence ?? 0.5), 0) / group.length).toFixed(2);
+      lines.push(`- **${names}**（${locale === "zh-CN" ? "观点相似" : "similar views"}）[${avgConf}]${colon}${firstLine}${firstLine.length >= 80 ? ellipsis : ""}`);
+    }
   }
   return lines.join("\n");
 }
 
-// ── Token Budget ──────────────────────────────────────────────────────────────
+/**
+ * Semantic deduplication (MECP §4.1 item 3).
+ * Groups reviews whose first significant lines share high keyword overlap.
+ */
+export function deduplicateSimilarReviews(reviews: PersonaResultWithMeta[]): PersonaResultWithMeta[][] {
+  const groups: PersonaResultWithMeta[][] = [];
+  const assigned = new Set<string>();
+
+  for (const r of reviews) {
+    if (assigned.has(r.personaId)) continue;
+
+    const group = [r];
+    assigned.add(r.personaId);
+    const tokensA = tokenize(r.review);
+
+    for (const other of reviews) {
+      if (assigned.has(other.personaId)) continue;
+      const tokensB = tokenize(other.review);
+      const similarity = jaccardSimilarity(tokensA, tokensB);
+      if (similarity > 0.35) {
+        group.push(other);
+        assigned.add(other.personaId);
+      }
+    }
+
+    groups.push(group);
+  }
+
+  return groups;
+}
+
+function tokenize(text: string): Set<string> {
+  const firstBlock = text.split("\n\n")[0] || text;
+  const words = firstBlock
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fff]+/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 1);
+  return new Set(words);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 0;
+  let intersection = 0;
+  for (const item of a) {
+    if (b.has(item)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+// ── Token Budget (MECP §8.2) ─────────────────────────────────────────────────
+
+/** Per-mode budget policy defaults from MECP §8.2 recommended table. */
+const BUDGET_POLICIES: Record<ExecutionMode, BudgetPolicy> = {
+  mcp_sampling: { maxAgentTokens: 8_000, maxTurns: 3, maxSessionTokens: 32_000 },
+  direct_api: { maxAgentTokens: 6_000, maxTurns: 5, maxSessionTokens: 40_000 },
+  orchestration: { maxAgentTokens: 4_000, maxTurns: 1, maxSessionTokens: 8_000 },
+};
 
 const DEFAULT_TOKEN_BUDGET = {
   per_task: 100_000,
@@ -230,9 +319,13 @@ export function estimateTokenCost(
   return contentTokens + personas * DEFAULT_TOKEN_BUDGET.per_persona + systemPromptTokens;
 }
 
-export function checkBudget(personas: number, contentLength: number, personaSystemPrompts?: string[]): void {
-  const budget =
-    Number(process.env.KEVLAR_TOKEN_BUDGET_PER_TASK) || DEFAULT_TOKEN_BUDGET.per_task;
+export function getBudgetPolicy(mode: ExecutionMode): BudgetPolicy {
+  return BUDGET_POLICIES[mode];
+}
+
+export function checkBudget(personas: number, contentLength: number, personaSystemPrompts?: string[], mode?: ExecutionMode): void {
+  const envBudget = Number(process.env.KEVLAR_TOKEN_BUDGET_PER_TASK);
+  const budget = envBudget || (mode ? getBudgetPolicy(mode).maxSessionTokens : DEFAULT_TOKEN_BUDGET.per_task);
   const estimated = estimateTokenCost(personas, contentLength, undefined, personaSystemPrompts);
 
   if (estimated > budget) {

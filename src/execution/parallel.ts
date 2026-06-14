@@ -34,7 +34,7 @@ export async function executePersonasInParallel(
 ): Promise<ExecutionResult> {
   const config = readConfig();
 
-  checkBudget(personas.length, content.length, personas.map(p => p.systemPrompt));
+  checkBudget(personas.length, content.length, personas.map(p => p.systemPrompt), options.mode);
 
   const limiter = getRateLimiter({
     maxConcurrent: config.multiAgent.maxConcurrency,

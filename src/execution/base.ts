@@ -11,19 +11,43 @@ export type ExecutionMode = "orchestration" | "mcp_sampling" | "direct_api";
 
 export type ResolveableMode = ExecutionMode | "auto";
 
+// ── Budget Policy (MECP §8.2) ────────────────────────────────────────────────
+
+export interface BudgetPolicy {
+  maxAgentTokens: number;
+  maxTurns: number;
+  maxSessionTokens: number;
+}
+
+// ── Tracing (MECP §8.3) ──────────────────────────────────────────────────────
+
+export interface TraceContext {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+}
+
+// ── Usage Tracking ───────────────────────────────────────────────────────────
+
+export interface UsageInfo {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
 // ── Sampling Function Type ───────────────────────────────────────────────────
 
 export type SamplingFunction = (params: {
   systemPrompt: string;
   message: string;
   maxTokens?: number;
-}) => Promise<{ content: string; stopReason?: string }>;
+}) => Promise<{ content: string; stopReason?: string; usage?: UsageInfo }>;
 
 export type MultiTurnSamplingFunction = (params: {
   systemPrompt: string;
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   maxTokens?: number;
-}) => Promise<{ content: string; stopReason?: string }>;
+}) => Promise<{ content: string; stopReason?: string; usage?: UsageInfo }>;
 
 // ── Execution Context ─────────────────────────────────────────────────────────
 
@@ -35,6 +59,40 @@ export interface ExecutionContext {
   samplingFn?: SamplingFunction;
   dimensions?: DimensionsConfig;
   preAuditReport?: any;
+  traceContext?: TraceContext;
+}
+
+// ── MECP Frame (MECP §9.2) ────────────────────────────────────────────────────
+
+/** Standardized actor-to-actor communication envelope. */
+export interface Frame<T = unknown> {
+  source: string;
+  destination: string;
+  correlationId: string;
+  traceId?: string;
+  type: "request" | "response" | "event" | "error";
+  payload: T;
+  timestamp: string;
+}
+
+/** Build a MECP-compliant Frame envelope. */
+export function toFrame<T>(
+  source: string,
+  destination: string,
+  correlationId: string,
+  type: Frame["type"],
+  payload: T,
+  traceId?: string,
+): Frame<T> {
+  return {
+    source,
+    destination,
+    correlationId,
+    traceId,
+    type,
+    payload,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 // ── Execution Result ─────────────────────────────────────────────────────────
@@ -44,6 +102,8 @@ export interface ExecutionResult {
   personas: string[]; // participating persona IDs
   mode: ExecutionMode;
   partialFailures?: Array<{ personaId: string; error: string }>;
+  /** MECP Frame envelope (§9.2). */
+  frame?: Frame<unknown>;
 }
 
 // ── Execution Handler Interface ─────────────────────────────────────────────

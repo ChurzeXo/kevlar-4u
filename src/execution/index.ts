@@ -11,14 +11,19 @@ import { isSamplingSupported } from "./client.js";
 import { orchestrationHandler } from "./modes/orchestration.js";
 import { samplingHandler } from "./modes/sampling.js";
 import { directApiHandler } from "./modes/direct_api.js";
+import { apiCircuitBreaker, CircuitBreakerOpenError } from "./limiter.js";
+import { generateTraceId, generateSpanId, withTraceContext } from "../utils/observability.js";
+import { toFrame } from "./base.js";
 import type {
   ExecutionContext,
   ExecutionHandler,
   ExecutionMode,
   ExecutionResult,
+  Frame,
   ModesInfo,
   ModeStatus,
   ResolveableMode,
+  TraceContext,
 } from "./base.js";
 
 // ── Handler Registry ──────────────────────────────────────────────────────────
@@ -54,17 +59,28 @@ export async function executeReview(
     throw new Error(`${resolved} 模式当前不可用`);
   }
 
-  logger.info("Executing review", {
+  // Initialize trace context (MECP §8.3)
+  const traceId = generateTraceId();
+  const spanId = generateSpanId();
+  const traceCtx: TraceContext = { traceId, spanId };
+  const tracedCtx: ExecutionContext = { ...ctx, traceContext: traceCtx };
+
+  logger.info("Executing review", withTraceContext({
     event: "review_execute",
     mode: resolved,
     personas: ctx.personas.length,
     contentLength: ctx.content.length,
-  });
+  }, traceId, spanId));
 
   const startTime = Date.now();
   let result: ExecutionResult;
 
   if (resolved !== "orchestration") {
+    // Circuit breaker check for direct_api mode
+    if (resolved === "direct_api") {
+      apiCircuitBreaker.check();
+    }
+
     const { acquireReviewLock, releaseReviewLock, getReviewLock } = await import("./lock.js");
     
     if (!acquireReviewLock(resolved)) {
@@ -75,24 +91,44 @@ export async function executeReview(
     }
 
     try {
-      result = await handler.execute(ctx);
+      result = await handler.execute(tracedCtx);
+    } catch (err) {
+      if (err instanceof CircuitBreakerOpenError) {
+        logger.warn("Circuit breaker open, downgrading to orchestration", withTraceContext({
+          event: "circuit_breaker_downgrade",
+          originalMode: resolved,
+        }, traceId, spanId));
+        result = await orchestrationHandler.execute(tracedCtx);
+      } else {
+        throw err;
+      }
     } finally {
       releaseReviewLock();
     }
   } else {
-    result = await handler.execute(ctx);
+    result = await handler.execute(tracedCtx);
   }
 
   const durationMs = Date.now() - startTime;
   const failedCount = result.partialFailures?.length ?? 0;
-  logger.info("Review summary", {
+  logger.info("Review summary", withTraceContext({
     event: "review_summary",
     mode: resolved,
     personas: ctx.personas.length,
     success: ctx.personas.length - failedCount,
     failure: failedCount,
     durationMs,
-  });
+  }, traceId, spanId));
+
+  // Attach MECP Frame envelope (§9.2)
+  result.frame = toFrame(
+    `kevlar/${resolved}`,
+    "mcp/host",
+    spanId,
+    result.partialFailures?.length ? "response" : "response",
+    { report: result.report, personas: result.personas, mode: result.mode, partialFailures: result.partialFailures },
+    traceId,
+  );
 
   return result;
 }

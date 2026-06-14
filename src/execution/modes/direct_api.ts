@@ -10,9 +10,23 @@ import type { Persona } from "../../utils/parser.js";
 import { DEFAULT_DIMENSIONS_CONFIG } from "../dimensions.js";
 import { executePersonasInParallel, buildUserMessage, augmentSystemPrompt } from "../parallel.js";
 import { logger } from "../../utils/logger.js";
-import { scanForCredentials } from "../../utils/sanitize.js";
+import { scanForCredentials, sanitizeOutput } from "../../utils/sanitize.js";
+import { readConfig } from "../config.js";
+import { apiCircuitBreaker } from "../limiter.js";
 
 const MODE: ExecutionMode = "direct_api";
+
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 // ── API Key Management ────────────────────────────────────────────────────────
 
@@ -121,7 +135,8 @@ async function callApi(keyInfo: ApiKeyInfo, request: LlmRequest): Promise<LlmRes
 }
 
 async function callAnthropic(apiKey: string, request: LlmRequest): Promise<LlmResponse> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const timeout = readConfig().multiAgent.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -135,7 +150,7 @@ async function callAnthropic(apiKey: string, request: LlmRequest): Promise<LlmRe
       max_tokens: request.maxTokens || 4096,
       temperature: request.temperature ?? 0.7,
     }),
-  });
+  }, timeout);
 
   if (!response.ok) {
     const error = await response.text();
@@ -161,7 +176,8 @@ async function callAnthropic(apiKey: string, request: LlmRequest): Promise<LlmRe
 async function callOpenAi(apiKey: string, request: LlmRequest): Promise<LlmResponse> {
   const model = request.model || "gpt-4o";
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const timeout = readConfig().multiAgent.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -176,7 +192,7 @@ async function callOpenAi(apiKey: string, request: LlmRequest): Promise<LlmRespo
       max_tokens: request.maxTokens || 4096,
       temperature: request.temperature ?? 0.7,
     }),
-  });
+  }, timeout);
 
   if (!response.ok) {
     const error = await response.text();
@@ -200,7 +216,8 @@ async function callOpenAi(apiKey: string, request: LlmRequest): Promise<LlmRespo
 async function callOllama(_apiKey: string, request: LlmRequest): Promise<LlmResponse> {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 
-  const response = await fetch(`${baseUrl}/api/chat`, {
+  const timeout = readConfig().multiAgent.timeoutMs || DEFAULT_TIMEOUT_MS;
+  const response = await fetchWithTimeout(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -217,7 +234,7 @@ async function callOllama(_apiKey: string, request: LlmRequest): Promise<LlmResp
       },
       stream: false,
     }),
-  });
+  }, timeout);
 
   if (!response.ok) {
     const error = await response.text();
@@ -258,23 +275,35 @@ export const directApiHandler: ExecutionHandler = {
       provider: keyInfo.provider,
     });
 
-    const result = await executePersonasInParallel(
-      personas,
-      content,
-      { mode: MODE, retryEventName: "api", dimensions: dimsConfig, preAuditReport: ctx.preAuditReport },
-      async (persona: Persona) => {
-        const review = await executePersonaReview(keyInfo, persona, content, contextNote, dimsConfig, ctx.preAuditReport);
-        return review;
+    try {
+      const result = await executePersonasInParallel(
+        personas,
+        content,
+        { mode: MODE, retryEventName: "api", dimensions: dimsConfig, preAuditReport: ctx.preAuditReport },
+        async (persona: Persona) => {
+          const review = await executePersonaReview(keyInfo, persona, content, contextNote, dimsConfig, ctx.preAuditReport);
+          return review;
+        }
+      );
+
+      const fullFailure = result.partialFailures && result.partialFailures.length >= personas.length;
+      if (fullFailure) {
+        apiCircuitBreaker.recordFailure();
+      } else {
+        apiCircuitBreaker.recordSuccess();
       }
-    );
 
-    logger.info("Direct API review completed", {
-      event: "direct_api_complete",
-      personas: result.personas.length,
-      partialFailures: result.partialFailures?.length || 0,
-    });
+      logger.info("Direct API review completed", {
+        event: "direct_api_complete",
+        personas: result.personas.length,
+        partialFailures: result.partialFailures?.length || 0,
+      });
 
-    return result;
+      return result;
+    } catch (err) {
+      apiCircuitBreaker.recordFailure();
+      throw err;
+    }
   },
 };
 
@@ -300,12 +329,12 @@ async function executePersonaReview(
 
   const leaked = scanForCredentials(response.content);
   if (leaked.length > 0) {
-    logger.warn("Credential pattern detected in LLM response", {
-      event: "credential_leak_detected",
+    logger.warn("Credential pattern detected and redacted in LLM response", {
+      event: "credential_redacted",
       personaId: persona.meta.id,
       patterns: leaked,
     });
   }
 
-  return response.content;
+  return sanitizeOutput(response.content);
 }

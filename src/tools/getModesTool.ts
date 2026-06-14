@@ -9,7 +9,7 @@ import { ToolResult } from "../utils/types.js";
 import { getModesInfo } from "../execution/index.js";
 import { readConfigAsync } from "../execution/config.js";
 import { hasApiKey } from "../execution/modes/direct_api.js";
-import { getSamplingClientList, isSamplingSupported } from "../execution/client.js";
+import { getSamplingClientList, isSamplingSupported, getCapabilitiesSummary } from "../execution/client.js";
 import type { ToolModule } from "./types.js";
 
 // ── Static Labels ──────────────────────────────────────────────────────────────
@@ -97,6 +97,8 @@ export async function handleGetModes(): Promise<ToolResult> {
       ? `\n\n💡 首次使用？你可以告诉我"设置"来切换执行模式。`
       : "";
 
+    const capsSummary = getCapabilitiesSummary();
+
     const text = [
       "**可用执行模式**",
       "",
@@ -105,7 +107,9 @@ export async function handleGetModes(): Promise<ToolResult> {
       ...rows,
       "",
       `**推荐模式**：${RECOMMENDED_LABELS[modesInfo.recommendedMode] ?? modesInfo.recommendedMode}`,
-      `**当前配置**：${modesInfo.currentMode} → ${modesInfo.resolvedMode}${firstTimeTip}`,
+      `**当前配置**：${modesInfo.currentMode} → ${modesInfo.resolvedMode}`,
+      `**客户端能力**：${capsSummary}`,
+      ...(firstTimeTip ? [firstTimeTip] : []),
     ].join("\n");
 
     return { content: [{ type: "text", text }] };

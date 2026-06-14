@@ -19,10 +19,11 @@ import {
   DEFENSIVE_DIMENSION_IDS,
 } from "../dimensions.js";
 import { transformFindingsToFocusTopics, formatFocusTopicsForPrompt } from "../focusTopicTransform.js";
-import { wrapContent, stripPromptBoundaries } from "../../utils/sanitize.js";
+import { wrapContent, stripPromptBoundaries, sanitizeForBoundary } from "../../utils/sanitize.js";
 import { buildKevlarRiskDirective, buildPseudoParallelDirective } from "../riskPrompt.js";
 import { buildCoreReasoningFramework, buildCoreFrameworkSteps, buildCommonRiskRules, buildCompactAuditorCoT } from "../../prompts/reviewWizard.js";
 import { buildRSTSection } from "../parallel.js";
+import { tryParseFindingsJson, parseStructuredOutput, FindingSchema } from "../jsonParser.js";
 
 const MODE: ExecutionMode = "orchestration";
 
@@ -46,17 +47,30 @@ export function buildPersonaEndMarker(index: number): string {
  *
  * 返回 { index, content } 数组。
  */
+export interface ParsedPersonaOutput {
+  index: number;
+  content: string;
+  source: "findings_tag" | "persona_end" | "raw";
+  /** Structured findings parsed from JSON content (MECP §6.4) */
+  structuredFindings?: Array<{ id: string; severity: string; description: string; evidence?: string; tags?: string[] }>;
+}
+
 export function parsePersonaOutputs(
   rawOutput: string,
   personaCount: number,
-): Array<{ index: number; content: string; source: "findings_tag" | "persona_end" | "raw" }> {
+): ParsedPersonaOutput[] {
   // 方案 A：<findings_N> 标签提取（结构化纯结论）
-  const aResults = new Map<number, string>();
+  const aResults = new Map<number, { content: string; structured?: ParsedPersonaOutput["structuredFindings"] }>();
   for (let i = 1; i <= personaCount; i++) {
     const tagRe = new RegExp(`<findings_${i}>([\\s\\S]*?)</findings_${i}>`, "i");
     const match = rawOutput.match(tagRe);
     if (match) {
-      aResults.set(i, match[1].trim());
+      const content = match[1].trim();
+      const parsed = tryParseFindingsJson(content);
+      aResults.set(i, {
+        content,
+        structured: parsed.structured ? parsed.findings : undefined,
+      });
     }
   }
 
@@ -70,10 +84,15 @@ export function parsePersonaOutputs(
   }
 
   // 合并：优先用 A（结构化 findings），A 缺失的用 B 补缺
-  const merged: Array<{ index: number; content: string; source: "findings_tag" | "persona_end" | "raw" }> = [];
+  const merged: ParsedPersonaOutput[] = [];
   for (let i = 1; i <= personaCount; i++) {
     if (aResults.has(i)) {
-      merged.push({ index: i, content: aResults.get(i)!, source: "findings_tag" });
+      merged.push({
+        index: i,
+        content: aResults.get(i)!.content,
+        source: "findings_tag",
+        structuredFindings: aResults.get(i)!.structured,
+      });
     } else if (bResults.has(i)) {
       merged.push({ index: i, content: bResults.get(i)!, source: "persona_end" });
     }
@@ -247,9 +266,9 @@ function buildPersonaBlock(
     ? `\n**发布平台 & 目标受众背景**：${contextNote}`
     : "";
 
-  const safeContent = wrapContent(content);
+  const safeContent = wrapContent(sanitizeForBoundary(content));
   const isSystemAuditor = persona.meta.tags.includes("system_auditor");
-  const safeSystemPrompt = wrapContent(stripPromptBoundaries(persona.systemPrompt), "sp");
+  const safeSystemPrompt = wrapContent(stripPromptBoundaries(sanitizeForBoundary(persona.systemPrompt)), "sp");
   const endMarker = buildPersonaEndMarker(index);
 
   if (isSystemAuditor) {
