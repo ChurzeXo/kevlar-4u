@@ -40,7 +40,7 @@ export class SaaSClient {
         return null;
       }
 
-      const data = await response.json();
+      const data: any = await response.json();
       if (!data || !data.prompts) return null;
 
       cachedPrompts = data.prompts as PromptSegments;

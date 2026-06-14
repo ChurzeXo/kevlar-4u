@@ -16,8 +16,8 @@ export interface WildTranslation {
 }
 
 export interface Precedent {
-  event: string;  // 事件名称
-  date?: string;  // 事件时间（可选）
+  event: string; // 事件名称
+  date?: string; // 事件时间（可选）
 }
 
 export interface Step0Result {
@@ -27,13 +27,15 @@ export interface Step0Result {
   precedents?: Precedent[]; // 类似舆情事件先例
 }
 
-export const LEGACY_TOOL_DESCRIPTION = `内容风险评测向导工具。
+// ── Shared core template ────────────────────────────────────────────────────
+
+const TOOL_CORE_PREFIX = `内容风险评测向导工具。
 
 【核心功能】
 基于"职业黑粉逆向解码"视角，对用户提交的文本进行深度攻击链推演与多维度社会语义风险评测。
 
 【触发时机】
-当用户提交文本内容，并明确要求“评测风险”、“审稿”、“挑刺”、“排查翻车风险”或类似表述时调用。
+当用户提交文本内容，并明确要求"评测风险"、"审稿"、"挑刺"、"排查翻车风险"或类似表述时调用。
 
 【接口契约】
 - 输入：待评测的纯文本（不支持图片、音频或文档附件）。
@@ -41,10 +43,26 @@ export const LEGACY_TOOL_DESCRIPTION = `内容风险评测向导工具。
 
 【核心控制生命周期】
 1. 捕获输入：调用本工具，传入待评测文本。
-2. 搬运渲染：工具返回初审报告后，你作为外壳，必须严格按照下方【排版与输出协议】向用户展示最终报告，不得私自截断或增删。
-3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进复审或平台检查流程。
+2. 搬运渲染：工具返回初审报告后，你作为外壳，必须严格按照`;
 
-【排版与输出协议（硬性约束）】
+const TOOL_CORE_SUFFIX = `向用户展示最终报告，不得私自截断或增删。
+3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进复审或平台检查流程。`;
+
+// ── Tool descriptions ──────────────────────────────────────────────────────
+
+/** 旧版步骤 2 引用"下方【排版与输出协议】"（紧随其后即排版协议） */
+const STEP2_LEGACY = `下方【排版与输出协议】`;
+
+/** 新版步骤 2 引用"工具返回的排版协议"（协议由工具动态返回，不在描述中） */
+const STEP2_CLEAN = `工具返回的排版协议`;
+
+export const TOOL_DESCRIPTION = `${TOOL_CORE_PREFIX}${STEP2_CLEAN}${TOOL_CORE_SUFFIX}`;
+
+/**
+ * 排版协议 + 红线约束（仅旧版工具描述中包含）。
+ * 新版中通过 buildFinalRenderInstructions() 在编排模式的 Turn 3 finalizer prompt 注入。
+ */
+export const LEGACY_RENDERING_SECTION = `【排版与输出协议（硬性约束）】
 大模型在输出表现层时，必须严格执行以下四个格式区块，禁止调换顺序：
 
 1. [# 一级标题：风险等级]
@@ -73,22 +91,9 @@ export const LEGACY_TOOL_DESCRIPTION = `内容风险评测向导工具。
 - 禁止伪合规引导：绝对禁止使用「你可以…」、「建议你…」、「更好的表达是…」等任何具有建设性、引导性的祈使句式。
 - 保持冷酷：你只是一个检测器和协议搬运工，不是内容创作者。`;
 
-export const TOOL_DESCRIPTION = `内容风险评测向导工具。
+export const LEGACY_TOOL_DESCRIPTION = `${TOOL_CORE_PREFIX}${STEP2_LEGACY}${TOOL_CORE_SUFFIX}
 
-【核心功能】
-基于"职业黑粉逆向解码"视角，对用户提交的文本进行深度攻击链推演与多维度社会语义风险评测。
-
-【触发时机】
-当用户提交文本内容，并明确要求"评测风险"、"审稿"、"挑刺"、"排查翻车风险"或类似表述时调用。
-
-【接口契约】
-- 输入：待评测的纯文本（不支持图片、音频或文档附件）。
-- 输出：包含结构化数据（表格、分析链）与初步排版的初审报告 payload。
-
-【核心控制生命周期】
-1. 捕获输入：调用本工具，传入待评测文本。
-2. 搬运渲染：工具返回初审报告后，你作为外壳，必须严格按照工具返回的排版协议向用户展示最终报告，不得私自截断或增删。
-3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进复审或平台检查流程。`;
+${LEGACY_RENDERING_SECTION}`;
 
 /**
  * Build the final rendering instructions for Orchestration mode Turn 3.
@@ -397,9 +402,7 @@ export function buildGlobalStep0Prompt(): string {
     ``,
     JSON.stringify(
       {
-        wildTranslations: [
-          { original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }
-        ],
+        wildTranslations: [{ original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }],
         blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
         attackCandidates: [
           {
@@ -407,9 +410,7 @@ export function buildGlobalStep0Prompt(): string {
             attackChain: "原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
           },
         ],
-        precedents: [
-          { event: "2024年某品牌低俗广告事件", date: "2024-03" },
-        ],
+        precedents: [{ event: "2024年某品牌低俗广告事件", date: "2024-03" }],
       },
       null,
       2,
@@ -567,9 +568,7 @@ export function buildOrchestrationStep0Prompt(
     ``,
     JSON.stringify(
       {
-        wildTranslations: [
-          { original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }
-        ],
+        wildTranslations: [{ original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }],
         blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
         attackCandidates: [
           {
@@ -578,7 +577,7 @@ export function buildOrchestrationStep0Prompt(
           },
         ],
         webContextMap: {
-          "关键词1": "- 标题: 摘要内容\n- 标题2: 摘要内容",
+          关键词1: "- 标题: 摘要内容\n- 标题2: 摘要内容",
         },
         precedents: [
           {
@@ -995,7 +994,8 @@ export function buildIsolatedSystemAuditorMessage(
     ``,
     buildCompactAuditorCoT(auditor),
     ``,
-    auditor.meta.id === "cross_lingual_distortion" && (!step0Result?.wildTranslations || step0Result.wildTranslations.length === 0)
+    auditor.meta.id === "cross_lingual_distortion" &&
+    (!step0Result?.wildTranslations || step0Result.wildTranslations.length === 0)
       ? `⚡ 快速通道：wildTranslations 为空数组（文案无外文），跨语言曲解维度直接判定为 🟢 无风险，跳过后续推理。`
       : `重要提示：当前沙盒的推理必须以 Step 0 的输出（attackCandidates）为输入，判断攻击点是否属于本维度并补充风险描述，不需要重新推演攻击链。`,
     ``,

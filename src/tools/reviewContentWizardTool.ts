@@ -18,7 +18,7 @@ import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
 import {
   TOOL_DESCRIPTION,
-  LEGACY_TOOL_DESCRIPTION,
+  LEGACY_RENDERING_SECTION,
   buildOrchestrationStep0Prompt,
   buildOrchestrationAuditPrompt,
   buildOrchestrationFinalizerPrompt,
@@ -124,7 +124,7 @@ const ORCHESTRATION_FINAL_GUIDANCE = [
 
 export const reviewContentWizardToolDefinition: Tool = {
   name: "review_content_wizard",
-  description: process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? LEGACY_TOOL_DESCRIPTION : TOOL_DESCRIPTION,
+  description: process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? `${TOOL_DESCRIPTION}\n\n${LEGACY_RENDERING_SECTION}` : TOOL_DESCRIPTION,
 
   inputSchema: {
     type: "object",
