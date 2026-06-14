@@ -239,6 +239,7 @@ export class CircuitBreaker {
 
   isOpen(): boolean {
     this.prune();
+    this.updateState();
     return this.open;
   }
 

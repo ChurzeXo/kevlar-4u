@@ -90,11 +90,15 @@ export async function withDuration<T>(
 // ── Trace & Span ID Generation (MECP §8.3) ────────────────────────────────────
 
 export function generateTraceId(): string {
-  return `trace-${crypto.randomUUID()}`;
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function generateSpanId(): string {
-  return `span-${crypto.randomUUID()}`;
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Prefix a traceId and spanId onto a structured log context object. */

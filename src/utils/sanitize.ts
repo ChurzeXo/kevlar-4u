@@ -1,7 +1,7 @@
 const KEY_PATTERNS = [
   /sk-ant-[a-zA-Z0-9]{10,}/g,
   /sk-[a-zA-Z0-9]{20,}/g,
-  /(?:api|secret|private|token|key)[-_]?[a-zA-Z0-9]{16,}/gi,
+  /(?:api|secret|private|token|key|credential|password)[-_]?[a-zA-Z0-9]{16,}/gi,
   /AIza[0-9A-Za-z_-]{35}/g,
   /ghp_[a-zA-Z0-9]{36}/g,
   /gho_[a-zA-Z0-9]{36}/g,

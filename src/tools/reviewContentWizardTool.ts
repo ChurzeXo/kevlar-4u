@@ -495,6 +495,7 @@ async function handleOrchestrationStep0Result(
     );
   } catch (err) {
     const info = getErrorInfo(err);
+    await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
@@ -773,6 +774,7 @@ async function handleOrchestrationAuditResult(
     return toolResponse(state, ORCHESTRATION_FINAL_GUIDANCE + turn3Prompt);
   } catch (err) {
     const info = getErrorInfo(err);
+    await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
@@ -852,6 +854,7 @@ async function handleOrchestrationFinalResult(
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {
     const info = getErrorInfo(err);
+    await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
