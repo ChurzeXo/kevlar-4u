@@ -4,14 +4,16 @@
   "description": "Kevlar-4u: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
   "main": "dist/index.js",
   "bin": {
-    "kevlar-4u": "dist/index.js"
+    "kevlar-4u": "dist/scripts/cli.js"
   },
   "scripts": {
-    "build": "tsc && cp -r src/i18n/locales dist/i18n/locales",
+    "build": "tsc -b && cp -r src/i18n/locales dist/i18n/locales",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "setup": "tsx scripts/setup.ts",
     "kevlar-4u": "tsx scripts/cli.ts",
+    "auto-install": "tsx scripts/cli.ts --auto",
+    "build:scripts": "tsc -b tsconfig.scripts.json",
     "test": "tsx --test src/__tests__/*.test.ts",
     "test:watch": "tsx --test --watch src/__tests__/*.test.ts",
     "prepublishOnly": "if [ -z \"$CI\" ]; then echo '⚠️  请通过 CI 发布：git tag vX.X.X && git push origin vX.X.X'; exit 1; fi"
