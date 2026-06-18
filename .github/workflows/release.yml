@@ -36,7 +36,9 @@ jobs:
       - name: Build
         run: npm run build
 
-
+      # ── 5. Run tests ──────────────────────────────────────────────────────
+      - name: Test
+        run: npm test
 
       # ── 6. Extract version from tag (e.g. refs/tags/v1.2.3 → 1.2.3) ────
       - name: Extract version

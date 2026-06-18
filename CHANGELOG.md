@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.4.0] - 2026-06-18
+
+### Added
+
+- **Precedents (Similar Incident Lookup)**: Pre-audit pipeline now searches for real-world similar incidents and injects them as reviewer context to strengthen risk detection
+- **Cross-lingual Distortion Auditor**: New 6th system auditor (`cross_lingual_distortion`) detects malicious mistranslation, Chinglish puns, and cultural misfit risks across languages
+- **MECP Compliance Optimizations (P1-P3)**: Circuit breaker for LLM calls, structured JSON parser with fallback, request sanitization, distributed tracing with traceId/spanId, and automatic rollback on failure
+- **Auto-install Mode**: `--auto` flag enables silent, non-interactive installation designed for AI-invoked setup (`npx -y kevlar-4u --auto`)
+- **ESC to Cancel**: Press ESC during the interactive installer to cancel at any time
+- **Tier/Subscription Decoupling**: SaaS-fetched `PromptSegments` and unified `isPro()` logic for future cloud features
+- **Web Search Integration**: Step 0b+ now uses host AI's own web search tool for blacklist atom verification instead of DuckDuckGo dependency
+
+### Changed
+
+- **Three-tier Instruction Decoupling**: Separated `SERVER_INSTRUCTIONS`, `TOOL_DESCRIPTION`, and dynamic prompt composition into independent layers for cleaner maintenance
+- **Two-stage Orchestration Pipeline**: Turn 1 performs global decode (black atom extraction + emotional reframing), Turn 2 performs per-dimension system audit — replacing single-pass scanning
+- **DuckDuckGo Removed**: Web search responsibility shifted to host AI in orchestration mode, eliminating external dependency
+- **CLI MCP Entry Path Fix**: Local installation now points to compiled `dist/scripts/cli.js` instead of TypeScript source, ensuring AI clients can spawn the MCP server correctly
+- **tsconfig Restructured**: Project references (`tsconfig.src.json` + `tsconfig.scripts.json`) resolve `rootDir` conflict between `src/` and `scripts/`
+- **Auditor Prompt Hardening**: System auditor prompts refined with adversarial "black-fan" perspective and compact chain-of-thought per dimension
+- **Review Wizard UI**: Cleaner persona selection with numbered listing and compact CoT rendering
+
+### Fixed
+
+- **MCP Entry Path for Local Runs**: `npm run kevlar-4u` now generates correct `node dist/scripts/cli.js` entries instead of pointing at `.ts` source files that Node.js cannot execute
+- **MECP Audit 5 Fixes**: Circuit breaker reset, JSON parser edge cases, input sanitization, trace context propagation, and rollback on partial failure
+- **Precedents Rendering**: Similar incidents now render in both orchestration and direct API output paths
+- **Delta Risks**: `buildEmptyDeltaRisks` function restored and applied across all review paths
+
+---
+
 ## [1.3.0] - 2026-05-30
 
 ### Changed
