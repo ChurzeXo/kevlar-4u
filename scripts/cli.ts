@@ -26,6 +26,7 @@ const GITHUB_REPO = "9Churze/kevlar-4u";
 // Resolve package version from nearest package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const currentScriptPath = fileURLToPath(import.meta.url);
+const compiledEntryPath = path.resolve(__dirname, "..", "dist", "scripts", "cli.js");
 
 function findPackageJson(startDir: string): any {
   let curr = startDir;
@@ -371,9 +372,11 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
 if (process.argv.includes("--stdio")) {
   const projectRoot = pkg.__path ? path.dirname(pkg.__path) : path.resolve(__dirname, "..");
 
-  const serverPath = fs.existsSync(path.join(projectRoot, "dist/index.js"))
-    ? path.join(projectRoot, "dist/index.js")
-    : path.join(projectRoot, "src/index.ts");
+  const serverPath = path.join(projectRoot, "dist", "index.js");
+  if (!fs.existsSync(serverPath)) {
+    console.error("[Kevlar-4u] dist/index.js not found. Run `npm run build` first.");
+    process.exit(1);
+  }
 
   const child = spawn("node", [serverPath, ...process.argv.slice(2)], {
     stdio: "inherit",
@@ -617,7 +620,9 @@ async function runAutoInstall() {
   const isRemoteRun = __dirname.includes("node_modules") || __dirname.includes("_npx");
   const { cmd, args } = isRemoteRun
     ? { cmd: "npx", args: ["-y", "kevlar-4u@latest", "--stdio"] }
-    : { cmd: "node", args: [currentScriptPath, "--stdio"] };
+    : fs.existsSync(compiledEntryPath)
+      ? { cmd: "node", args: [compiledEntryPath, "--stdio"] }
+      : { cmd: "npx", args: ["tsx", currentScriptPath, "--stdio"] };
 
   const registry = getRegistry();
 
@@ -671,7 +676,9 @@ async function runCLI() {
   // When launched with --stdio, the CLI spawns the real server.
   const { cmd, args } = isRemoteRun
     ? { cmd: "npx", args: ["-y", "kevlar-4u@latest", "--stdio"] }
-    : { cmd: "node", args: [currentScriptPath, "--stdio"] };
+    : fs.existsSync(compiledEntryPath)
+      ? { cmd: "node", args: [compiledEntryPath, "--stdio"] }
+      : { cmd: "npx", args: ["tsx", currentScriptPath, "--stdio"] };
 
   const registry = getRegistry();
 
