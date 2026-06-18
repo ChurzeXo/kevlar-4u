@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.4.0)"
+        required: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -20,6 +25,8 @@ jobs:
       # ── 1. Checkout ──────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       # ── 2. Setup Node.js ─────────────────────────────────────────────────
       - name: Set up Node.js
@@ -43,7 +50,9 @@ jobs:
       # ── 6. Extract version from tag (e.g. refs/tags/v1.2.3 → 1.2.3) ────
       - name: Extract version
         id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       # ── 7. Bundle release tarball ─────────────────────────────────────────
       # Includes: compiled dist/, skills/, config/, README, LICENSE
@@ -75,7 +84,8 @@ jobs:
       - name: Extract changelog
         id: changelog
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
           # Extract the section for current version from CHANGELOG.md
           # Matches from "## [x.y.z]" to the next "## [" or end of file
           SECTION=$(sed -n "/^## \\[${VERSION}\\]/,/^## \\[/p" CHANGELOG.md | head -n -1)
@@ -95,13 +105,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "🛡️ Kevlar ${{ github.ref_name }}"
+          name: "🛡️ Kevlar ${{ github.event.inputs.tag || github.ref_name }}"
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           body_path: changelog.txt
           files: |
             kevlar-${{ steps.version.outputs.VERSION }}.tar.gz
             kevlar-${{ steps.version.outputs.VERSION }}.zip
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
