@@ -1,8 +1,8 @@
 # Kevlar — 댓글 시뮬레이터
 
 ![Release](https://img.shields.io/badge/Release-passing-brightgreen?logo=github)
-![License](https://img.shields.io/github/license/9Churze/kevlar-4u?color=blue)
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/9Churze/kevlar-4u?color=blue)
+![License](https://img.shields.io/github/license/ChurzeXo/kevlar-4u?color=blue)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/ChurzeXo/kevlar-4u?color=blue)
 ![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)
 
 🌐 [English](../README.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)

@@ -21,7 +21,7 @@ const AMBER = chalk.hex("#FFBF00");
 const ORANGE = chalk.hex("#FF8C00");
 
 const MCP_NAME = "kevlar-4u";
-const GITHUB_REPO = "9Churze/kevlar-4u";
+const GITHUB_REPO = "ChurzeXo/kevlar-4u";
 
 // Resolve package version from nearest package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

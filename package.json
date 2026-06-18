@@ -33,15 +33,15 @@
     "content-review",
     "ai"
   ],
-  "author": "9Churze",
+  "author": "ChurzeXo",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/9Churze/kevlar-4u.git"
+    "url": "https://github.com/ChurzeXo/kevlar-4u.git"
   },
-  "homepage": "https://github.com/9Churze/kevlar-4u#readme",
+  "homepage": "https://github.com/ChurzeXo/kevlar-4u#readme",
   "bugs": {
-    "url": "https://github.com/9Churze/kevlar-4u/issues"
+    "url": "https://github.com/ChurzeXo/kevlar-4u/issues"
   },
   "type": "module",
   "dependencies": {
