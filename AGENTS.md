@@ -8,15 +8,31 @@ An MCP stdio server that stress-tests content by simulating reader reactions thr
 
 | Command | What |
 |---|---|
-| `npm run dev` | Run via `tsx src/index.ts` (no build needed) |
-| `npm run build` | `tsc` — compiles `src/` → `dist/` |
+| `npm run dev` | Run server via `tsx src/index.ts` (no build) |
+| `npm run kevlar-4u` | Interactive install CLI via `tsx` (no build) |
+| `npm run auto-install` | Silent auto-install via `tsx` (no build) |
+| `npm run build` | Full build: `src/` + `scripts/` → `dist/` |
+| `npm run build:scripts` | Quick: build only `scripts/` → `dist/scripts/` |
 | `npm start` | Run compiled `dist/index.js` |
 | `npm test` | `tsx --test src/__tests__/*.test.ts` |
 | `npm run test:watch` | `tsx --test --watch src/__tests__/*.test.ts` |
-| `npm run setup` | Zero-config auto-setup |
-| `npm run kevlar-4u` | Interactive install CLI |
+| `npm run setup` | Zero-config auto-setup (Claude only) |
+| `npx .` | Run compiled bin (simulates published package) |
+| `npx . --auto` | Run compiled bin in silent mode |
 
 **Single test file**: `npx tsx --test src/__tests__/<name>.test.ts`
+
+## Development workflow
+
+All local testing uses `tsx` directly — no build needed:
+
+1. Edit code (`src/` or `scripts/`)
+2. Test with the `npm run dev` / `npm run kevlar-4u` / `npm run auto-install` commands
+3. Pass tests with `npm test`
+4. Final verification: `npm run build:scripts` (or `npm run build` for full build), then restart your AI client
+
+> `npm run build:scripts` recompiles `scripts/cli.ts` → `dist/scripts/cli.js` in <1s.
+> Run this when you want to test the actual compiled bin (via `npx .`) or rebuild after a code change so installed clients pick up the new version.
 
 ## Testing
 

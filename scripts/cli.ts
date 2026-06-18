@@ -25,6 +25,7 @@ const GITHUB_REPO = "9Churze/kevlar-4u";
 
 // Resolve package version from nearest package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const currentScriptPath = fileURLToPath(import.meta.url);
 
 function findPackageJson(startDir: string): any {
   let curr = startDir;
@@ -362,9 +363,10 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
   };
 }
 
-// ── MCP stdio pass-through mode ──────────────────────────────────
-// When Claude Desktop spawns this file as an MCP server it passes --stdio.
-// We forward to the compiled entry point instead of rendering the CLI.
+// ── Mode dispatch ──────────────────────────────────────────────
+// --auto   silent install (for AI-invoked setup)
+// --stdio  MCP server mode (spawns the compiled server)
+// (no flag) interactive install wizard
 
 if (process.argv.includes("--stdio")) {
   const projectRoot = pkg.__path ? path.dirname(pkg.__path) : path.resolve(__dirname, "..");
@@ -377,6 +379,11 @@ if (process.argv.includes("--stdio")) {
     stdio: "inherit",
   });
   child.on("exit", (code) => process.exit(code ?? 0));
+} else if (process.argv.includes("--auto")) {
+  runAutoInstall().catch((err) => {
+    console.error(`[Kevlar-4u] Fatal: ${err.message}`);
+    process.exit(1);
+  });
 } else {
   runCLI().catch((err) => {
     console.error(`${centerPad()}${RED(`\n  Fatal error: ${err.message}`)}`);
@@ -601,6 +608,58 @@ function setupEscapeHandler() {
   process.stdin.on("keypress", handler);
 }
 
+// ── Silent auto-install mode ─────────────────────────────────────
+// Triggered by --auto flag. No prompts, no fancy UI.
+// Designed for AI-invoked setup: "npx -y kevlar-4u --auto"
+
+async function runAutoInstall() {
+  currentLang = loadSavedLanguage();
+  const isRemoteRun = __dirname.includes("node_modules") || __dirname.includes("_npx");
+  const { cmd, args } = isRemoteRun
+    ? { cmd: "npx", args: ["-y", "kevlar-4u@latest", "--stdio"] }
+    : { cmd: "node", args: [currentScriptPath, "--stdio"] };
+
+  const registry = getRegistry();
+
+  // Scan (no spinner, no noise)
+  const detectionResults = await Promise.all(
+    registry.map(async (c) => ({ client: c, found: await detectClient(c) })),
+  );
+  const found = detectionResults.filter((r) => r.found).map((r) => r.client);
+
+  if (found.length === 0) {
+    console.log("[Kevlar-4u] No supported AI clients detected.");
+    process.exit(0);
+  }
+
+  // Inject
+  const results: Array<{ client: ClientDef; result: InjectResult }> = [];
+  for (const client of found) {
+    const result = await injectConfig(client, { cmd, args });
+    results.push({ client, result });
+  }
+
+  // Report
+  const ok = results.filter((r) => r.result.ok);
+  const err = results.filter((r) => !r.result.ok);
+  for (const { client, result } of ok) {
+    const status = result.status === "skipped" ? "already configured" : "configured";
+    console.log(`[Kevlar-4u] ✓ ${client.label} — ${status}`);
+    if (result.backupPath) console.log(`         backup: ${sanitisePath(result.backupPath)}`);
+  }
+  for (const { client, result } of err) {
+    console.log(`[Kevlar-4u] ✗ ${client.label} — ${result.errorType ?? "error"}`);
+  }
+
+  if (ok.length > 0) {
+    console.log("");
+    console.log(`[Kevlar-4u] ✅ Installation complete. Restart your AI client, then say:`);
+    console.log(`         "${currentLang === "zh-CN" ? "帮我用 Kevlar-4u 压力测试一下我的内容。" : "Help me stress-test my content with Kevlar-4u."}"`);
+  }
+
+  process.exit(err.length > 0 ? 1 : 0);
+}
+
 async function runCLI() {
   setupEscapeHandler();
 
@@ -608,17 +667,11 @@ async function runCLI() {
 
   const projectRoot = pkg.__path ? path.dirname(pkg.__path) : path.resolve(__dirname, "..");
 
+  // The MCP client config points to THIS script with --stdio.
+  // When launched with --stdio, the CLI spawns the real server.
   const { cmd, args } = isRemoteRun
     ? { cmd: "npx", args: ["-y", "kevlar-4u@latest", "--stdio"] }
-    : {
-        cmd: "node",
-        args: [
-          fs.existsSync(path.join(projectRoot, "dist/index.js"))
-            ? path.join(projectRoot, "dist/index.js")
-            : path.join(projectRoot, "src/index.ts"),
-          "--stdio",
-        ],
-      };
+    : { cmd: "node", args: [currentScriptPath, "--stdio"] };
 
   const registry = getRegistry();
 

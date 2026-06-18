@@ -40,3 +40,6 @@ RELEASE.md
 
 # Workbuddy (local editor/tool config)
 .workbuddy/
+
+# TypeScript build info
+tsconfig.src.tsbuildinfo
