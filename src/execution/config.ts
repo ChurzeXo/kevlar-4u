@@ -101,6 +101,23 @@ export async function readConfigAsync(): Promise<KevlarConfig> {
 
 // ── Write Config ─────────────────────────────────────────────────────────────
 
+/**
+ * Direct write — used by activation pipeline to persist sync_token and cloud_server_url.
+ * Prefer updateConfig() for selective field updates.
+ */
+export function writeConfig(config: KevlarConfig): void {
+  if (!configPath) {
+    const skillsDir = process.env.KEVLAR_SKILLS_DIR;
+    if (skillsDir) {
+      configPath = path.join(skillsDir, "kevlar-config.json");
+    } else {
+      throw new Error("Config path not initialized — set KEVLAR_SKILLS_DIR or call setConfigPath()");
+    }
+  }
+  config.updatedAt = new Date().toISOString();
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+}
+
 interface UpdateConfigOptions {
   mode?: ResolveableMode;
   maxConcurrency?: number;

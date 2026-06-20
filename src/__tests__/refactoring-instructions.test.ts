@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
+import { fileURLToPath } from "url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -16,13 +17,29 @@ import {
   buildCoreReasoningFramework,
 } from "../prompts/reviewWizard.js";
 import { SERVER_INSTRUCTIONS } from "../prompts/instructions.js";
-import { DEFAULT_FREE_PROMPTS } from "../subscription/promptTypes.js";
+import { loadPromptSegments, writePromptSegmentsFile } from "../subscription/promptTemplates.js";
+import type { PromptSegments } from "../subscription/promptTypes.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REAL_TEMPLATES_DIR = path.resolve(__dirname, "..", "..", "skills", "templates");
 
 let tmpDir: string;
+let FREE_SEGMENTS: PromptSegments;
+
+function copyTemplatesTo(tmpDir: string): void {
+  const tmpTemplates = path.join(tmpDir, "templates");
+  fs.mkdirSync(tmpTemplates, { recursive: true });
+  for (const file of fs.readdirSync(REAL_TEMPLATES_DIR)) {
+    fs.copyFileSync(path.join(REAL_TEMPLATES_DIR, file), path.join(tmpTemplates, file));
+  }
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-refactor-"));
+  copyTemplatesTo(tmpDir);
   process.env.KEVLAR_SKILLS_DIR = tmpDir;
+  FREE_SEGMENTS = loadPromptSegments("free");
 });
 
 afterEach(() => {
@@ -45,7 +62,7 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
     });
 
     it("MCP server exposes instructions field", async () => {
-      const server = createKevlarServer();
+      const server = await createKevlarServer();
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
       const client = new Client(
@@ -92,7 +109,7 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
 
   describe("Rendering instructions isolation", () => {
     it("buildFinalRenderInstructions contains full rendering protocol", () => {
-      const instructions = buildFinalRenderInstructions(DEFAULT_FREE_PROMPTS);
+      const instructions = buildFinalRenderInstructions(FREE_SEGMENTS);
       assert.ok(instructions.includes("排版与输出协议"), "Should contain rendering protocol title");
       assert.ok(instructions.includes("一级标题"), "Should contain heading instructions");
       assert.ok(instructions.includes("Markdown 表格"), "Should contain table instructions");
@@ -108,14 +125,14 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
         { triggered: [], overallMultiplier: 1.0, levelUpgrades: [] },
         { bareOnly: [], fullOnly: [], stable: [] },
         undefined,
-        DEFAULT_FREE_PROMPTS,
+        FREE_SEGMENTS,
       );
       assert.ok(prompt.includes("排版与输出协议"), "Turn 3 prompt should include rendering instructions");
       assert.ok(prompt.includes("一级标题"), "Turn 3 prompt should include heading instructions");
     });
 
     it("buildPreAuditFinalizerPrompt does NOT include rendering instructions", () => {
-      const prompt = buildPreAuditFinalizerPrompt([], undefined, DEFAULT_FREE_PROMPTS);
+      const prompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
       assert.ok(!prompt.includes("排版与输出协议"), "Direct API/Sampling finalizer should NOT include rendering instructions");
     });
   });
@@ -127,9 +144,11 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
         [],
         [],
         { triggered: [], overallMultiplier: 1.0, levelUpgrades: [] },
-        { bareOnly: [], fullOnly: [], stable: [] }
+        { bareOnly: [], fullOnly: [], stable: [] },
+        undefined,
+        FREE_SEGMENTS,
       );
-      const directApiPrompt = buildPreAuditFinalizerPrompt([]);
+      const directApiPrompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
 
       const commonRules = buildCommonRiskRules();
       assert.ok(orchestrationPrompt.includes(commonRules), "Orchestration finalizer should include common risk rules");
@@ -137,7 +156,7 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
     });
 
     it("Direct API/Sampling finalizer includes core reasoning framework for semantic parity", () => {
-      const directApiPrompt = buildPreAuditFinalizerPrompt([]);
+      const directApiPrompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
       const coreFramework = buildCoreReasoningFramework();
       assert.ok(directApiPrompt.includes(coreFramework), "Direct API/Sampling finalizer should include core reasoning framework");
     });

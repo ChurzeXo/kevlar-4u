@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
+import { fileURLToPath } from "url";
 
 import { writePersonaFile, invalidatePersonasCache } from "../utils/parser.js";
 import type { PersonaMeta } from "../utils/parser.js";
@@ -10,10 +11,19 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createKevlarServer } from "../server.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const REAL_TEMPLATES_DIR = path.resolve(__dirname, "..", "..", "skills", "templates");
+
 let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-e2e-"));
+  const tmpTemplates = path.join(tmpDir, "templates");
+  fs.mkdirSync(tmpTemplates, { recursive: true });
+  for (const file of fs.readdirSync(REAL_TEMPLATES_DIR)) {
+    fs.copyFileSync(path.join(REAL_TEMPLATES_DIR, file), path.join(tmpTemplates, file));
+  }
   process.env.KEVLAR_SKILLS_DIR = tmpDir;
 });
 
@@ -24,7 +34,7 @@ afterEach(() => {
 
 describe("End-to-End integration test", () => {
   it("calls review_content_wizard via MCP client (multi-turn)", async () => {
-    const server = createKevlarServer();
+    const server = await createKevlarServer();
 
     // Seed a test persona
     const meta: PersonaMeta = {
@@ -113,7 +123,7 @@ describe("End-to-End integration test", () => {
   });
 
   it("starts create_persona_wizard via MCP client", async () => {
-    const server = createKevlarServer();
+    const server = await createKevlarServer();
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
     const client = new Client(

@@ -12,7 +12,9 @@ import type { ToolModule } from "./types.js";
 import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
 import { isPro } from "../subscription/tier.js";
 import { SaaSClient } from "../utils/saasClient.js";
-import { DEFAULT_FREE_PROMPTS, type PromptSegments } from "../subscription/promptTypes.js";
+import { type PromptSegments } from "../subscription/promptTypes.js";
+import { loadPromptSegments } from "../subscription/promptTemplates.js";
+import type { StrategyProvider, ReviewPlan } from "../execution/strategy.js";
 import { callConfiguredDirectApi, hasApiKey } from "../execution/modes/direct_api.js";
 import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
@@ -22,15 +24,39 @@ import {
   buildOrchestrationStep0Prompt,
   buildOrchestrationAuditPrompt,
   buildOrchestrationFinalizerPrompt,
-  buildPreAuditFinalizerPrompt,
-  buildIsolatedSystemAuditorMessage,
-  buildIsolatedSystemAuditorPrompt,
-  buildCommonRiskRules,
-  buildCoreReasoningFramework,
   type OrchestrationPreAuditContext,
   type Precedent,
   type Step0Result,
 } from "../prompts/reviewWizard.js";
+import {
+  type AuditLlmCaller,
+  type PreAuditDimensionResult,
+  type PreAuditReport,
+  type ReviewStepId,
+  type ReviewStepKind,
+  type BaseReviewStep,
+  type InlineStep,
+  type OrchestrationTurnStep,
+  type ReviewStepContext,
+  type ReviewStepResult,
+  getFindingsLevel,
+  buildEmptyDeltaRisks,
+  normalizePreAuditDimensions,
+  mergeLocalFindingsIntoAudits,
+  computeDeltaAnalysis,
+  executeFullPipeline,
+  stepStripContext,
+  stepBareAudit,
+  stepFullAudit,
+  stepDeltaAnalysis,
+  stepMergeLocalFindings,
+  stepCrossValidation,
+  stepSynergyWeighting,
+  stepFinalArbitration,
+  orchestrationStep0,
+  orchestrationAudit,
+  orchestrationFinal,
+} from "../execution/reviewSteps.js";
 
 
 const ORCHESTRATION_STEP0_GUIDANCE = [
@@ -148,6 +174,7 @@ export interface ReviewWizardInput {
   userMessage: string;
   samplingFn?: MultiTurnSamplingFunction;
   sendProgress?: (message: string) => void;
+  strategyProvider?: StrategyProvider;
 }
 
 type ReviewWizardStep =
@@ -159,6 +186,7 @@ type ReviewWizardStep =
   | "waitingForPersonaCreation"
   | "waitingForReviewDecision"
   | "waitingForReviewerConfirmation"
+  | "rstConfirmation"
   | "completed";
 
 interface ReviewWizardState {
@@ -173,6 +201,9 @@ interface ReviewWizardState {
   systemAuditorIds: string[];
   dimensions: DimensionsConfig;
   preAuditReport?: any;
+  tier?: "free" | "pro";
+  strategySessionId?: string;
+  strategyHash?: string;
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
   orchestrationTurn2Results?: {
     // Turn 2 审计结果，用于 Turn 3 的中间状态
@@ -198,6 +229,7 @@ export const reviewContentWizardModule: ToolModule = {
     const input = args as any;
     input.samplingFn = deps.resolveSamplingFn();
     input.sendProgress = deps.sendProgress;
+    input.strategyProvider = deps.strategyProvider;
     return await handleReviewContentWizard(deps.skillsDir, deps.tmpDir, input);
   },
 };
@@ -221,6 +253,37 @@ export async function handleReviewContentWizard(
     const allPersonas = await loadAllPersonas(skillsDir);
     const userPersonas = allPersonas.filter((p) => !p.meta.tags.includes("system_auditor"));
     const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+
+    // Resolve strategy plan once, freeze for run duration
+    const strategyProvider = input.strategyProvider;
+    let plan: ReviewPlan | undefined;
+    if (strategyProvider && !state.strategySessionId) {
+      plan = await strategyProvider.getReviewPlan();
+      state.tier = plan.tier;
+      state.strategySessionId = plan.strategySessionId;
+      state.strategyHash = plan.strategyHash;
+    } else if (state.strategySessionId) {
+      // Reconstruct plan from frozen state (no re-resolution)
+      plan = {
+        tier: state.tier as "free" | "pro",
+        steps: state.tier === "free" ? ["rst_review"] : [],
+        visibility: {
+          preAuditDetails: state.tier === "pro" ? "full" : "hidden",
+          upgradePrompt: state.tier === "free" ? "after_rst" : "disabled",
+          rstContinuationPrompt: state.tier === "pro" ? "after_pre_audit" : undefined,
+        },
+        strategySessionId: state.strategySessionId,
+        strategyVersion: "1.0.0",
+        strategyHash: state.strategyHash ?? "",
+      };
+    }
+    const isFreeTier = state.tier === "free";
+
+    if (isFreeTier && state.step === "systemAudit") {
+      state.step = "checkPersonaInventory";
+      await saveState(tmpDir, state);
+    }
+
     return await advanceWizard(
       skillsDir,
       tmpDir,
@@ -230,6 +293,7 @@ export async function handleReviewContentWizard(
       input.userMessage,
       input.samplingFn,
       input.sendProgress,
+      plan,
     );
   } catch (err) {
     const info = getErrorInfo(err);
@@ -254,6 +318,7 @@ async function advanceWizard(
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
   sendProgress?: (message: string) => void,
+  plan?: ReviewPlan,
 ): Promise<ToolResult> {
   switch (state.step) {
     case "systemAudit":
@@ -288,6 +353,9 @@ async function advanceWizard(
     case "waitingForReviewerConfirmation":
       return handleReviewerConfirmation(skillsDir, tmpDir, state, personas, userMessage, samplingFn);
 
+    case "rstConfirmation":
+      return handleRstConfirmation(tmpDir, state, personas, userMessage, samplingFn);
+
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
 
@@ -295,12 +363,6 @@ async function advanceWizard(
       return toolResponse(state, "未知步骤，请重新开始评测流程。");
   }
 }
-
-type AuditLlmCaller = (params: {
-  systemPrompt: string;
-  messages: Array<{ role: "user" | "assistant"; content: string }>;
-  maxTokens?: number;
-}) => Promise<{ content: string; stopReason?: string }>;
 
 async function handleSystemAudit(
   skillsDir: string,
@@ -330,8 +392,18 @@ async function handleSystemAudit(
       summary:
         dimensions.length > 0 ? summarizePreAuditResults(dimensions) : "未找到系统审查员，且本地规则未命中风险点",
     };
-    state.step = "checkPersonaInventory";
+    state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
+    if (state.step === "rstConfirmation") {
+      return toolResponse(
+        state,
+        [
+          "六维初审已完成（本地规则模式）。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "",
+          "回复「继续」或「是」进入评审，回复「否」结束。",
+        ].join("\n"),
+      );
+    }
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   }
 
@@ -348,8 +420,18 @@ async function handleSystemAudit(
     const results = normalizePreAuditDimensions(mergedResults, systemAuditors);
     state.preAuditReport = { dimensions: results, summary: summarizePreAuditResults(results) };
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-    state.step = "checkPersonaInventory";
+    state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
+    if (state.step === "rstConfirmation") {
+      return toolResponse(
+        state,
+        [
+          "六维初审已完成（本地回退模式）。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "",
+          "回复「继续」或「是」进入评审，回复「否」结束。",
+        ].join("\n"),
+      );
+    }
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   }
 
@@ -381,9 +463,11 @@ function buildOrchestrationPreAuditContext(
 }
 
 async function resolvePromptSegments(): Promise<PromptSegments> {
-  if (!isPro()) return { ...DEFAULT_FREE_PROMPTS };
-  const serverPrompts = await SaaSClient.fetchSubscriptionPrompts();
-  return serverPrompts ?? { ...DEFAULT_FREE_PROMPTS };
+  if (isPro()) {
+    const serverPrompts = await SaaSClient.fetchSubscriptionPrompts();
+    return serverPrompts ?? loadPromptSegments("pro");
+  }
+  return loadPromptSegments("free");
 }
 
 /**
@@ -471,8 +555,21 @@ async function handleOrchestrationStep0Result(
       );
       state.preAuditReport = preAuditReport;
       state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-      state.step = "checkPersonaInventory";
+      state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
       await saveState(tmpDir, state);
+      if (state.step === "rstConfirmation") {
+        const prompts = await resolvePromptSegments();
+        return toolResponse(
+          state,
+          [
+            buildPreAuditSummaryBlock(state, prompts),
+            "",
+            "六维初审已完成。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+            "",
+            "回复「继续」或「是」进入评审，回复「否」结束。",
+          ].join("\n"),
+        );
+      }
       return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
     }
 
@@ -533,184 +630,18 @@ async function executeLlmSystemAudit(
   timingContext?: string,
   sendProgress?: (message: string) => void,
 ): Promise<PreAuditReport> {
-  const emit = (msg: string) => {
-    try {
-      sendProgress?.(msg);
-    } catch {
-      /* ignore */
-    }
-  };
-  // ── Step 1: Physical context stripping ─────────────────────────────────────
-  const stripped = stripContext(content);
-
-  // Step 0b (decoding) and Step 0c (web search) were completed by host AI in Turn 1.
-  // step0Result and webContextMap are provided as pre-computed inputs.
-
-  // ── Step 2: Bare text audit (context_distortion + network_culture_risk + cross_lingual_distortion) ──
-  emit("🧪 [1/4] 正在执行裸文维度审计（Step 2）...");
-  const bareOnlyAuditors = systemAuditors.filter(
-    (a) =>
-      a.meta.id === "context_distortion" ||
-      a.meta.id === "network_culture_risk" ||
-      a.meta.id === "cross_lingual_distortion",
-  );
-  const bareFindings =
-    bareOnlyAuditors.length > 0
-      ? await runSystemAuditors(
-          stripped.bare,
-          bareOnlyAuditors,
-          caller,
-          undefined,
-          localFindings,
-          step0Result,
-          webContextMap,
-        )
-      : [];
-
-  // ── Step 3: Full text audit (all auditors) ────────────────────────────────
-  emit(`📊 [2/4] 正在并发执行全维度深度审计（Step 3，共 ${systemAuditors.length} 个维度）...`);
-  const auditorResults = await runSystemAuditors(
+  const prompts = await resolvePromptSegments();
+  return executeFullPipeline(
     content,
     systemAuditors,
-    caller,
-    timingContext,
     localFindings,
+    caller,
     step0Result,
     webContextMap,
-  );
-
-  // ── Step 4: Delta analysis ────────────────────────────────────────────────
-  const bareKeywords = [...new Set(bareFindings.flatMap((r) => r.findings.map((f: any) => f.keyword)))].filter(
-    Boolean,
-  ) as string[];
-  const fullKeywords = [...new Set(auditorResults.flatMap((r) => r.findings.map((f: any) => f.keyword)))].filter(
-    Boolean,
-  ) as string[];
-
-  const findOverlap = (kw: string, list: string[]): boolean => {
-    return list.some(
-      (item) =>
-        item.toLowerCase() === kw.toLowerCase() ||
-        item.toLowerCase().includes(kw.toLowerCase()) ||
-        kw.toLowerCase().includes(item.toLowerCase()),
-    );
-  };
-
-  const bareOnly = bareKeywords.filter((kw) => !findOverlap(kw, fullKeywords));
-  const fullOnly = fullKeywords.filter((kw) => !findOverlap(kw, bareKeywords));
-  const stable = [
-    ...bareKeywords.filter((kw) => findOverlap(kw, fullKeywords)),
-    ...fullKeywords.filter((kw) => findOverlap(kw, bareKeywords) && !bareKeywords.includes(kw)),
-  ];
-
-  const deltaRisks = {
-    bareOnly,
-    fullOnly,
-    stable: [...new Set(stable)],
-  };
-
-  // ── Step 5: Merge local findings into audits ─────────────────────────────
-  const mergedResults = normalizePreAuditDimensions(
-    mergeLocalFindingsIntoAudits(auditorResults, localFindings),
-    systemAuditors,
-  );
-  emit("🔀 [3/4] 正在执行交叉验证（Step 6）...");
-  const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
-
-  // ── Step 7: Synergy calculation ───────────────────────────────────────────
-  const dimensionLevels: Record<string, string> = {};
-  for (const dim of crossValidatedResults) {
-    dimensionLevels[dim.id] = dim.level ?? "🟢";
-  }
-  const timingFlag = localFindings.some((f) => f.timingWindowId) ? ["timing_risk"] : [];
-  const synergy = calculateSynergy(dimensionLevels, timingFlag);
-
-  emit("⚖️ [4/4] 正在进行最终仲裁（Step 8）...");
-  const prompts = await resolvePromptSegments();
-  const report = await finalizePreAuditReport(
-    content,
-    localFindings,
-    mergedResults,
-    crossValidatedResults,
-    systemAuditors,
-    caller,
-    synergy,
-    deltaRisks,
     precedents,
+    timingContext,
+    sendProgress,
     prompts,
-  );
-
-  report.synergyFlags = {
-    triggered: synergy.triggered,
-    overallMultiplier: synergy.overallMultiplier,
-    levelUpgrades: synergy.levelUpgrades,
-  };
-  report.deltaRisks = deltaRisks;
-
-  return report;
-}
-
-/**
- * Run unified concurrent web search for all keywords from Step 0 and local rules.
- * Returns a map of keyword -> web context string.
- */
-async function runSystemAuditors(
-  content: string,
-  systemAuditors: Persona[],
-  caller: AuditLlmCaller,
-  timingContext?: string,
-  localFindings: any[] = [],
-  step0Result?: Step0Result,
-  webContextMap?: Record<string, string>,
-): Promise<PreAuditDimensionResult[]> {
-  return Promise.all(
-    systemAuditors.map(async (auditor) => {
-      try {
-        // Timing context injected only for social_risk
-        const auditContent =
-          timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
-
-        // Build consolidated web context for this auditor from pre-searched map
-        let webContext = "";
-        if (webContextMap && Object.keys(webContextMap).length > 0) {
-          const relevantEntries = Object.entries(webContextMap)
-            .filter(([, ctx]) => ctx.length > 0)
-            .map(([kw, ctx]) => `### 关键词「${kw}」\n${ctx}`);
-          if (relevantEntries.length > 0) {
-            webContext = `以下是针对本文案黑料原子的联网验证结果（Turn 1 已完成检索）：\n\n${relevantEntries.join("\n\n")}`;
-          }
-        }
-
-        const response = await caller({
-          systemPrompt: buildIsolatedSystemAuditorPrompt(auditor),
-          messages: [
-            {
-              role: "user",
-              content: buildIsolatedSystemAuditorMessage(auditContent, auditor, {
-                localFindings,
-                step0Result,
-                timingContext: timingContext && auditor.meta.id === "social_risk" ? timingContext : undefined,
-                webContext: webContext || undefined,
-              }),
-            },
-          ],
-          maxTokens: 2048,
-        });
-        const parsed = JSON.parse(stripCodeFence(response.content.trim()));
-        return {
-          id: auditor.meta.id,
-          name: auditor.meta.name,
-          findings: Array.isArray(parsed.findings) ? parsed.findings : [],
-        };
-      } catch (err) {
-        logger.warn("System auditor failed", {
-          event: "system_auditor_failed",
-          auditorId: auditor.meta.id,
-          error: getErrorInfo(err).message,
-        });
-        return { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
-      }
-    }),
   );
 }
 
@@ -848,9 +779,22 @@ async function handleOrchestrationFinalResult(
     state.preAuditReport = report;
     state.orchestrationPreAuditContext = undefined;
     state.orchestrationTurn2Results = undefined;
-    state.step = "checkPersonaInventory";
+    state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
 
+    if (state.step === "rstConfirmation") {
+      const prompts = await resolvePromptSegments();
+      return toolResponse(
+        state,
+        [
+          buildPreAuditSummaryBlock(state, prompts),
+          "",
+          "六维初审已完成。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "",
+          "回复「继续」或「是」进入评审，回复「否」结束。",
+        ].join("\n"),
+      );
+    }
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {
     const info = getErrorInfo(err);
@@ -863,150 +807,6 @@ async function handleOrchestrationFinalResult(
         "请让宿主 AI 仅返回包含 dimensions、summary、worstCaseNarrative 的合法 JSON，然后再次提交。",
       ].join("\n"),
     );
-  }
-}
-
-// ── Pre-audit normalization and finalization ────────────────────────────────
-
-interface PreAuditDimensionResult {
-  id: string;
-  name: string;
-  findings: any[];
-  level?: string;
-}
-
-function normalizePreAuditDimensions(raw: unknown, systemAuditors: Persona[]): PreAuditDimensionResult[] {
-  const auditorMeta = new Map(systemAuditors.map((auditor) => [auditor.meta.id, auditor.meta.name]));
-  const source = Array.isArray(raw) ? raw : [];
-  const normalized: PreAuditDimensionResult[] = [];
-  const seen = new Set<string>();
-
-  for (const item of source) {
-    if (!item || typeof item !== "object") continue;
-    const record = item as Record<string, unknown>;
-    const id =
-      typeof record.id === "string" && record.id.trim() ? record.id.trim() : `dimension_${normalized.length + 1}`;
-    const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : auditorMeta.get(id) || id;
-    const findings = Array.isArray(record.findings) ? record.findings : [];
-    const cleanedFindings = findings
-      .filter((finding) => finding && typeof finding === "object")
-      .map((finding) => normalizeFinding(finding as Record<string, unknown>));
-    normalized.push({ id, name, findings: cleanedFindings, level: getFindingsLevel(cleanedFindings) });
-    seen.add(id);
-  }
-
-  for (const auditor of systemAuditors) {
-    if (!seen.has(auditor.meta.id)) {
-      normalized.push({ id: auditor.meta.id, name: auditor.meta.name, findings: [], level: "🟢" });
-    }
-  }
-
-  return normalized;
-}
-
-function normalizeFinding(finding: Record<string, unknown>): Record<string, unknown> {
-  const normalized: Record<string, unknown> = { ...finding };
-  const suggestedLevel = String(finding.suggestedLevel || "").trim();
-  if (suggestedLevel !== "🔴" && suggestedLevel !== "🟡") {
-    normalized.suggestedLevel = "🟡";
-  }
-  return normalized;
-}
-
-interface PreAuditReport {
-  dimensions: PreAuditDimensionResult[];
-  summary: string;
-  riskProfile?: {
-    timing_risk: string;
-    context_risk: string;
-    cultural_risk: string;
-    narrative_power_risk: string;
-    emotion_risk: string;
-    symbol_risk: string;
-    propagation_risk: string;
-  };
-  synergyFlags?: {
-    triggered: string[];
-    overallMultiplier: number;
-    levelUpgrades?: Array<{
-      dimension: string;
-      from: string;
-      to: string;
-      reason: string;
-    }>;
-  };
-  attackChainAnalysis?: string;
-  worstCaseNarrative?: string;
-  deltaRisks?: {
-    bareOnly: string[];
-    fullOnly: string[];
-    stable: string[];
-  };
-  precedents?: Precedent[]; // 类似舆情事件先例
-}
-
-async function finalizePreAuditReport(
-  content: string,
-  localFindings: any[], // Step 0
-  mergedResults: PreAuditDimensionResult[], // Step 2
-  crossValidatedResults: PreAuditDimensionResult[], // Step 3
-  systemAuditors: Persona[],
-  caller: AuditLlmCaller,
-  synergy?: {
-    triggered: string[];
-    overallMultiplier: number;
-    levelUpgrades?: Array<{ dimension: string; from: string; to: string; reason: string }>;
-    details: Array<{ rule: any; matched: boolean }>;
-  },
-  deltaRisks?: any,
-  precedents?: Precedent[],
-  prompts: PromptSegments = DEFAULT_FREE_PROMPTS,
-): Promise<PreAuditReport> {
-  const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
-  try {
-    const response = await caller({
-      systemPrompt: buildPreAuditFinalizerPrompt(systemAuditors, precedents, prompts),
-      messages: [
-        {
-          role: "user",
-          content: JSON.stringify({
-            content,
-            localFindings, // Step 0
-            mergedResults, // Step 2
-            crossValidatedResults, // Step 3
-            synergy, // 协同加权结果
-            deltaRisks, // 脱嵌 delta 信号
-          }),
-        },
-      ],
-      maxTokens: 4096,
-    });
-    const parsed = JSON.parse(stripCodeFence(response.content.trim()));
-    const dimensions = normalizePreAuditDimensions(parsed.dimensions, systemAuditors);
-    return {
-      dimensions,
-      summary: parsed.summary || summarizePreAuditResults(dimensions),
-      riskProfile: parsed.riskProfile ?? undefined,
-      synergyFlags: parsed.synergyFlags ?? undefined,
-      attackChainAnalysis: parsed.attackChainAnalysis ?? undefined,
-      worstCaseNarrative: parsed.worstCaseNarrative ?? undefined,
-      deltaRisks: parsed.deltaRisks ?? undefined,
-      precedents,
-    };
-  } catch (err) {
-    logger.warn("Pre-audit finalizer failed, using deterministic summary", {
-      event: "pre_audit_finalizer_failed",
-      error: getErrorInfo(err).message,
-    });
-    if (synergy?.levelUpgrades && synergy.levelUpgrades.length > 0) {
-      for (const upgrade of synergy.levelUpgrades) {
-        const dim = fallbackDimensions.find((d) => d.id === upgrade.dimension);
-        if (dim && dim.level === upgrade.from) {
-          dim.level = upgrade.to;
-        }
-      }
-    }
-    return { dimensions: fallbackDimensions, summary: summarizePreAuditResults(fallbackDimensions), precedents };
   }
 }
 
@@ -1133,214 +933,6 @@ function findContextRiskTerms(content: string, keyword: string): string[] {
   return riskTerms.filter((term) => context.includes(term));
 }
 
-function mergeLocalFindingsIntoAudits(
-  audits: PreAuditDimensionResult[],
-  localFindings: any[],
-): PreAuditDimensionResult[] {
-  const merged = audits.map((audit) => ({ ...audit, findings: [...(audit.findings || [])] }));
-  if (localFindings.length === 0) return merged;
-
-  const networkAudit = merged.find((audit) => audit.id === "network_culture_risk");
-  if (networkAudit) {
-    networkAudit.findings.push(...localFindings);
-  } else {
-    merged.unshift({
-      id: "local_rule_engine",
-      name: "本地规则引擎",
-      findings: localFindings,
-      level: getFindingsLevel(localFindings),
-    });
-  }
-
-  for (const audit of merged) {
-    audit.level = getFindingsLevel(audit.findings || []);
-  }
-
-  return merged;
-}
-
-function getFindingsLevel(findings: any[]): string {
-  let level = "🟢";
-  for (const finding of findings) {
-    if (finding.suggestedLevel === "🔴") return "🔴";
-    if (finding.suggestedLevel === "🟡") level = "🟡";
-  }
-  return level;
-}
-
-function buildEmptyDeltaRisks(): { bareOnly: string[]; fullOnly: string[]; stable: string[] } {
-  return { bareOnly: [], fullOnly: [], stable: [] };
-}
-
-// ── Phase 2: Cross-validation for risky dimensions ──
-
-interface CrossValidationPair {
-  source: string;
-  validator: string;
-  question: string;
-}
-
-const CROSS_VALIDATION_PAIRS: CrossValidationPair[] = [
-  {
-    source: "network_culture_risk",
-    validator: "context_distortion",
-    question:
-      '以下内容被「暗语破译」标记为网络文化风险。请从「语境脱嵌」角度进行交叉验证，判断它们在真实语境下是否确实容易被断章取义或恶意曲解。请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
-  },
-  {
-    source: "context_distortion",
-    validator: "network_culture_risk",
-    question:
-      '以下内容被「语境猎手」标记为语境脱嵌风险。请从「网络文化」角度进行交叉验证，判断它们是否确实在网络社区存在低俗暗语或恶意梗的隐晦含义。请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
-  },
-  {
-    source: "social_risk",
-    validator: "factual_integrity",
-    question:
-      '以下内容被「社伦判官」标记为社会风险。请从「事实完整性」角度交叉验证：这些风险点是否有明确的事实硬伤或夸大陈述？还是纯粹基于情绪联想？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
-  },
-  {
-    source: "legal_compliance",
-    validator: "social_risk",
-    question:
-      '以下内容被「合规哨兵」标记为合规风险。请从「社会风险」角度交叉验证：这些合规问题是否可能在当前社会语境中触发负面的舆论情绪对立？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
-  },
-  {
-    source: "cross_lingual_distortion",
-    validator: "network_culture_risk",
-    question:
-      '以下内容被「跨界判官」标记为跨语言曲解风险。请从「网络文化」角度进行交叉验证：这些外文词在中文互联网上是否有现成的恶搞梗、表情包或黑话含义？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
-  },
-  {
-    source: "network_culture_risk",
-    validator: "cross_lingual_distortion",
-    question:
-      '以下内容被「暗语破译」标记为网络文化风险。请从「跨语言曲解」角度进行交叉验证：这些风险词是否涉及外文谐音、恶意机翻或文化水土不服？请对每一项进行判定并输出 JSON。结构要求：{"findings": [{"keyword": "风险词", "status": "confirmed / downgraded / debunked", "reason": "说明判定理由", "suggestedLevel": "如果为 confirmed 或 downgraded，提供推荐等级 🔴 或 🟡"}]}',
-  },
-];
-
-async function crossValidateRiskyDimensions(
-  content: string,
-  phase1Results: Array<{ id: string; name: string; findings: any[]; level?: string }>,
-  auditors: Persona[],
-  samplingFn: MultiTurnSamplingFunction,
-): Promise<Array<{ id: string; name: string; findings: any[]; level?: string }>> {
-  const riskyDimensions = phase1Results.filter((r) => r.findings && r.findings.length > 0);
-  if (riskyDimensions.length === 0) return phase1Results;
-
-  const validatorMap = new Map(auditors.map((a) => [a.meta.id, a]));
-  const results = [...phase1Results.map((r) => ({ ...r, findings: [...r.findings] }))];
-
-  for (const pair of CROSS_VALIDATION_PAIRS) {
-    const sourceDim = results.find((r) => r.id === pair.source);
-    if (!sourceDim || sourceDim.findings.length === 0) continue;
-
-    const validatorAuditor = validatorMap.get(pair.validator);
-    if (!validatorAuditor) continue;
-
-    const findingsSummary = sourceDim.findings
-      .map(
-        (f, i) =>
-          `${i + 1}. [${f.suggestedLevel || "🟡"}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`,
-      )
-      .join("\n");
-
-    try {
-      const response = await samplingFn({
-        systemPrompt: [
-          `# [SYSTEM PROTOCOL] 防御性风险矩阵交叉验证沙盒`,
-          ``,
-          `## 【元规则】`,
-          `1. 运行环境：真实隔离 LLM 沙盒；当前调用代表一名交叉验证审查员`,
-          `2. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
-          ``,
-          buildCommonRiskRules(),
-          ``,
-          buildCoreReasoningFramework(),
-          ``,
-          `## 【你的审查员角色与原始规则】`,
-          `- 审查员：${validatorAuditor.meta.name}（${validatorAuditor.meta.id}）`,
-          `- 角色描述：${validatorAuditor.meta.description}`,
-          ``,
-          validatorAuditor.systemPrompt,
-        ].join("\n"),
-        messages: [
-          {
-            role: "user",
-            content: [
-              pair.question,
-              "",
-              `原始内容：${content}`,
-              "",
-              `「${sourceDim.name}」的发现：`,
-              findingsSummary,
-            ].join("\n"),
-          },
-        ],
-        maxTokens: 1024,
-      });
-
-      const parsed = JSON.parse(stripCodeFence(response.content.trim()));
-      const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
-
-      const validatorDim = results.find((r) => r.id === pair.validator);
-      if (validatedFindings.length > 0) {
-        for (const vf of validatedFindings) {
-          const status = String(vf.status || "")
-            .toLowerCase()
-            .trim();
-          const targetKeyword = String(vf.keyword || "").trim();
-
-          if (status === "debunked") {
-            // 剔除：从源维度中移除此项
-            sourceDim.findings = sourceDim.findings.filter((f) => String(f.keyword || "").trim() !== targetKeyword);
-          } else if (status === "downgraded") {
-            // 降级：若源 findings 匹配该词，将其降级为 🟡
-            for (const f of sourceDim.findings) {
-              if (String(f.keyword || "").trim() === targetKeyword) {
-                f.suggestedLevel = "🟡";
-                f.trigger = `[交叉验证降级 (验证方: ${validatorAuditor.meta.name})] ${f.trigger}`;
-                f.riskDescription = `${f.riskDescription} (降级缘由: ${vf.reason || "未指明理由"})`;
-              }
-            }
-          } else if (status === "confirmed") {
-            // 确认：保持源维度风险，同时向验证维度注入确认信息
-            if (validatorDim) {
-              const exists = validatorDim.findings.some(
-                (existing: any) => String(existing.keyword || "").trim() === targetKeyword,
-              );
-              if (!exists) {
-                validatorDim.findings.push({
-                  keyword: targetKeyword,
-                  trigger: `[交叉验证确认 (源自: ${sourceDim.name})] ${vf.reason || "确认存在关联风险"}`,
-                  riskDescription: vf.reason || "双向交叉验证增强确认",
-                  suggestedLevel: vf.suggestedLevel || "🟡",
-                  source: "cross_validation",
-                });
-              }
-            }
-          }
-        }
-
-        // 重新计算两个维度的最终级别
-        sourceDim.level = getFindingsLevel(sourceDim.findings);
-        if (validatorDim) {
-          validatorDim.level = getFindingsLevel(validatorDim.findings);
-        }
-      }
-    } catch (err) {
-      logger.warn("Cross-validation failed", {
-        event: "cross_validation_failed",
-        source: pair.source,
-        validator: pair.validator,
-        error: getErrorInfo(err).message,
-      });
-    }
-  }
-
-  return results;
-}
-
 const CHINESE_DIMENSION_NAMES: Record<string, string> = {
   legal_compliance: "合规",
   context_distortion: "语境脱嵌",
@@ -1456,7 +1048,7 @@ function summarizePreAuditResults(
 // ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
 
 function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSegments): string {
-  const segs = prompts ?? DEFAULT_FREE_PROMPTS;
+  const segs = prompts ?? loadPromptSegments("free");
   const lines: string[] = ["<!-- kevlar:verbatim-pre-audit:start -->", "初审结果"];
   if (state.preAuditReport?.summary) {
     lines.push(state.preAuditReport.summary);
@@ -1828,6 +1420,41 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
   };
 }
 
+async function handleRstConfirmation(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  const normalized = userMessage.trim().toLowerCase();
+  const wantsRst = /^(是|继续|确认|好的|好|yes|y|1|开始|开始复审|进入复审|继续评审|继续 RST|继续rst)$/i.test(normalized);
+
+  if (wantsRst) {
+    state.step = "checkPersonaInventory";
+    await saveState(tmpDir, state);
+    // Pre-audit results are in state.preAuditReport; they flow into
+    // Focus Topics when RST runs via handleInventoryCheck → executeReview.
+    return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+  }
+
+  const wantsSkip = /^(否|不|取消|跳过|不用|不需要|结束|退出|skip|no|n|2)$/i.test(normalized);
+  if (wantsSkip) {
+    state.step = "completed";
+    await saveState(tmpDir, state);
+    return toolResponse(state, "评测已完成，未进入 RST 仿真评审。需要评测新内容时，请重新开始。");
+  }
+
+  return toolResponse(
+    state,
+    [
+      "六维初审已完成。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+      "",
+      "回复「继续」或「是」进入评审，回复「否」结束。",
+    ].join("\n"),
+  );
+}
+
 async function executeReview(
   skillsDir: string,
   tmpDir: string,
@@ -1849,6 +1476,20 @@ async function executeReview(
             maxTokens: params.maxTokens,
           })
       : undefined,
+    tier: state.tier as "free" | "pro" | undefined,
+    runContext: state.strategySessionId
+      ? {
+          reviewRunId: `wizard-${state.sessionId}`,
+          strategySessionId: state.strategySessionId,
+          strategyVersion: "1.0.0",
+          strategyHash: state.strategyHash ?? "",
+          promptSetHash: state.strategyHash ?? "",
+          weightSetHash: state.strategyHash ?? "",
+          executionMode: "orchestration",
+          locale: "zh-CN",
+          startedAt: new Date().toISOString(),
+        }
+      : undefined,
   });
 
   if (reviewResult.isError) {
@@ -1860,7 +1501,15 @@ async function executeReview(
 
   state.step = "completed";
   const resultText = reviewResult.content[0]?.text || "";
-  const response = toolResponse(state, resultText + "\n\n---\n\n评测完成。");
+  const upgradePrompt =
+    state.tier === "free"
+      ? [
+          "",
+          "---",
+          "💡 本次已完成免费版 RST 仿真评审。专业版可以在本地解锁六维初审管线，进一步检查合规、语境、网络文化、事实与跨语言风险。是否查看升级方式？",
+        ].join("\n")
+      : "";
+  const response = toolResponse(state, resultText + "\n\n---\n\n评测完成。" + upgradePrompt);
   await cleanupState(tmpDir, state.sessionId);
   return response;
 }
@@ -1909,6 +1558,9 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     remainingPersonaIds: [],
     systemAuditorIds: [],
     dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
+    tier: undefined,
+    strategySessionId: undefined,
+    strategyHash: undefined,
   };
 }
 

@@ -49,6 +49,20 @@ export type MultiTurnSamplingFunction = (params: {
   maxTokens?: number;
 }) => Promise<{ content: string; stopReason?: string; usage?: UsageInfo }>;
 
+// ── Review Run Context (frozen at run start) ──────────────────────────────────
+
+export interface ReviewRunContext {
+  reviewRunId: string;
+  strategySessionId: string;
+  strategyVersion: string;
+  strategyHash: string;
+  promptSetHash: string;
+  weightSetHash: string;
+  executionMode: ExecutionMode;
+  locale: "zh-CN" | "en-US";
+  startedAt: string;
+}
+
 // ── Execution Context ─────────────────────────────────────────────────────────
 
 export interface ExecutionContext {
@@ -60,6 +74,8 @@ export interface ExecutionContext {
   dimensions?: DimensionsConfig;
   preAuditReport?: any;
   traceContext?: TraceContext;
+  runContext?: ReviewRunContext;
+  tier?: "free" | "pro";
 }
 
 // ── MECP Frame (MECP §9.2) ────────────────────────────────────────────────────

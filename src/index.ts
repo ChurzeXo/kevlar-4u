@@ -4,7 +4,7 @@ import { createKevlarServer } from "./server.js";
 import { getErrorInfo } from "./utils/observability.js";
 
 async function main() {
-	const server = createKevlarServer();
+	const server = await createKevlarServer();
 	const transport = new StdioServerTransport();
 
 	console.error("[Kevlar-4u] 🛡️  Server starting...");

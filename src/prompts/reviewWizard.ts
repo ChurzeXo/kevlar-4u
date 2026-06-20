@@ -1,7 +1,7 @@
 import type { Persona } from "../utils/parser.js";
 import type { StrippedContent } from "../utils/stripContext.js";
 import type { PromptSegments } from "../subscription/promptTypes.js";
-import { DEFAULT_FREE_PROMPTS } from "../subscription/promptTypes.js";
+import { loadPromptSegments } from "../subscription/promptTemplates.js";
 
 // ── Step 0 output types ──────────────────────────────────────────────────────
 
@@ -782,8 +782,9 @@ export function buildOrchestrationFinalizerPrompt(
   },
   deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] },
   precedents?: Precedent[],
-  prompts: PromptSegments = DEFAULT_FREE_PROMPTS,
+  prompts?: PromptSegments,
 ): string {
+  const segs = prompts ?? loadPromptSegments("free");
   return [
     `# [SYSTEM PROTOCOL] 防御性风险矩阵扫描协议（Turn 3：交叉验证与最终仲裁）`,
     ``,
@@ -791,7 +792,7 @@ export function buildOrchestrationFinalizerPrompt(
     `1. 运行环境：单次推理孤岛状态，无外部状态机`,
     `2. 执行身份：非情感化的【Kevlar-4u 系统初审总仲裁官】`,
     `3. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
-    prompts.orchestrationMetaRuleItem4,
+    segs.orchestrationMetaRuleItem4,
     ``,
     buildCommonRiskRules(),
     ``,
@@ -848,7 +849,7 @@ export function buildOrchestrationFinalizerPrompt(
     `1. **合并去重**：对所有维度的风险点进行最终聚合，消除重复`,
     `2. **风险定级**：根据交叉验证和协同加权结果，对每个维度重新校准 level（🔴/🟡/🟢）`,
     `3. **协同升级应用**：synergy.levelUpgrades 中标记的升级必须被应用（如 🟡→🔴）`,
-    prompts.orchestrationStep8Item4,
+    segs.orchestrationStep8Item4,
     ``,
     `### 最终 JSON 输出`,
     `请输出以下格式的纯 JSON，不包含任何 Markdown 标记或额外解释：`,
@@ -865,7 +866,7 @@ export function buildOrchestrationFinalizerPrompt(
     `请严格执行以上流程并输出 JSON：`,
     ``,
     // ── Rendering instructions (only for Orchestration mode Turn 3) ──
-    process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? "" : buildFinalRenderInstructions(prompts),
+    process.env.KEVLAR_USE_LEGACY_PROMPT === "1" ? "" : buildFinalRenderInstructions(segs),
   ].join("\n");
 }
 
@@ -1041,8 +1042,9 @@ export function buildIsolatedSystemAuditorMessage(
 export function buildPreAuditFinalizerPrompt(
   systemAuditors: Persona[],
   precedents?: Precedent[],
-  prompts: PromptSegments = DEFAULT_FREE_PROMPTS,
+  prompts?: PromptSegments,
 ): string {
+  const segs = prompts ?? loadPromptSegments("free");
   return [
     `你是 **Kevlar-4u 系统初审总仲裁官**。`,
     ``,
@@ -1054,7 +1056,7 @@ export function buildPreAuditFinalizerPrompt(
     `1. 合并去重：对所有系统审查员、本地规则及交叉验证的风险点进行最终聚合。`,
     `2. 风险定级：根据仲裁原则，对每个风险点重新校准风险等级（🔴/🟡/🟢）。`,
     `3. 协同升级：应用协同加权结果（synergy），处理跨维度的组合风险。`,
-    prompts.finalizerCoreItem4,
+    segs.finalizerCoreItem4,
     ``,
     `## 【最高仲裁原则】`,
     ``,

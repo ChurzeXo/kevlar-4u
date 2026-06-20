@@ -365,11 +365,40 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
 }
 
 // ── Mode dispatch ──────────────────────────────────────────────
-// --auto   silent install (for AI-invoked setup)
-// --stdio  MCP server mode (spawns the compiled server)
-// (no flag) interactive install wizard
+// --activate [--code <code>]  activate Pro license
+// --status                   show Free/Pro status
+// --logout                   clear stored credentials
+// --sync                     sync strategy bundle from server
+// --doctor                   run diagnostics
+// --auto                     silent install (for AI-invoked setup)
+// --stdio                    MCP server mode (spawns the compiled server)
+// (no flag)                  interactive install wizard
 
-if (process.argv.includes("--stdio")) {
+if (process.argv.includes("--activate")) {
+  const codeIndex = process.argv.indexOf("--code");
+  const code = codeIndex !== -1 ? process.argv[codeIndex + 1] : undefined;
+  runActivate(code).catch((err) => {
+    console.error(`[Kevlar-4u] Activation failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (process.argv.includes("--status")) {
+  runStatus();
+} else if (process.argv.includes("--logout")) {
+  runLogout().catch((err) => {
+    console.error(`[Kevlar-4u] Logout failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (process.argv.includes("--sync")) {
+  runSync().catch((err) => {
+    console.error(`[Kevlar-4u] Sync failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (process.argv.includes("--doctor")) {
+  runDoctor().catch((err) => {
+    console.error(`[Kevlar-4u] Doctor failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (process.argv.includes("--stdio")) {
   const projectRoot = pkg.__path ? path.dirname(pkg.__path) : path.resolve(__dirname, "..");
 
   const serverPath = path.join(projectRoot, "dist", "index.js");
@@ -397,6 +426,7 @@ if (process.argv.includes("--stdio")) {
 // ── Types ────────────────────────────────────────────────────────
 
 import { getRegistry, type ClientDef } from "./registry.js";
+import { runActivate, runStatus, runLogout, runDoctor, runSync } from "./credentialCli.js";
 
 interface InjectResult {
   ok: boolean;

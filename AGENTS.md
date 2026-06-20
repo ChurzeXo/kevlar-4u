@@ -18,6 +18,10 @@ An MCP stdio server that stress-tests content by simulating reader reactions thr
 | `npm run test:watch` | `tsx --test --watch src/__tests__/*.test.ts` |
 | `npm run setup` | Zero-config auto-setup (Claude only) |
 | `npx .` | Run compiled bin (simulates published package) |
+| `npx . --sync` | Sync strategy bundle from server |
+| `npx . --status` | Show Free/Pro status |
+| `npx . --doctor` | Run diagnostics |
+| `npx . --activate --code <code>` | Activate Pro license |
 | `npx . --auto` | Run compiled bin in silent mode |
 
 **Single test file**: `npx tsx --test src/__tests__/<name>.test.ts`
@@ -97,6 +101,9 @@ New files are auto-discovered via content sniffing (presence of a `personas` key
 - **Persona files** are written to `skills/` — path validation enforces this. No files outside `skills/` may be written.
 - **Rule files**: `rules_free.json` (shipped, active), `rules_pro.json`/`rules_sensitive.json`/`rules_lowbrow.json` (backend in development / placeholder). `rules_free.json` covers the active rule set.
 - **i18n**: `src/i18n/` powers bilingual output (zh-CN / en-US). The `set_language` MCP tool switches at runtime.
+- **Credential storage**: AES-256-GCM (PBKDF2, 100k iterations) via `src/credential/index.ts`. Old XOR format auto-detected on read for backward compat.
+- **Bundle signature**: Ed25519 with public key embedded in `src/execution/strategyBundle.ts:KEVLAR_ED25519_PUBLIC_KEY`. Offline bundles (`bundleId === "default"`) use self-hash check.
+- **Sync**: `npx . --sync` downloads strategy bundle from server, verifies Ed25519 sig, checks revocation list, caches with AES-256-GCM.
 
 ## Environment variables
 
@@ -109,6 +116,7 @@ New files are auto-discovered via content sniffing (presence of a `personas` key
 | `OPENAI_API_KEY` | OpenAI fallback API key |
 | `KEVLAR_SKILLS_DIR` | Override default `skills/` path |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
+| `KEVLAR_SIGNING_KEY` | Ed25519 private key PEM for server-side bundle signing |
 
 ## Release
 

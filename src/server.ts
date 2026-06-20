@@ -17,6 +17,7 @@ import { resolveSamplingFn } from "./execution/sampling.js";
 import { setConfigPath } from "./execution/config.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
 import { SERVER_INSTRUCTIONS } from "./prompts/instructions.js";
+import { DynamicImportProRuntimeLoader, resolveStrategyProvider } from "./execution/proRuntime.js";
 
 // Priority:
 //   1. KEVLAR_SKILLS_DIR environment variable (absolute path)
@@ -121,11 +122,14 @@ function createMultiTurnSamplingFn(serverInstance: any): MultiTurnSamplingFuncti
   };
 }
 
-function buildToolDependencies(
+async function buildToolDependencies(
   skillsDir: string,
   tmpDir: string,
   underlyingServer: any,
-): ToolDependencies {
+): Promise<ToolDependencies> {
+  const proLoader = new DynamicImportProRuntimeLoader();
+  const strategyProvider = await resolveStrategyProvider(proLoader, skillsDir);
+
   return {
     skillsDir,
     tmpDir,
@@ -147,6 +151,7 @@ function buildToolDependencies(
         // Ignore synchronous throws from MCP SDK if logging is not enabled
       }
     },
+    strategyProvider,
   };
 }
 
@@ -201,7 +206,7 @@ function setupCallToolHandler(
   });
 }
 
-export function createKevlarServer(): McpServer {
+export async function createKevlarServer(): Promise<McpServer> {
   const skillsDir = resolveSkillsDir();
   const tmpDir = path.join(skillsDir, "tmp");
 
@@ -223,7 +228,7 @@ export function createKevlarServer(): McpServer {
   );
 
   const underlyingServer = mcpServer.server;
-  const deps = buildToolDependencies(skillsDir, tmpDir, underlyingServer);
+  const deps = await buildToolDependencies(skillsDir, tmpDir, underlyingServer);
   const { registry, toolDefinitions } = createToolRegistry(deps);
 
   setupListToolsHandler(underlyingServer, toolDefinitions);

@@ -1,7 +1,7 @@
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
 import { executeReview, loadPersonasForReview, MAX_PERSONAS } from "../execution/index.js";
-import type { ExecutionContext, ResolveableMode, SamplingFunction } from "../execution/base.js";
+import type { ExecutionContext, ResolveableMode, ReviewRunContext, SamplingFunction } from "../execution/base.js";
 import type { DimensionsConfig } from "../execution/dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG } from "../execution/dimensions.js";
 import { getErrorInfo } from "../utils/observability.js";
@@ -155,6 +155,8 @@ export async function handleReviewContent(
     samplingFn?: SamplingFunction;
     dimensions?: DimensionsConfig;
     preAuditReport?: any;
+    runContext?: ReviewRunContext;
+    tier?: "free" | "pro";
   }
 ): Promise<ToolResult> {
   const validationError = validateInput(input);
@@ -169,6 +171,18 @@ export async function handleReviewContent(
   const mode = input.mode || "auto";
 
   try {
+    const runContext: ReviewRunContext = input.runContext ?? {
+      reviewRunId: `run-${Math.random().toString(36).substring(2, 10)}`,
+      strategySessionId: "legacy-v1",
+      strategyVersion: "1.0.0",
+      strategyHash: "legacy",
+      promptSetHash: "legacy",
+      weightSetHash: "legacy",
+      executionMode: "orchestration",
+      locale: "zh-CN",
+      startedAt: new Date().toISOString(),
+    };
+
     const ctx: ExecutionContext = {
       skillsDir,
       personas,
@@ -177,6 +191,8 @@ export async function handleReviewContent(
       samplingFn: input.samplingFn,
       dimensions: input.dimensions ?? DEFAULT_DIMENSIONS_CONFIG,
       preAuditReport: input.preAuditReport,
+      runContext,
+      tier: input.tier,
     };
 
     const result = await executeReview(mode, ctx);

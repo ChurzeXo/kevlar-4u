@@ -10,7 +10,8 @@ import { DEFAULT_DIMENSIONS_CONFIG, buildDimensionTable, buildDimensionCriteriaI
 import { t, getCurrentLanguage } from "../i18n/index.js";
 import { getModeLabel } from "../i18n/tools-i18n.js";
 import { isPro } from "../subscription/tier.js";
-import { DEFAULT_FREE_PROMPTS, type PromptSegments } from "../subscription/promptTypes.js";
+import { type PromptSegments } from "../subscription/promptTypes.js";
+import { loadPromptSegments } from "../subscription/promptTemplates.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
@@ -139,7 +140,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
       }
     }
     if (options.preAuditReport.precedents && options.preAuditReport.precedents.length > 0) {
-      const segs = options.prompts ?? DEFAULT_FREE_PROMPTS;
+      const segs = options.prompts ?? loadPromptSegments("free");
       report += `\n\n### 📌 ${t("report.precedents", { ns: "common", defaultValue: "Similar Precedents (for reference)" })}\n\n`;
       if (isPro()) {
         for (const p of options.preAuditReport.precedents) {

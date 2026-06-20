@@ -22,7 +22,7 @@ describe("createKevlarServer", () => {
     process.env.KEVLAR_SKILLS_DIR = skillsDir;
 
     const { createKevlarServer } = await import("../server.js");
-    const server = createKevlarServer();
+    const server = await createKevlarServer();
 
     assert.ok(server, "should return a server");
     assert.ok(fs.existsSync(skillsDir), "should create skills dir");
@@ -50,7 +50,7 @@ describe("createKevlarServer", () => {
     process.env.KEVLAR_SKILLS_DIR = skillsDir;
 
     const { createKevlarServer } = await import("../server.js");
-    createKevlarServer();
+    await createKevlarServer();
 
     // The cleanup runs async; wait for it
     await new Promise((r) => setTimeout(r, 300));
