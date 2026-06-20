@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { LicenseCredential, CredentialStore } from "./index.js";
 import { ActivationClient } from "./activationClient.js";
 import { saveBundleToCache } from "./bundleCache.js";
-import { makeDefaultProBundle } from "../execution/strategyBundle.js";
-import { readConfig, writeConfig } from "../execution/config.js";
+import { makeDefaultProBundle } from "../strategyBundle.js";
+import { readConfig, writeConfig } from "../../execution/config.js";
 
 const ACTIVATION_CODE_PATTERN = /^KV-ACT-[A-Z0-9-]+$/;
 

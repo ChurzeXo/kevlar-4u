@@ -1,4 +1,4 @@
-import type { StrategyProvider, Entitlement, ReviewPlan, SynergyWeights } from "./strategy.js";
+import type { StrategyProvider, Entitlement, ReviewPlan, SynergyWeights } from "../execution/strategy.js";
 import type { StrategyBundleV1 } from "./strategyBundle.js";
 import { resolveAllTemplates, computePlanFingerprintFromBundle, isBundleExpired, verifyBundleIntegrity } from "./strategyBundle.js";
 import { logger } from "../utils/observability.js";

@@ -15,6 +15,7 @@ import {
 	slugify,
 } from "../utils/personaIdMaps.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { isValidSessionId } from "../utils/sessionId.js";
 
 // ── Persistent Prompt Injection Defense ──────────────────────────────────────
 // These patterns represent common prompt-injection / jailbreak tokens that
@@ -510,7 +511,7 @@ export async function handleUpdatePersonaDraft(
 	tmpDir: string,
 	input: UpdatePersonaDraftInput,
 ): Promise<ToolResult> {
-	if (!/^[a-z0-9-]+$/.test(input.sessionId)) {
+	if (!isValidSessionId(input.sessionId)) {
 		return {
 			content: [{ type: "text", text: `❌ sessionId 格式不合法` }],
 			isError: true,
@@ -602,7 +603,7 @@ export async function handleDeletePersonaDraft(
 	tmpDir: string,
 	input: DeletePersonaDraftInput,
 ): Promise<ToolResult> {
-	if (!/^[a-z0-9-]+$/.test(input.sessionId)) {
+	if (!isValidSessionId(input.sessionId)) {
 		return {
 			content: [{ type: "text", text: `❌ sessionId 格式不合法` }],
 			isError: true,

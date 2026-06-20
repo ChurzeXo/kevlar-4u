@@ -4,8 +4,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-import { FileCredentialStore } from "../credential/store.js";
-import { activateWithCode, isValidActivationCode } from "../credential/activate.js";
+import { FileCredentialStore } from "../pro/credential/store.js";
+import { activateWithCode, isValidActivationCode } from "../pro/credential/activate.js";
 import { isPro, isProWithStore, invalidateCredentialCache } from "../subscription/tier.js";
 
 describe("CredentialStore", () => {

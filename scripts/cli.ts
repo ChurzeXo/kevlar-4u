@@ -364,6 +364,28 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
   };
 }
 
+// ── Pro CLI loader ─────────────────────────────────────────────
+
+import { getRegistry, type ClientDef } from "./registry.js";
+let _proCliLoader: (() => Promise<{
+  runActivate(code?: string): Promise<void>;
+  runStatus(): void;
+  runLogout(): Promise<void>;
+  runDoctor(): Promise<void>;
+  runSync(): Promise<void>;
+} | null>) | undefined;
+
+async function getProCli() {
+  if (!_proCliLoader) {
+    try {
+      _proCliLoader = (await import("../src/utils/proCliLoader.js")).getProCli;
+    } catch {
+      _proCliLoader = async () => null;
+    }
+  }
+  return _proCliLoader();
+}
+
 // ── Mode dispatch ──────────────────────────────────────────────
 // --activate [--code <code>]  activate Pro license
 // --status                   show Free/Pro status
@@ -377,24 +399,54 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
 if (process.argv.includes("--activate")) {
   const codeIndex = process.argv.indexOf("--code");
   const code = codeIndex !== -1 ? process.argv[codeIndex + 1] : undefined;
-  runActivate(code).catch((err) => {
+  getProCli().then((pro) => {
+    if (!pro) {
+      console.log("❌ Pro 功能不可用。请安装 @kevlar/pro-runtime 包以使用此功能。");
+      process.exit(1);
+    }
+    return pro.runActivate(code);
+  }).catch((err) => {
     console.error(`[Kevlar-4u] Activation failed: ${err.message}`);
     process.exit(1);
   });
 } else if (process.argv.includes("--status")) {
-  runStatus();
+  getProCli().then((pro) => {
+    if (!pro) {
+      console.log("🆓 Free 版 (Pro 包未安装)");
+      return;
+    }
+    return pro.runStatus();
+  });
 } else if (process.argv.includes("--logout")) {
-  runLogout().catch((err) => {
+  getProCli().then((pro) => {
+    if (!pro) {
+      console.log("❌ Pro 功能不可用。请安装 @kevlar/pro-runtime 包。");
+      process.exit(1);
+    }
+    return pro.runLogout();
+  }).catch((err) => {
     console.error(`[Kevlar-4u] Logout failed: ${err.message}`);
     process.exit(1);
   });
 } else if (process.argv.includes("--sync")) {
-  runSync().catch((err) => {
+  getProCli().then((pro) => {
+    if (!pro) {
+      console.log("❌ Pro 功能不可用。请安装 @kevlar/pro-runtime 包。");
+      process.exit(1);
+    }
+    return pro.runSync();
+  }).catch((err) => {
     console.error(`[Kevlar-4u] Sync failed: ${err.message}`);
     process.exit(1);
   });
 } else if (process.argv.includes("--doctor")) {
-  runDoctor().catch((err) => {
+  getProCli().then((pro) => {
+    if (!pro) {
+      console.log("🆓 Free 版 (Pro 包未安装) - 无需诊断。");
+      return;
+    }
+    return pro.runDoctor();
+  }).catch((err) => {
     console.error(`[Kevlar-4u] Doctor failed: ${err.message}`);
     process.exit(1);
   });
@@ -424,9 +476,6 @@ if (process.argv.includes("--activate")) {
 }
 
 // ── Types ────────────────────────────────────────────────────────
-
-import { getRegistry, type ClientDef } from "./registry.js";
-import { runActivate, runStatus, runLogout, runDoctor, runSync } from "./credentialCli.js";
 
 interface InjectResult {
   ok: boolean;

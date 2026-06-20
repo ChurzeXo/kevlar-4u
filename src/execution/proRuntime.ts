@@ -1,9 +1,6 @@
 import { FreeStrategyProvider, InMemoryProStrategyProvider } from "./strategy.js";
 import type { StrategyProvider } from "./strategy.js";
-import { loadBundleFromCache, getBundleCacheStatus } from "../credential/bundleCache.js";
-import { verifyAndCreateProvider } from "./bundleStrategyProvider.js";
 import { isPro } from "../subscription/tier.js";
-import { randomUUID } from "node:crypto";
 import { logger } from "../utils/logger.js";
 
 export interface ProRuntimeLoader {
@@ -72,31 +69,35 @@ export async function resolveStrategyProvider(
   const pro = await loader.tryLoad();
   if (pro) return pro;
 
-  // 2. Try cached strategy bundle
+  // 2. Try cached strategy bundle (dynamic import to avoid Pro dep)
   if (isPro()) {
-    const bundle = loadBundleFromCache(skillsDir);
-    if (bundle) {
-      const vars: Record<string, string> = {
-        watermark: bundle.watermarkToken,
-        canary: bundle.canaryToken,
-        sessionId: bundle.strategySessionId,
-        sessionNonce: bundle.sessionNonce,
-        bundleId: bundle.bundleId,
-      };
-      const result = verifyAndCreateProvider(bundle, vars);
-      if (result.ok) {
-        logger.info("Loaded Pro strategy from cached bundle", {
-          event: "bundle_cache_loaded",
+    try {
+      const { loadBundleFromCache } = await import("../pro/credential/bundleCache.js");
+      const bundle = loadBundleFromCache(skillsDir);
+      if (bundle) {
+        const { verifyAndCreateProvider } = await import("../pro/bundleStrategyProvider.js");
+        const vars: Record<string, string> = {
+          watermark: bundle.watermarkToken,
+          canary: bundle.canaryToken,
+          sessionId: bundle.strategySessionId,
+          sessionNonce: bundle.sessionNonce,
           bundleId: bundle.bundleId,
-          version: bundle.version,
+        };
+        const result = verifyAndCreateProvider(bundle, vars);
+        if (result.ok) {
+          logger.info("Loaded Pro strategy from cached bundle", {
+            event: "bundle_cache_loaded",
+            bundleId: bundle.bundleId,
+            version: bundle.version,
+          });
+          return result.provider;
+        }
+        logger.warn("Cached strategy bundle invalid, falling back to Free", {
+          event: "bundle_cache_invalid",
+          reason: result.reason,
         });
-        return result.provider;
       }
-      logger.warn("Cached strategy bundle invalid, falling back to Free", {
-        event: "bundle_cache_invalid",
-        reason: result.reason,
-      });
-    } else {
+    } catch {
       logger.info("No cached strategy bundle, using Free", {
         event: "bundle_cache_missing",
       });

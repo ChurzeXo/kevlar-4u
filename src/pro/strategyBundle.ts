@@ -1,5 +1,5 @@
 import { createHash, createHmac, createVerify, createSign } from "node:crypto";
-import type { VisibilityPolicy, SynergyWeights } from "./strategy.js";
+import type { VisibilityPolicy, SynergyWeights } from "../execution/strategy.js";
 
 /** Ed25519 public key embedded in the client. Corresponding private key on server. */
 export const KEVLAR_ED25519_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----

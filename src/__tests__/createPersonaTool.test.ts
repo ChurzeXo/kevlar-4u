@@ -160,6 +160,26 @@ describe("handleUpdatePersonaDraft", () => {
     assert.ok(result.content[0].text.includes("sessionId"));
   });
 
+  it("accepts sessionId with underscore, dot, hyphen, and letters", async () => {
+    const result = await handleUpdatePersonaDraft(tmpDir, {
+      sessionId: "Session_1.2-Alpha",
+      field: "ageRange",
+      value: "25-34",
+    });
+    assert.equal(result.isError, undefined);
+    assert.ok(result.content[0].text.includes("ageRange 更新成功"));
+  });
+
+  it("rejects sessionId longer than 128 characters", async () => {
+    const result = await handleUpdatePersonaDraft(tmpDir, {
+      sessionId: "a".repeat(129),
+      field: "ageRange",
+      value: "25-34",
+    });
+    assert.ok(result.isError);
+    assert.ok(result.content[0].text.includes("sessionId"));
+  });
+
   it("rejects invalid sessionId in value", async () => {
     const result = await handleUpdatePersonaDraft(tmpDir, {
       sessionId: "normal",
@@ -220,6 +240,11 @@ describe("handleUpdatePersonaDraft", () => {
 describe("handleDeletePersonaDraft", () => {
   it("rejects invalid sessionId", async () => {
     const result = await handleDeletePersonaDraft(tmpDir, { sessionId: "bad!!" });
+    assert.ok(result.isError);
+  });
+
+  it("rejects sessionId longer than 128 characters", async () => {
+    const result = await handleDeletePersonaDraft(tmpDir, { sessionId: "a".repeat(129) });
     assert.ok(result.isError);
   });
 

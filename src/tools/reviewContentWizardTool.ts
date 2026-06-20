@@ -8,6 +8,7 @@ import { handleReviewContent } from "./reviewTool.js";
 import { DEFAULT_DIMENSIONS_CONFIG, DEFENSIVE_DIMENSION_IDS, type DimensionsConfig } from "../execution/dimensions.js";
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { isValidSessionId } from "../utils/sessionId.js";
 import type { ToolModule } from "./types.js";
 import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
 import { isPro } from "../subscription/tier.js";
@@ -1515,7 +1516,7 @@ async function executeReview(
 }
 
 async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
-  if (input.sessionId && !/^[a-z0-9-]+$/.test(input.sessionId)) {
+  if (input.sessionId && !isValidSessionId(input.sessionId)) {
     throw new Error("sessionId 格式不合法。");
   }
 

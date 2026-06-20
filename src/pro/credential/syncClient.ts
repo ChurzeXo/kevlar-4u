@@ -7,9 +7,9 @@ import {
   type BundleCacheStatus,
 } from "./bundleCache.js";
 import { deobfuscate } from "./index.js";
-import type { StrategyBundleV1 } from "../execution/strategyBundle.js";
-import { verifyBundleIntegrity } from "../execution/strategyBundle.js";
-import { logger } from "../utils/observability.js";
+import type { StrategyBundleV1 } from "../strategyBundle.js";
+import { verifyBundleIntegrity } from "../strategyBundle.js";
+import { logger } from "../../utils/observability.js";
 
 export interface SyncConfig {
   refreshToken: string;

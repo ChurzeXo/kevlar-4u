@@ -1,25 +1,42 @@
 import { readConfig } from "../execution/config.js";
-import { FileCredentialStore } from "../credential/store.js";
 
 let credentialCache: boolean | undefined;
+let triedCredentialStore = false;
 
-function hasLicenseCredential(): boolean {
-  if (credentialCache !== undefined) return credentialCache;
+async function tryCredentialCheck(): Promise<boolean> {
+  if (triedCredentialStore) return credentialCache ?? false;
+  triedCredentialStore = true;
   try {
+    const { FileCredentialStore } = await import("../pro/credential/store.js");
     const store = new FileCredentialStore();
     const cred = store.loadSync();
     credentialCache = cred !== null && cred.licenseKey.length > 0;
   } catch {
     credentialCache = false;
   }
-  return credentialCache;
+  return credentialCache ?? false;
+}
+
+let credentialPromise: Promise<boolean> | null = null;
+
+function hasLicenseCredential(): boolean {
+  if (credentialCache !== undefined && triedCredentialStore) return credentialCache;
+  if (!triedCredentialStore) {
+    if (!credentialPromise) {
+      credentialPromise = tryCredentialCheck();
+    }
+    return false;
+  }
+  return credentialCache ?? false;
 }
 
 export function invalidateCredentialCache(): void {
   credentialCache = undefined;
+  triedCredentialStore = false;
+  credentialPromise = null;
 }
 
-export function isPro(credentialPath?: string): boolean {
+export function isPro(_credentialPath?: string): boolean {
   if (process.env.KEVLAR_TIER === "pro") return true;
   if (process.env.KEVLAR_PRO_TOKEN) return true;
   if (readConfig().sync_token) return true;
@@ -32,4 +49,11 @@ export function isProWithStore(store: { loadSync(): { licenseKey: string } | nul
   if (readConfig().sync_token) return true;
   const cred = store.loadSync();
   return cred !== null && cred.licenseKey.length > 0;
+}
+
+export async function isProAsync(): Promise<boolean> {
+  if (process.env.KEVLAR_TIER === "pro") return true;
+  if (process.env.KEVLAR_PRO_TOKEN) return true;
+  if (readConfig().sync_token) return true;
+  return tryCredentialCheck();
 }

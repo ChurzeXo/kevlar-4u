@@ -9,6 +9,7 @@ import {
 } from "./deletePersonaTool.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { isValidSessionId } from "../utils/sessionId.js";
 
 export const deletePersonaWizardToolDefinition: Tool = {
   name: "delete_persona_wizard",
@@ -187,7 +188,7 @@ async function loadOrCreateState(
   tmpDir: string,
   input: DeletePersonaWizardInput
 ): Promise<DeletePersonaWizardState> {
-  if (input.sessionId && !/^[a-z0-9-]+$/.test(input.sessionId)) {
+  if (input.sessionId && !isValidSessionId(input.sessionId)) {
     throw new Error("sessionId 格式不合法。");
   }
 

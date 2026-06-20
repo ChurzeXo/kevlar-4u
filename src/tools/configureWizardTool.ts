@@ -6,6 +6,7 @@ import { handleConfigure, ConfigureInput } from "./configureTool.js";
 import { isValidMode, isValidConcurrency } from "../execution/config.js";
 import type { ToolModule } from "./types.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { isValidSessionId } from "../utils/sessionId.js";
 
 export const configureWizardToolDefinition: Tool = {
 	name: "configure_wizard",
@@ -173,7 +174,7 @@ async function loadOrCreateState(
 	tmpDir: string,
 	input: ConfigureWizardInput,
 ): Promise<ConfigureWizardState> {
-	if (input.sessionId && !/^[a-z0-9-]+$/.test(input.sessionId)) {
+	if (input.sessionId && !isValidSessionId(input.sessionId)) {
 		throw new Error("sessionId 格式不合法。");
 	}
 

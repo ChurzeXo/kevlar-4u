@@ -12,6 +12,7 @@ import {
   sanitizePersistentField,
 } from "./createPersonaTool.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { isValidSessionId } from "../utils/sessionId.js";
 import {
   PERSPECTIVE_PRESETS,
   buildDimensionBiasFromPresets,
@@ -1827,7 +1828,7 @@ function extractPureJson(text: string): string {
 }
 
 async function loadOrCreateState(tmpDir: string, inputSessionId?: string): Promise<WizardState> {
-  if (inputSessionId && !/^[a-z0-9-]+$/.test(inputSessionId)) {
+  if (inputSessionId && !isValidSessionId(inputSessionId)) {
     throw new Error(getInvalidSessionIdMessage());
   }
 

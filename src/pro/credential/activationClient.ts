@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { StrategyBundleV1 } from "../execution/strategyBundle.js";
-import { readConfig, writeConfig } from "../execution/config.js";
-import { logger } from "../utils/observability.js";
+import type { StrategyBundleV1 } from "../strategyBundle.js";
+import { readConfig, writeConfig } from "../../execution/config.js";
+import { logger } from "../../utils/observability.js";
 
 export interface ActivationResult {
   licenseKey: string;
@@ -40,7 +40,7 @@ export class ActivationClient {
     if (process.env.KEVLAR_SERVER_URL) {
       return process.env.KEVLAR_SERVER_URL.replace(/\/+$/, "");
     }
-    return "https://api.kevlar.ai";
+    return "https://kevlar4u.xyz";
   }
 
   async activate(code: string, installationId: string): Promise<ActivationResult | null> {
@@ -53,6 +53,10 @@ export class ActivationClient {
         signal: AbortSignal.timeout(10000),
       });
       if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        if (errorData?.error?.code === "ACTIVATION_FAILED") {
+          throw new Error(`ACTIVATION_FAILED: ${errorData.error.message}`);
+        }
         logger.warn("Activation server returned error", {
           event: "activation_server_error",
           status: res.status,
@@ -153,7 +157,7 @@ export class ActivationClient {
     );
 
     if (bundle) {
-      const { verifyBundleIntegrity } = await import("../execution/strategyBundle.js");
+      const { verifyBundleIntegrity } = await import("../strategyBundle.js");
       if (!verifyBundleIntegrity(bundle)) {
         logger.warn("Downloaded bundle has invalid signature", {
           event: "bundle_signature_mismatch",

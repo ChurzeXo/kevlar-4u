@@ -1,9 +1,9 @@
 import * as path from "path";
 import * as fs from "fs";
-import type { StrategyBundleV1 } from "../execution/strategyBundle.js";
-import { isBundleExpired } from "../execution/strategyBundle.js";
+import type { StrategyBundleV1 } from "../strategyBundle.js";
+import { isBundleExpired } from "../strategyBundle.js";
 import { obfuscate, deobfuscate } from "./index.js";
-import { logger } from "../utils/observability.js";
+import { logger } from "../../utils/observability.js";
 
 const BUNDLE_CACHE_FILENAME = "strategy-bundle-cache.enc";
 

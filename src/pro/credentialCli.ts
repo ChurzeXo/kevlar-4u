@@ -2,7 +2,10 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as fsp from "fs/promises";
-import { createHash, randomUUID, pbkdf2Sync, randomBytes, createCipheriv, createDecipheriv, createVerify, createSign, createHmac } from "node:crypto";
+import { randomUUID } from "node:crypto";
+
+import { obfuscate, deobfuscate, CREDENTIAL_FILENAME } from "./credential/index.js";
+import { verifyBundleIntegrity } from "./strategyBundle.js";
 
 // ── File paths ──────────────────────────────────────────────────
 
@@ -12,95 +15,12 @@ function configPath(): string {
   return path.join(SKILLS_DIR, "kevlar-config.json");
 }
 
-const CREDENTIAL_PATH = path.join(os.homedir(), ".kevlar-credentials");
-const AES_TAG = "kevlar:aes:v1";
-const XOR_TAG = "kevlar:v1";
-const APP_SEED = "kevlar-credential-store-v2";
-const PBKDF2_ITERATIONS = 100000;
-const KEY_LENGTH = 32;
-const SALT_LENGTH = 16;
-const IV_LENGTH = 12;
-const TAG_LENGTH = 16;
-
-function obfuscate(text: string): string {
-  const salt = randomBytes(SALT_LENGTH);
-  const iv = randomBytes(IV_LENGTH);
-  const key = pbkdf2Sync(APP_SEED, salt, PBKDF2_ITERATIONS, KEY_LENGTH, "sha256");
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(text, "utf-8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  const payload = Buffer.concat([salt, iv, authTag, encrypted]);
-  return AES_TAG + payload.toString("base64");
-}
-
-function deobfuscate(encoded: string): string | null {
-  if (encoded.startsWith(AES_TAG)) {
-    try {
-      const raw = Buffer.from(encoded.slice(AES_TAG.length), "base64");
-      const salt = raw.subarray(0, SALT_LENGTH);
-      const iv = raw.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-      const authTag = raw.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
-      const encrypted = raw.subarray(SALT_LENGTH + IV_LENGTH + TAG_LENGTH);
-      const key = pbkdf2Sync(APP_SEED, salt, PBKDF2_ITERATIONS, KEY_LENGTH, "sha256");
-      const decipher = createDecipheriv("aes-256-gcm", key, iv);
-      decipher.setAuthTag(authTag);
-      return decipher.update(encrypted) + decipher.final("utf-8");
-    } catch {
-      return null;
-    }
-  }
-
-  if (encoded.startsWith(XOR_TAG)) {
-    try {
-      const raw = Buffer.from(encoded.slice(XOR_TAG.length), "base64");
-      const xorKey = createHash("sha256").update("kevlar-credential-store-v1").digest();
-      for (let i = 0; i < raw.length; i++) {
-        raw[i] ^= xorKey[i % xorKey.length];
-      }
-      return raw.toString("utf-8");
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
+const CREDENTIAL_PATH = path.join(os.homedir(), CREDENTIAL_FILENAME);
 
 // ── Ed25519 bundle signature verification ───────────────────────
 
-const KEVLAR_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEA4Rm1xicSuZiuRujvT+DuAbU4D43R7ORzujB0sIAk/ns=
------END PUBLIC KEY-----`;
-
-const BUNDLE_HMAC_KEY = createHash("sha256").update("kevlar-bundle-signing-v1").digest();
-
-function canonicalJSON(data: Record<string, unknown>): string {
-  return JSON.stringify(data, Object.keys(data).sort());
-}
-
 function verifyBundleSignature(bundle: any): boolean {
-  const { bundleSignature, ...data } = bundle;
-  const canonical = canonicalJSON(data as any);
-
-  if (bundle.bundleId === "default") {
-    return createHash("sha256").update(canonical).digest("hex") === bundleSignature;
-  }
-
-  try {
-    const expected = createHmac("sha256", BUNDLE_HMAC_KEY)
-      .update(canonical)
-      .digest("base64");
-    if (expected === bundleSignature) return true;
-  } catch { /* fall through */ }
-
-  try {
-    const verifier = createVerify("ed25519");
-    verifier.update(canonical);
-    verifier.end();
-    return verifier.verify(KEVLAR_PUBLIC_KEY, bundleSignature, "base64");
-  } catch {
-    return false;
-  }
+  return verifyBundleIntegrity(bundle);
 }
 
 // ── Credential I/O ─────────────────────────────────────────────
@@ -146,7 +66,7 @@ function getServerUrl(): string {
     const config = JSON.parse(fs.readFileSync(configPath(), "utf-8"));
     if (config.cloud_server_url) return config.cloud_server_url.replace(/\/+$/, "");
   } catch { /* no config */ }
-  return "https://api.kevlar.ai";
+  return "https://kevlar4u.xyz";
 }
 
 const BUNDLE_CACHE_PATH = path.join(SKILLS_DIR, "strategy-bundle-cache.enc");
@@ -196,7 +116,7 @@ export async function runSync(): Promise<void> {
   let config: any = {};
   try { config = JSON.parse(fs.readFileSync(configPath(), "utf-8")); } catch { /* ok */ }
 
-  const serverUrl = config.cloud_server_url || process.env.KEVLAR_SERVER_URL || "https://api.kevlar.ai";
+  const serverUrl = config.cloud_server_url || process.env.KEVLAR_SERVER_URL || "https://kevlar4u.xyz";
   const installationId = cred.installationId || randomUUID();
   const refreshToken = cred.refreshToken;
 
@@ -311,6 +231,12 @@ export async function runActivate(code?: string): Promise<void> {
       };
       // Try to download strategy bundle
       bundleId = await tryDownloadBundle(data.refreshToken, installationId);
+    } else {
+      const errData: any = await res.json().catch(() => null);
+      if (errData?.error?.code === "ACTIVATION_FAILED") {
+        console.log(`❌ 激活失败：${errData.error.message}`);
+        return;
+      }
     }
   } catch {
     // Server unreachable

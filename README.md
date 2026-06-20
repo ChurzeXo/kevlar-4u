@@ -25,11 +25,24 @@ And most platforms don't offer a real **A/B test**. Once content goes live, by t
 
 ---
 
-## License
+## License & Tier Model
 
-Kevlar-4u's core local features are open-sourced under the **AGPL-3.0** license.
+This repository is licensed under **AGPL-3.0**. It contains both **Free** (open source) and **Pro** (subscription-gated) client code. Pro features are inert without a valid license; no Pro prompt IP or server-side code lives in this repository.
 
-Cloud-based risk word cloud services, paid rule synchronization, and advanced features are **proprietary commercial services**.
+### Feature Comparison
+
+| Area | Free (out of the box) | Pro (requires activation) |
+|---|---|---|
+| **Persona simulation** | Full RST-based persona creation, natural language parsing, all execution modes | — |
+| **System pre-audit** | 6 defensive dimensions with local rule engine (`rules_free.json`) | Server-synced strategy bundle with enhanced prompts, real precedent names, worst-case narratives |
+| **Rule sets** | `rules_free.json` (shipped with repo) | `rules_pro.json` merged on top (pulled from server) |
+| **Audit report detail** | Abstract/generic descriptions | Real brand/event names, detailed amplification chains |
+| **Strategy updates** | Static default bundled with release | Dynamic sync from server (`npx . --sync`) |
+| **Prompt fidelity** | Locked/teaser text (prevents prompt IP leakage) | Full Pro instructions from SaaS |
+| **Credential & sync** | — | AES-256-GCM credential store, Ed25519 bundle verification, revocation checks |
+| **Custom persona storage** | Unlimited local personas via `skills/*.json` | — |
+
+> **Pro is powered by a backend service at `https://kevlar4u.xyz`.** The client communicates only metadata (license id, version, session id, locale) — never user content, audit results, or API keys.
 
 ---
 
@@ -41,7 +54,7 @@ Cloud-based risk word cloud services, paid rule synchronization, and advanced fe
 
 ## Core Features
 
-### 1. Highly Customizable Reviewers (Persona Customization)
+### 1. Highly Customizable Reviewers (Persona Customization) — Free
 
 Break out of the single-AI perspective with comprehensive persona customization:
 
@@ -52,7 +65,7 @@ Break out of the single-AI perspective with comprehensive persona customization:
 
 ### 2. Two-Stage Review Pipeline
 
-**Stage 1 — System Pre-audit**: Five specialized system auditors scan content in five defensive dimensions:
+**Stage 1 — System Pre-audit** (Free: local rules; Pro: server-enhanced): Six specialized system auditors scan content in six defensive dimensions:
 
 | Auditor (ID) | Focus |
 |---|---|
@@ -61,10 +74,11 @@ Break out of the single-AI perspective with comprehensive persona customization:
 | 语境猎手 (`context_distortion`) | Screenshot out-of-context vulnerability, malicious misinterpretation potential |
 | 暗语破译 (`network_culture_risk`) | Internet slang collisions, subculture terminology, hidden vulgar meanings |
 | 事实判官 (`factual_integrity`) | Factual errors, common-sense violations, logical fallacies, data credibility |
+| 跨界判官 (`cross_lingual_distortion`) | Malicious mistranslation, Chinglish puns, cultural misfit across languages |
 
 When independent LLM access is available (MCP Sampling / Direct API), each auditor runs as a separate LLM call for maximum isolation. Under Orchestration fallback, a single-inference **matrix-filling protocol** replaces role-playing — each dimension is a structured XML sandbox slot filled independently, then arbitrated. See [Protocol Comparison](#protocol-comparison-pseudo-parallel-vs-matrix-filling).
 
-**Stage 2 — RST Review**: User-created reviewers with RST personalities receive **Focus Topics** (filtered + translated from pre-audit findings based on each persona's RST triggers) and produce authentic user reactions, not dimension-scored reports.
+**Stage 2 — RST Review** (Free): User-created reviewers with RST personalities receive **Focus Topics** (filtered + translated from pre-audit findings based on each persona's RST triggers) and produce authentic user reactions, not dimension-scored reports.
 
 ---
 
@@ -94,6 +108,17 @@ Production start:
 ```bash
 npm start
 ```
+
+### Pro Activation
+
+```bash
+npx . --activate --code <activation-code>    # Exchange code for license
+npx . --sync                                  # Sync strategy bundle from server
+npx . --status                                # Show Free/Pro status
+npx . --doctor                                # Run diagnostics
+```
+
+Activation codes are single-use, time-limited (10–30 min). Once activated, the client securely stores credentials via AES-256-GCM and syncs strategy bundles from `kevlar4u.xyz`. The `--status` command shows your current tier; `--sync` downloads the latest Pro bundle with signature verification.
 
 ---
 
@@ -322,7 +347,18 @@ flowchart TD
   Wizards --> Tmp["skills/tmp Session State"]
   Execution --> Personas["skills/*.json Personas & Rules"]
   Execution --> Report["Structured Review Report"]
+
+  subgraph Pro["Pro (subscription)"]
+    Sync["npx . --sync"]
+    Server["kevlar4u.xyz API"]
+    Bundle["Strategy Bundle<br/>(prompts, rules, config)"]
+    Cred["AES-256-GCM Credential Store"]
+  end
+
+  Sync --> Server --> Bundle --> Cred --> Execution
 ```
+
+**Free** features (persona creation, RST review, local rule engine, all execution modes) work entirely offline. **Pro** adds a server-synced strategy bundle with enhanced prompts, real precedent names, and additional rule sets — activated via `npx . --activate` and synced via `npx . --sync`.
 
 Design principles:
 
@@ -344,6 +380,7 @@ kevlar-4u/
 │   └── RST-PHASE-LOG.md                   # RST implementation phase log
 ├── scripts/                               # Install & config scripts
 │   ├── cli.ts                             # Interactive install CLI
+│   ├── credentialCli.ts                   # Pro: activation, license, sync CLI
 │   ├── registry.ts                        # MCP client detection
 │   └── setup.ts                           # Zero-config setup script
 ├── skills/                                # Reviewer persona library
@@ -371,10 +408,26 @@ kevlar-4u/
 │   │   ├── focusTopicTransform.ts         # Focus Topic filter + translate pipeline
 │   │   ├── rstParser.ts                   # Natural language → RST config parser
 │   │   ├── rstRecommender.ts              # RST-based persona recommendation engine
+│   │   ├── strategy.ts                    # Pro: strategy plan types
+│   │   ├── strategyBundle.ts              # Pro: bundle signature & verification
+│   │   ├── bundleStrategyProvider.ts      # Pro: server-backed strategy provider
+│   │   ├── proRuntime.ts                  # Pro: runtime loader (DynamicImport / Mock)
+│   │   ├── reviewSteps.ts                 # Pro: step type system & execution
 │   │   └── modes/
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
 │   │       └── direct_api.ts
+│   ├── credential/                        # Pro: activation, license, sync, bundle cache
+│   │   ├── index.ts                       # AES-256-GCM credential store
+│   │   ├── activate.ts                    # Activation code → license
+│   │   ├── activationClient.ts            # Full activation flow (code → license → session → bundle)
+│   │   ├── bundleCache.ts                 # Bundle cache read/write/status
+│   │   ├── syncClient.ts                  # Sync strategy bundle from server
+│   │   └── store.ts                       # Disk-backed secure credential store
+│   ├── subscription/                      # Pro: SaaS-prompt integration
+│   │   ├── tier.ts                        # isPro() resolution
+│   │   ├── promptTypes.ts                 # PromptSegments type & defaults
+│   │   └── promptTemplates.ts             # Prompt text for Pro/Free tiers
 │   ├── tools/                             # MCP tools
 │   │   ├── index.ts                       # Tool registry
 │   │   ├── listPersonasTool.ts

@@ -25,11 +25,24 @@
 
 ---
 
-## 许可协议
+## 许可协议与分级模型
 
-Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
+本仓库以 **AGPL-3.0** 协议开源，包含 **免费版**（开源）和 **Pro**（需订阅）两端客户端代码。Pro 功能在没有有效许可证时不可用；本仓库中不包含任何 Pro 提示词 IP 或服务端代码。
 
-云端风险词云服务、付费规则同步及高级功能属于**商业闭源服务**。
+### 功能对比
+
+| 领域 | 免费版（开箱即用） | Pro（需激活） |
+|---|---|---|
+| **人设模拟** | 完整 RST 人设创建、自然语言解析、全部执行模式 | — |
+| **系统初审** | 6 个防御维度 + 本地规则引擎（`rules_free.json`） | 服务端同步的策略包：增强提示词、真实案例名、最坏情况叙事 |
+| **规则集** | `rules_free.json`（随仓库发布） | `rules_pro.json` 叠加（从服务端拉取） |
+| **审计报告详情** | 抽象/通用描述 | 真实品牌/事件名、详细放大链 |
+| **策略更新** | 随版本发布的静态默认值 | 从服务端动态同步（`npx . --sync`） |
+| **提示词保真度** | 锁定/占位文本（防提示词 IP 泄露） | 来自 SaaS 的完整 Pro 指令 |
+| **凭据与同步** | — | AES-256-GCM 凭据存储、Ed25519 包签名校验、吊销检查 |
+| **自定义人设存储** | 通过 `skills/*.json` 无限制本地人设 | — |
+
+> **Pro 由后端服务 `https://kevlar4u.xyz` 驱动。**客户端仅传输元数据（license id、版本、session id、locale）——绝不包含用户内容、审计结果或 API key。
 
 ---
 
@@ -41,7 +54,7 @@ Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
 
 ## 核心特性
 
-### 1. 高度定制的评审员（Persona Customization）
+### 1. 高度定制的评审员（Persona Customization）— 免费版
 
 打破单一的 AI 视角，支持全方位的评审员画像定制：
 
@@ -52,7 +65,7 @@ Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
 
 ### 2. 两阶段评审流水线
 
-**Stage 1 — 系统初审**：6 位专业系统审查员对以下六个防御维度进行扫描：
+**Stage 1 — 系统初审**（免费版：本地规则；Pro：服务端增强）：6 位专业系统审查员对以下六个防御维度进行扫描：
 
 | 审查员 (ID) | 审查焦点 |
 |---|---|
@@ -65,7 +78,7 @@ Kevlar-4u 的核心本地功能以 **AGPL-3.0** 协议开源。
 
 当有独立 LLM 调用能力时（MCP Sampling / Direct API），每位审查员以独立 LLM 调用执行，隔离度最高。进入兜底模式（Orchestration）时，使用 **矩阵填空协议** 替代角色扮演——每个维度是一个独立 XML 沙盒槽位，填写完成后由仲裁沙盒交叉验证。详见[协议对比](#协议对比矩阵填空与伪并行与强化角色扮演)。
 
-**Stage 2 — RST 复审**：用户创建的带 RST 人格的评审员接收 **Focus Topics**（根据评审员的 RST Trigger 从初审发现中过滤+转译），产出真实用户反应，而非维度评分报告。
+**Stage 2 — RST 复审**（免费版）：用户创建的带 RST 人格的评审员接收 **Focus Topics**（根据评审员的 RST Trigger 从初审发现中过滤+转译），产出真实用户反应，而非维度评分报告。
 
 ---
 
@@ -96,6 +109,16 @@ npm run dev
 npm start
 ```
 
+### Pro 激活
+
+```bash
+npx . --activate --code <激活码>    # 激活码兑换许可证
+npx . --sync                        # 从服务端同步策略包
+npx . --status                      # 查看 Free/Pro 状态
+npx . --doctor                      # 运行诊断
+```
+
+激活码为一次性使用、限时有效（10–30 分钟）。激活后客户端通过 AES-256-GCM 安全存储凭据，并从 `kevlar4u.xyz` 同步策略包。`--status` 命令显示当前版本；`--sync` 下载带签名验证的最新 Pro 策略包。
 
 ---
 
@@ -510,7 +533,18 @@ flowchart TD
   Execution --> Personas["skills/*.json 评审员人设与规则"]
   Execution --> Report["结构化评审报告 + Frame 信封"]
   Execution --> Observability["分布式追踪 & Token 追踪"]
+
+  subgraph Pro["Pro（订阅）"]
+    Sync["npx . --sync"]
+    Server["kevlar4u.xyz API"]
+    Bundle["策略包<br/>(提示词、规则、配置)"]
+    Cred["AES-256-GCM 凭据存储"]
+  end
+
+  Sync --> Server --> Bundle --> Cred --> Execution
 ```
+
+**免费版**功能（人设创建、RST 复审、本地规则引擎、全部执行模式）完全离线可用。**Pro** 额外提供服务端同步的策略包——增强提示词、真实案例名、额外规则集——通过 `npx . --activate` 激活，通过 `npx . --sync` 同步。
 
 设计原则：
 
@@ -529,6 +563,7 @@ kevlar-4u/
 ├── docs/                                  # 架构决策、ADR、审计报告
 ├── scripts/                               # 安装与配置脚本
 │   ├── cli.ts                             # 交互式安装 CLI
+│   ├── credentialCli.ts                   # Pro: 激活、许可证、同步 CLI
 │   ├── registry.ts                        # MCP 客户端检测
 │   └── setup.ts                           # 零配置安装脚本
 ├── skills/                                # 评审员人设库
@@ -567,11 +602,27 @@ kevlar-4u/
 │   │   ├── rstParser.ts                   # 自然语言 → RST 配置解析器
 │   │   ├── rstRecommender.ts              # RST 评审员推荐引擎
 │   │   ├── synergyCalculator.ts           # 跨维度协同加权
+│   │   ├── strategy.ts                    # Pro: 策略计划类型
+│   │   ├── strategyBundle.ts              # Pro: 策略包签名与校验
+│   │   ├── bundleStrategyProvider.ts      # Pro: 服务端策略提供器
+│   │   ├── proRuntime.ts                  # Pro: 运行时加载器
+│   │   ├── reviewSteps.ts                 # Pro: 步骤类型与执行
 │   │   └── modes/
 │   │       ├── index.ts                   # 模式处理器导出
 │   │       ├── orchestration.ts           # 宿主编排模式
 │   │       ├── sampling.ts                # MCP Sampling 模式
 │   │       └── direct_api.ts              # Direct API 模式
+│   ├── credential/                        # Pro: 激活、许可证、同步、缓存
+│   │   ├── index.ts                       # AES-256-GCM 凭据存储
+│   │   ├── activate.ts                    # 激活码 → 许可证
+│   │   ├── activationClient.ts            # 完整激活流程
+│   │   ├── bundleCache.ts                 # 策略包缓存
+│   │   ├── syncClient.ts                  # 从服务端同步策略包
+│   │   └── store.ts                       # 磁盘安全凭据存储
+│   ├── subscription/                      # Pro: SaaS 提示词集成
+│   │   ├── tier.ts                        # isPro() 裁决
+│   │   ├── promptTypes.ts                 # PromptSegments 类型与默认值
+│   │   └── promptTemplates.ts             # Pro/Free 层级提示词
 │   ├── i18n/                              # 国际化
 │   │   ├── index.ts
 │   │   ├── create-persona-wizard-i18n.ts

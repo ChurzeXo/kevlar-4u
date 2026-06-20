@@ -6,10 +6,10 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { createHash, createHmac } from "node:crypto";
 
-import { syncStrategyBundle, getCachedBundle, clearBundleCache, getBundleCacheStatus, type SyncConfig } from "../credential/syncClient.js";
-import { ActivationClient } from "../credential/activationClient.js";
-import { verifyBundleIntegrity, makeDefaultProBundle, resolveTemplateVars, isBundleExpired, canonicalJSONDeep, type StrategyBundleV1 } from "../execution/strategyBundle.js";
-import { saveBundleToCache } from "../credential/bundleCache.js";
+import { syncStrategyBundle, getCachedBundle, clearBundleCache, getBundleCacheStatus, type SyncConfig } from "../pro/credential/syncClient.js";
+import { ActivationClient } from "../pro/credential/activationClient.js";
+import { verifyBundleIntegrity, makeDefaultProBundle, resolveTemplateVars, isBundleExpired, canonicalJSONDeep, type StrategyBundleV1 } from "../pro/strategyBundle.js";
+import { saveBundleToCache } from "../pro/credential/bundleCache.js";
 
 const HMAC_KEY = "kevlar-bundle-signing-dev";
 
@@ -55,10 +55,17 @@ interface MockServerState {
   revokedHashes: string[];
   return304: boolean;
   validToken: string;
+  validTokens?: Record<string, string>;
+  sessions?: Record<string, { licenseKey: string; bundleId: string }>;
+  bundles?: Record<string, { licenseKey: string }>;
 }
 
 function startMockServer(port: number, state: MockServerState) {
+  state.sessions ??= {};
+  state.bundles ??= {};
+
   const server = http.createServer(async (req, res) => {
+    const tokenLicenses = state.validTokens ?? { [state.validToken]: "kv-lic-test-integration" };
     res.setHeader("Content-Type", "application/json");
 
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
@@ -98,9 +105,22 @@ function startMockServer(port: number, state: MockServerState) {
 
     if (req.method === "POST" && url.pathname === "/api/v1/strategy/session") {
       const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== state.validToken) {
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : "";
+      const licenseKey = tokenLicenses[token];
+      if (!licenseKey) {
         res.writeHead(401);
         res.end(JSON.stringify({ error: { code: "INVALID_TOKEN", message: "bad token" } }));
+        return;
+      }
+      const body = JSON.parse(await readBody(req));
+      if (!/^[\w.-]+$/.test(body.sessionId) || body.sessionId.length > 128) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: { code: "INVALID_SESSION_ID", message: "bad sessionId" } }));
+        return;
+      }
+      if (!/^[\w.-]+$/.test(body.installationId) || body.installationId.length > 256) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: { code: "INVALID_INSTALLATION_ID", message: "bad installationId" } }));
         return;
       }
 
@@ -111,10 +131,14 @@ function startMockServer(port: number, state: MockServerState) {
       }
 
       state.sessionCount++;
+      const sessionNonce = "nonce_" + state.sessionCount;
+      state.sessions![sessionNonce] = { licenseKey, bundleId: state.currentBundleId };
+      state.bundles![state.currentBundleId] = { licenseKey };
       res.writeHead(200);
       res.end(JSON.stringify({
         bundleId: state.currentBundleId,
-        sessionNonce: "nonce_" + state.sessionCount,
+        nonce: sessionNonce,
+        sessionNonce,
         watermarkToken: "wm_test",
         canaryToken: "cn_test",
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -124,7 +148,9 @@ function startMockServer(port: number, state: MockServerState) {
 
     if (req.method === "GET" && url.pathname.startsWith("/api/v1/strategy/bundle/")) {
       const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith("Bearer ") || auth.slice(7) !== state.validToken) {
+      const token = auth?.startsWith("Bearer ") ? auth.slice(7) : "";
+      const licenseKey = tokenLicenses[token];
+      if (!licenseKey) {
         res.writeHead(401);
         res.end(JSON.stringify({ error: { code: "INVALID_TOKEN", message: "bad token" } }));
         return;
@@ -137,7 +163,22 @@ function startMockServer(port: number, state: MockServerState) {
         return;
       }
 
-      const bundle = makeTestBundle({ bundleId: state.currentBundleId });
+      const session = state.sessions![String(nonce)];
+      if (!session || session.licenseKey !== licenseKey) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: { code: "SESSION_NOT_OWNED", message: "session does not belong to license" } }));
+        return;
+      }
+
+      const bundleId = url.pathname.split("/").pop()!;
+      const bundleOwner = state.bundles![bundleId];
+      if (!bundleOwner || bundleOwner.licenseKey !== licenseKey) {
+        res.writeHead(403);
+        res.end(JSON.stringify({ error: { code: "BUNDLE_NOT_OWNED", message: "bundle does not belong to license" } }));
+        return;
+      }
+
+      const bundle = makeTestBundle({ bundleId });
       res.writeHead(200);
       res.end(JSON.stringify(bundle));
       return;
@@ -293,6 +334,60 @@ describe("Bundle sync integration — HTTP mock server", () => {
     const r2 = await syncStrategyBundle(config);
     assert.equal(r2.ok, true);
     assert.equal(r2.status, "already_latest");
+  });
+
+  it("rejects bundle download when session nonce is reused with another license", async () => {
+    state.validTokens = {
+      rt_license_A: "kv_lic_A",
+      rt_license_B: "kv_lic_B",
+    };
+
+    const sessionRes = await fetch(`http://localhost:${port}/api/v1/strategy/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer rt_license_A" },
+      body: JSON.stringify({ installationId: "install.A_1", sessionId: "session.A_1" }),
+    });
+    assert.equal(sessionRes.status, 200);
+    const session = await sessionRes.json() as { bundleId: string; sessionNonce: string };
+
+    const bundleRes = await fetch(`http://localhost:${port}/api/v1/strategy/bundle/${session.bundleId}`, {
+      headers: { Authorization: "Bearer rt_license_B", "X-Nonce": session.sessionNonce },
+    });
+    const body = await bundleRes.json() as { error: { code: string } };
+
+    assert.equal(bundleRes.status, 403);
+    assert.equal(body.error.code, "SESSION_NOT_OWNED");
+  });
+
+  it("rejects bundle id owned by another license", async () => {
+    state.validTokens = {
+      rt_license_A: "kv_lic_A",
+      rt_license_B: "kv_lic_B",
+    };
+
+    state.currentBundleId = "bundle.for.A";
+    const sessionARes = await fetch(`http://localhost:${port}/api/v1/strategy/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer rt_license_A" },
+      body: JSON.stringify({ installationId: "install.A_1", sessionId: "session.A_1" }),
+    });
+    const sessionA = await sessionARes.json() as { bundleId: string };
+
+    state.currentBundleId = "bundle.for.B";
+    const sessionBRes = await fetch(`http://localhost:${port}/api/v1/strategy/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer rt_license_B" },
+      body: JSON.stringify({ installationId: "install.B_1", sessionId: "session.B_1" }),
+    });
+    const sessionB = await sessionBRes.json() as { sessionNonce: string };
+
+    const bundleRes = await fetch(`http://localhost:${port}/api/v1/strategy/bundle/${sessionA.bundleId}`, {
+      headers: { Authorization: "Bearer rt_license_B", "X-Nonce": sessionB.sessionNonce },
+    });
+    const body = await bundleRes.json() as { error: { code: string } };
+
+    assert.equal(bundleRes.status, 403);
+    assert.equal(body.error.code, "BUNDLE_NOT_OWNED");
   });
 });
 
