@@ -1,11 +1,11 @@
 ---
-description: Stage all changes, commit with a conventional-commit message, and push to main.
+description: Build, test, stage all Free changes, commit, and push to main.
 agent: build
 ---
 
-Commit and push all current changes to the main branch.
+Commit and push Free-tier changes (src/, scripts/, docs/, config/ — NOT src/pro/).
 
-1. Build and test first:
+1. Build and test:
    ```bash
    rm -rf dist && npm run build && npm test
    ```
@@ -15,22 +15,20 @@ Commit and push all current changes to the main branch.
    git add -A
    ```
 
-3. Review what's staged:
+3. Review staged changes:
    ```bash
    git status --short
    ```
 
-4. Commit with a conventional-commit message describing the changes:
+4. Commit with a conventional-commit message:
    ```bash
    git commit -m "type: description"
    ```
-
-   Use conventional commit types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`.
-   Generate the message based on the actual changes in `git status --short` and `git diff --stat`.
+   Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`.
 
 5. Push:
    ```bash
    git push churzexo main
    ```
 
-If the Pro submodule (`src/pro`) has changed, remind to run `/deploy-pro` separately.
+If `src/pro` changed (submodule pointer), use `/commit-pro` instead.
