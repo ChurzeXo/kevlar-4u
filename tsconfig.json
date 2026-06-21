@@ -14,6 +14,7 @@
       "kevlar-4u/utils/logger": ["./src/utils/logger.ts"]
     }
   },
+  "exclude": ["src/pro", "src/pro/**"],
   "files": [],
   "references": [
     { "path": "./tsconfig.src.json" },

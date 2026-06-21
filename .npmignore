@@ -23,3 +23,4 @@ node_modules/
 *.test.d.ts
 *.test.d.ts.map
 *.test.js.map
+dist/pro/

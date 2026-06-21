@@ -24,16 +24,17 @@ async function loadStrategyBundle(skillsDir: string): Promise<any | null> {
     const raw = await fs.promises.readFile(bundlePath, "utf-8");
     const trimmed = raw.trim();
 
-    // Try encrypted format (AES-256-GCM from --sync)
+    // Try encrypted format (AES-256-GCM — Pro runtime decrypts, not this module)
     if (trimmed.startsWith("kevlar:")) {
-      try {
-        const { deobfuscate } = await import("../pro/src/credential/index.js");
-        const decoded = deobfuscate(trimmed);
-        if (decoded) return JSON.parse(decoded);
-      } catch { /* fall through to plain JSON */ }
+      // Bundle is encrypted; Pro runtime handles decryption.
+      // For rule loading, fall through to empty rules.
+      logger.debug("Encrypted bundle found — rules require Pro runtime", {
+        event: "bundle_encrypted_skip",
+      });
+      return null;
     }
 
-    // Plain JSON (dev/test fallback)
+    // Plain JSON (dev/test)
     return JSON.parse(trimmed);
   } catch {
     return null;

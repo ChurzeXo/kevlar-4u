@@ -14,11 +14,19 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true,
-    "paths": {
-      "@kevlar/pro-runtime": ["./src/pro/src"]
-    }
+    "sourceMap": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/pro"]
+  "include": [
+    "src/index.ts",
+    "src/server.ts",
+    "src/dao/**/*.ts",
+    "src/execution/**/*.ts",
+    "src/i18n/**/*.ts",
+    "src/prompts/**/*.ts",
+    "src/subscription/**/*.ts",
+    "src/tools/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/__tests__/**/*.ts"
+  ],
+  "exclude": ["src/pro/**"]
 }
