@@ -15,6 +15,9 @@ skills/kevlar-config.json
 docs/*
 !docs/README.*.md
 !docs/decisions/
+!docs/DEPLOY.md
+!docs/preaudit-pipeline.md
+!docs/kevlar-4u-prd.md
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
@@ -43,3 +46,6 @@ RELEASE.md
 
 # TypeScript build info
 tsconfig.src.tsbuildinfo
+
+# 学习归档目录（本地专用，不提交）
+.学习/
