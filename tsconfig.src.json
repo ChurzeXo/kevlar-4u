@@ -14,7 +14,10 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "paths": {
+      "@kevlar/pro-runtime": ["./src/pro/src"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/pro"]

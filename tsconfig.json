@@ -1,4 +1,19 @@
 {
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "node16",
+    "paths": {
+      "@kevlar/pro-runtime": ["./src/pro/src"],
+      "kevlar-4u/execution/strategy": ["./src/execution/strategy.ts"],
+      "kevlar-4u/execution/config": ["./src/execution/config.ts"],
+      "kevlar-4u/subscription/tier": ["./src/subscription/tier.ts"],
+      "kevlar-4u/subscription/promptTypes": ["./src/subscription/promptTypes.ts"],
+      "kevlar-4u/subscription/promptTemplates": ["./src/subscription/promptTemplates.ts"],
+      "kevlar-4u/utils/observability": ["./src/utils/observability.ts"],
+      "kevlar-4u/utils/logger": ["./src/utils/logger.ts"]
+    }
+  },
   "files": [],
   "references": [
     { "path": "./tsconfig.src.json" },
