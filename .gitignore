@@ -49,3 +49,6 @@ tsconfig.src.tsbuildinfo
 
 # 学习归档目录（本地专用，不提交）
 .学习/
+
+# Pro strategy bundle cache (downloaded from kevlar4u.xyz)
+skills/strategy-bundle-cache.enc

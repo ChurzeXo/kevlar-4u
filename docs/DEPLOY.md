@@ -33,12 +33,8 @@ ChurzeXo/kevlar-4u (public, AGPL-3.0)       ChurzeXo/kevlar-pro-runtime (private
 ### 2. 推送 Pro 代码到私有仓库
 
 ```bash
-cd ~/Documents/MCP-Service/pro-runtime
-
-# 添加 remote（用你实际的 SSH URL）
+cd src/pro
 git remote add origin git@github.com:ChurzeXo/kevlar-pro-runtime.git
-
-# 推送
 git push -u origin main
 ```
 
@@ -122,35 +118,48 @@ npm version patch -m "chore: release %s"
 git push origin main --tags
 ```
 
-CI (.github/workflows/release.yml) 自动执行：
-1. `npm ci`
-2. `npm run build`
-3. `npm test`
-4. 打包 .tgz / .zip
-5. 创建 GitHub Release
-6. `npm publish` 到 npm registry
+CI (`.github/workflows/release.yml`) 自动执行：
+1. Checkout（`submodules: false`，不拉取私有子模块）
+2. `npm ci`
+3. `npm run build`
+4. **熔断检查**：确认 `dist/` 无 Pro 代码泄漏
+5. `npm test`（315 个测试，无需 Pro 包）
+6. 打包 .tgz / .zip（不含 src/、node_modules、Pro 子模块）
+7. 提取 CHANGELOG.md
+8. 创建 GitHub Release
+9. `npm publish` 到 npm registry
+
+此外还有 **Pro CI** (`.github/workflows/pro-ci.yml`)，仅当子模块指针变更时触发：
+- 需要用 SSH deploy key 拉取私有子模块
+- 编译并运行 Pro 的 35 个测试
+- 验证 dist/ 无 Pro 代码泄漏
+
+**CI 需要配置的 Secrets：**
+
+| Secret | 用途 | 配置位置 |
+|---|---|---|
+| `NPM_TOKEN` | npm 发布 token | Settings → Secrets → Actions |
+| `PRO_REPO_DEPLOY_KEY` | Pro CI 拉取子模块的 SSH 私钥 | 同上（仅内部需配） |
 
 ### 3.2 Pro 包 (@kevlar/pro-runtime) — 私有 (GitHub Packages)
 
+Pro 代码在 `src/pro/` 子模块中。发布于私有 GitHub Packages 而非 npm。
+
 ```bash
-cd ~/Documents/MCP-Service/pro-runtime
+cd src/pro
 
 # 1. 编译
-npm run build
+npm install --legacy-peer-deps
+npx tsc
 
 # 2. 确认测试
 npm test    # 预期: 35 pass / 0 fail
 
-# 3. 登录 GitHub Packages
-#    创建 GitHub Token: Settings → Developer settings → Tokens (classic)
-#    勾选 write:packages + read:packages
-npm login --registry=https://npm.pkg.github.com
-# Username: ChurzeXo
-# Password: ghp_xxxxxxxxxxxx
-# Email: your@email.com
+# 3. 推送子模块变更
+git add -A && git commit -m "feat: xxx" && git push
 
-# 4. 发布
-npm publish --registry=https://npm.pkg.github.com
+# 4. 回到主仓更新指针
+cd ../.. && npm run commit:pro
 ```
 
 package.json 配置参考：
@@ -203,25 +212,21 @@ npm install @kevlar/pro-runtime  # Pro 私有包
 
 ---
 
-## 六、npm link 回退方案
+## 六、本地开发说明
 
-如果子模块方式不适合当前开发场景，可以回到 `npm link`：
+子模块 + tsconfig paths 方案，无需 npm link。
 
 ```bash
-# Free 包全局链接
-cd ~/Documents/MCP-Service/kevlar
-npm link
+# 克隆（有 Pro 权限）
+git clone git@github.com:ChurzeXo/kevlar-4u.git
+git submodule update --init --recursive
 
-# Pro 包链接 Free（peer dep）
-cd ~/Documents/MCP-Service/pro-runtime
-npm link kevlar-4u
-npm link
+# tsconfig.json 已有 paths 映射：
+# @kevlar/pro-runtime → ./src/pro/src
+# kevlar-4u/execution/*  → ./src/execution/*.ts
+# kevlar-4u/subscription/* → ./src/subscription/*.ts
 
-# Free 包链接 Pro（optional dep）
-cd ~/Documents/MCP-Service/kevlar
-npm link @kevlar/pro-runtime
-
-# 恢复：两条路都走完
-npm unlink @kevlar/pro-runtime
-npm unlink kevlar-4u
+# 日常开发即可直接 import "@kevlar/pro-runtime"
+npm run dev     # tsx 启动，paths 自动生效
+npm test        # 315 tests
 ```

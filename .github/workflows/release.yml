@@ -22,11 +22,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────
+      # ── 1. Checkout (explicitly skip private submodule) ──────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          submodules: false
 
       # ── 2. Setup Node.js ─────────────────────────────────────────────────
       - name: Set up Node.js
@@ -43,20 +44,36 @@ jobs:
       - name: Build
         run: npm run build
 
-      # ── 5. Run tests ──────────────────────────────────────────────────────
+      # ── 5. Pre-publish leak check ──────────────────────────────────────────
+      - name: Verify no Pro code leaks
+        run: |
+          echo "🔍 Checking for Pro code leaks in dist/..."
+          if [ -d "dist/pro" ]; then
+            echo "❌ FAIL: dist/pro/ directory found — Pro code would be published!"
+            exit 1
+          fi
+          if [ -d "dist/credential" ]; then
+            echo "❌ FAIL: dist/credential/ directory found — Pro code would be published!"
+            exit 1
+          fi
+          # Verify Pro runtime loader still uses dynamic import (not inlined)
+          if grep -q "kevlar-pro-runtime" dist/execution/proRuntime.js 2>/dev/null; then
+            echo "⚠️  WARNING: static reference to kevlar-pro-runtime in dist/"
+          fi
+          echo "✅ No Pro code leaks detected"
+
+      # ── 6. Run tests ──────────────────────────────────────────────────────
       - name: Test
         run: npm test
 
-      # ── 6. Extract version from tag (e.g. refs/tags/v1.2.3 → 1.2.3) ────
+      # ── 7. Extract version from tag (e.g. refs/tags/v1.2.3 → 1.2.3) ────
       - name: Extract version
         id: version
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           echo "VERSION=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      # ── 7. Bundle release tarball ─────────────────────────────────────────
-      # Includes: compiled dist/, skills/, config/, README, LICENSE
-      # Excludes: source TypeScript, node_modules, dev files
+      # ── 8. Bundle release tarball ─────────────────────────────────────────
       - name: Create release tarball
         run: |
           tar -czf kevlar-${{ steps.version.outputs.VERSION }}.tar.gz \
@@ -68,7 +85,7 @@ jobs:
             package.json \
             README.md
 
-      # ── 8. Create zip for Windows users ──────────────────────────────────
+      # ── 9. Create zip for Windows users ──────────────────────────────────
       - name: Create release zip
         run: |
           zip -r kevlar-${{ steps.version.outputs.VERSION }}.zip \
@@ -80,7 +97,7 @@ jobs:
             README.md \
             -x "node_modules/*"
 
-      # ── 9. Extract changelog from CHANGELOG.md for current version ──────
+      # ── 10. Extract changelog from CHANGELOG.md for current version ─────
       - name: Extract changelog
         id: changelog
         run: |
@@ -101,7 +118,7 @@ jobs:
           echo "$SECTION" > changelog.txt
           echo "📝 Changelog extracted for v${VERSION}"
 
-      # ── 10. Publish GitHub Release ────────────────────────────────────────
+      # ── 11. Publish GitHub Release ────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -117,12 +134,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Optional: publish to npm ─────────────────────────────────────────────
+  # Requires NPM_TOKEN secret configured in repo settings
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
     needs: build-and-release
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: false
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -130,6 +150,14 @@ jobs:
           cache: "npm"
       - run: npm ci
       - run: npm run build
+      # Safety: double-check no Pro code in dist before npm publish
+      - name: Verify no Pro leaks in npm package
+        run: |
+          if [ -d "dist/pro" ] || [ -d "dist/credential" ]; then
+            echo "❌ Pro code leak detected! Aborting publish."
+            exit 1
+          fi
+          echo "✅ Package clean — no Pro code"
       - run: npm publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.SERVER_PASSWORD }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

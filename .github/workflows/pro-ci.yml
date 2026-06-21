@@ -1,0 +1,66 @@
+name: Pro CI (Internal)
+
+# This workflow runs when the Pro submodule is updated.
+# Requires an SSH deploy key with read access to ChurzeXo/kevlar-pro-runtime.
+
+on:
+  push:
+    paths:
+      - "src/pro"   # Git submodule pointer changed
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test-pro:
+    name: Test Pro Runtime
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout with Pro submodule ───────────────────────────────────
+      - name: Checkout repository (with Pro submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          ssh-key: ${{ secrets.PRO_REPO_DEPLOY_KEY }}
+
+      # ── 2. Setup Node.js ─────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 4. Build Free tier ───────────────────────────────────────────────
+      - name: Build Free tier
+        run: npm run build
+
+      # ── 5. Build Pro submodule (needs Free dist/ for types) ──────────────
+      - name: Build Pro package
+        run: |
+          cd src/pro
+          npm install --legacy-peer-deps
+          npx tsc
+
+      # ── 6. Run Free tier tests ───────────────────────────────────────────
+      - name: Test Free tier
+        run: npm test
+
+      # ── 7. Run Pro tests ─────────────────────────────────────────────────
+      - name: Test Pro runtime
+        working-directory: src/pro
+        run: npm test
+
+      # ── 8. Verify Pro code NOT in dist ───────────────────────────────────
+      - name: Verify no Pro code leaked into dist
+        run: |
+          if [ -d "dist/pro" ] || [ -d "dist/credential" ]; then
+            echo "❌ Pro code leaked into dist/ — this should never happen"
+            exit 1
+          fi
+          echo "✅ Clean — Pro code isolated to src/pro/ submodule"
