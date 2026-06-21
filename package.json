@@ -1,7 +1,7 @@
 {
   "name": "kevlar-4u",
   "version": "1.5.5",
-  "description": "Kevlar-4u: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
+  "description": "Local-first MCP content review server — simulates reader reactions before publishing. 100% offline, no telemetry, AGPL-3.0 open source.",
   "main": "dist/index.js",
   "exports": {
     ".": {

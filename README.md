@@ -13,6 +13,8 @@
 
 ---
 
+> 🔒 **Privacy & Security**: Kevlar-4u runs **100% locally** on your machine. No content is ever sent to any server. No telemetry, no analytics, no data collection. The source code is fully open (AGPL-3.0) and auditable on [GitHub](https://github.com/ChurzeXo/kevlar-4u). Pro features use an optional cloud sync for rule updates only — your content and review results never leave your device.
+
 Drop any content you're about to publish — **articles, tweets, video scripts, product intros, press releases, announcements, Reddit posts, V2EX posts, Hacker News headlines** — directly into Kevlar-4u. It won't just say "looks good." Instead, it'll **question, misinterpret, roast, nitpick, and comprehension-test** your content, just like the real internet.
 
 Writers often suffer from the **"curse of knowledge"**:
