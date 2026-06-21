@@ -59,3 +59,6 @@ tsconfig.src.tsbuildinfo
 
 # Pro strategy bundle cache (downloaded from kevlar4u.xyz)
 skills/strategy-bundle-cache.enc
+
+# Upload bundle for server (one-time use)
+.kevlar_upload_bundle.json
