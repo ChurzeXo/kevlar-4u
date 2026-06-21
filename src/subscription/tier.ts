@@ -7,7 +7,8 @@ async function tryCredentialCheck(): Promise<boolean> {
   if (triedCredentialStore) return credentialCache ?? false;
   triedCredentialStore = true;
   try {
-    const { FileCredentialStore } = await import("../pro/credential/store.js");
+    const pro = (await import("@kevlar/pro-runtime")) as any;
+    const FileCredentialStore = pro.FileCredentialStore;
     const store = new FileCredentialStore();
     const cred = store.loadSync();
     credentialCache = cred !== null && cred.licenseKey.length > 0;

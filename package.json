@@ -3,6 +3,41 @@
   "version": "1.4.0",
   "description": "Kevlar-4u: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
   "main": "dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./execution/strategy": {
+      "types": "./dist/execution/strategy.d.ts",
+      "import": "./dist/execution/strategy.js"
+    },
+    "./execution/config": {
+      "types": "./dist/execution/config.d.ts",
+      "import": "./dist/execution/config.js"
+    },
+    "./subscription/tier": {
+      "types": "./dist/subscription/tier.d.ts",
+      "import": "./dist/subscription/tier.js"
+    },
+    "./subscription/promptTypes": {
+      "types": "./dist/subscription/promptTypes.d.ts",
+      "import": "./dist/subscription/promptTypes.js"
+    },
+    "./subscription/promptTemplates": {
+      "types": "./dist/subscription/promptTemplates.d.ts",
+      "import": "./dist/subscription/promptTemplates.js"
+    },
+    "./utils/logger": {
+      "types": "./dist/utils/logger.d.ts",
+      "import": "./dist/utils/logger.js"
+    },
+    "./utils/observability": {
+      "types": "./dist/utils/observability.d.ts",
+      "import": "./dist/utils/observability.js"
+    }
+  },
+  "types": "dist/index.d.ts",
   "bin": {
     "kevlar-4u": "dist/scripts/cli.js"
   },
@@ -16,6 +51,7 @@
     "build:scripts": "tsc -b tsconfig.scripts.json",
     "test": "tsx --test src/__tests__/*.test.ts",
     "test:watch": "tsx --test --watch src/__tests__/*.test.ts",
+    "commit:pro": "node ./scripts/sync-pro-submodule.js",
     "prepublishOnly": "if [ -z \"$CI\" ]; then echo '⚠️  请通过 CI 发布：git tag vX.X.X && git push origin vX.X.X'; exit 1; fi"
   },
   "files": [
@@ -54,9 +90,6 @@
     "json5": "^2.2.3",
     "ora": "^9.4.0",
     "zod": "^4.4.3"
-  },
-  "optionalDependencies": {
-    "@kevlar/pro-runtime": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.8.0",

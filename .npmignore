@@ -1,0 +1,8 @@
+# Pro code — never ship in public npm package
+src/pro/
+src/pro/**/*
+
+# Personal development files
+node_modules/
+*.tsbuildinfo
+*.test.ts

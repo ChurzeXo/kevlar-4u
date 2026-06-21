@@ -18,6 +18,7 @@ const REAL_TEMPLATES_DIR = path.resolve(__dirname, "..", "..", "skills", "templa
 let tmpDir: string;
 
 beforeEach(() => {
+  process.env.KEVLAR_SKIP_PRO_IMPORT = "1";
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-e2e-"));
   const tmpTemplates = path.join(tmpDir, "templates");
   fs.mkdirSync(tmpTemplates, { recursive: true });
@@ -30,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   delete process.env.KEVLAR_SKILLS_DIR;
+  delete process.env.KEVLAR_SKIP_PRO_IMPORT;
 });
 
 describe("End-to-End integration test", () => {

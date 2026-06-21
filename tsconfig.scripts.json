@@ -1,8 +1,8 @@
 {
   "extends": "./tsconfig.src.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "."
+    "outDir": "./dist/scripts",
+    "rootDir": "./scripts"
   },
-  "include": ["scripts/**/*", "src/utils/proCliLoader.ts"]
+  "include": ["scripts/**/*"]
 }

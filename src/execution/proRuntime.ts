@@ -17,6 +17,14 @@ export class DynamicImportProRuntimeLoader implements ProRuntimeLoader {
     if (this.tried) return this.cached;
     this.tried = true;
 
+    // Allow disabling via env for testing
+    if (process.env.KEVLAR_SKIP_PRO_IMPORT === "1") {
+      logger.info("Pro runtime disabled via KEVLAR_SKIP_PRO_IMPORT", {
+        event: "pro_runtime_skipped",
+      });
+      return null;
+    }
+
     try {
       const mod = await import("@kevlar/pro-runtime");
       if (typeof mod.createProStrategyProvider === "function") {
@@ -69,13 +77,13 @@ export async function resolveStrategyProvider(
   const pro = await loader.tryLoad();
   if (pro) return pro;
 
-  // 2. Try cached strategy bundle (dynamic import to avoid Pro dep)
+  // 2. Try cached strategy bundle via @kevlar/pro-runtime
   if (isPro()) {
     try {
-      const { loadBundleFromCache } = await import("../pro/credential/bundleCache.js");
-      const bundle = loadBundleFromCache(skillsDir);
+      // Dynamic import — runtime resolution, cast to any for TS
+      const pro = (await import("@kevlar/pro-runtime")) as any;
+      const bundle = pro.getCachedBundle(skillsDir);
       if (bundle) {
-        const { verifyAndCreateProvider } = await import("../pro/bundleStrategyProvider.js");
         const vars: Record<string, string> = {
           watermark: bundle.watermarkToken,
           canary: bundle.canaryToken,
@@ -83,7 +91,7 @@ export async function resolveStrategyProvider(
           sessionNonce: bundle.sessionNonce,
           bundleId: bundle.bundleId,
         };
-        const result = verifyAndCreateProvider(bundle, vars);
+        const result = pro.verifyAndCreateProvider(bundle, vars);
         if (result.ok) {
           logger.info("Loaded Pro strategy from cached bundle", {
             event: "bundle_cache_loaded",

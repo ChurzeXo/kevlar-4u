@@ -367,23 +367,15 @@ function injectPanel(results: Array<{ client: ClientDef; result: InjectResult }>
 // ── Pro CLI loader ─────────────────────────────────────────────
 
 import { getRegistry, type ClientDef } from "./registry.js";
-let _proCliLoader: (() => Promise<{
-  runActivate(code?: string): Promise<void>;
-  runStatus(): void;
-  runLogout(): Promise<void>;
-  runDoctor(): Promise<void>;
-  runSync(): Promise<void>;
-} | null>) | undefined;
+let _proCli: Promise<any> | undefined;
 
-async function getProCli() {
-  if (!_proCliLoader) {
-    try {
-      _proCliLoader = (await import("../src/utils/proCliLoader.js")).getProCli;
-    } catch {
-      _proCliLoader = async () => null;
-    }
+async function getProCli(): Promise<any> {
+  if (!_proCli) {
+    // Dynamic path avoids TS static resolution when @kevlar/pro-runtime is absent
+    const PRO_PKG = "@kevlar/pro-runtime" as string;
+    _proCli = import(PRO_PKG).catch(() => null);
   }
-  return _proCliLoader();
+  return _proCli;
 }
 
 // ── Mode dispatch ──────────────────────────────────────────────
