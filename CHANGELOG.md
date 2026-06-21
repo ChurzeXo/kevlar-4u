@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.5.0] - 2026-06-21
+
+### Added
+
+- **Pro Code Extraction**: All proprietary Pro code (`credential/`, `strategyBundle`, `bundleStrategyProvider`, `credentialCli`) moved to private Git submodule at `src/pro/` (ChurzeXo/kevlar-pro-runtime). Public CI/CD never sees Pro source.
+- **Dynamic Pro Loading**: `DynamicImportProRuntimeLoader` attempts `import("@kevlar/pro-runtime")` at runtime. Pro installed → enhanced audit pipeline (11 steps). Not installed → auto-degrade to Free mode (transparent to users).
+- **`npm run commit:pro`**: One-click script that commits Pro submodule changes AND updates the parent repo pointer — no manual Git submodule gymnastics.
+- **Pro CI Workflow** (`.github/workflows/pro-ci.yml`): Triggers on submodule pointer changes. Requires SSH deploy key for private repo access. Runs Pro's 35 tests and verifies no Pro code leaked into `dist/`.
+- **Pre-publish Leak Check**: CI step that verifies `dist/pro/` and `dist/credential/` directories don't exist before releasing. Double-protection with `.npmignore` and `files` whitelist.
+- **OpenCode Commands**: 6 custom commands (`/commit`, `/commit-pro`, `/deploy-free`, `/deploy-pro`, `/deploy-all`, `/new-release`) for AI-assisted deployment workflows.
+- **`KEVLAR_SKIP_PRO_IMPORT`**: Env var (`= "1"`) to disable Pro runtime loading for tests and CI.
+
+### Changed
+
+- **Free/Pro Code Separation**: All Pro imports now use bare `@kevlar/pro-runtime` specifiers. Free code self-references via `kevlar-4u/*` subpath exports.
+- **TypeScript Config**: `tsconfig.json` paths map `@kevlar/pro-runtime` → `./src/pro/src` and `kevlar-4u/*` → `./src/*` for zero-config dev. `tsconfig.src.json` excludes `src/pro/`.
+- **AGENTS.md Refactored**: Split into Free/Pro sections with architecture diagrams, environment variables, and deploy checklist for AI agents.
+- **docs/ Cleanup**: 30 obsolete files archived to `.学习/归档/` (local only, gitignored). 7 core docs retained (DEPLOY.md, preaudit-pipeline.md, PRD, i18n READMEs, ADR).
+- **Packaging Safety**: `files` whitelist refined to specific files only. `.npmignore` excludes Pro bundle cache (`skills/strategy-bundle-cache.enc`), Pro rules (`rules_pro/sensitive/lowbrow.json`), and session temp files.
+- **README.md**: Added Free/Pro tier comparison table, Pro activation section, architecture diagram with Pro subgraph, tier-annotated features.
+
+### Fixed
+
+- **Backend v1 API Alignment**: `verifyBundleIntegrity` uses `canonicalJSONDeep` (recursive sort) with original `strategyHash` for HMAC verification — matching production server behavior at `kevlar4u.xyz`.
+- **Credential Check**: `isPro()` credential store check made dynamic (lazy import), preventing `src/pro/` dependency when Pro is absent.
+- **E2E Test Isolation**: Tests use temp `skills/` dirs and `KEVLAR_SKIP_PRO_IMPORT` to prevent real Pro credentials from interfering.
+
+### Removed
+
+- **`src/credential/`**: Extracted to private submodule.
+- **`src/execution/strategyBundle.ts`, `bundleStrategyProvider.ts`**: Extracted to private submodule.
+- **`scripts/credentialCli.ts`**: Extracted to private submodule.
+- **`src/pro/` direct files**: Replaced by Git submodule.
+
+---
+
 ## [1.4.0] - 2026-06-18
 
 ### Added
