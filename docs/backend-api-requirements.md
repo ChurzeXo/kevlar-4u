@@ -176,8 +176,12 @@ POST /api/v1/admin/templates
 
 ## 六、优先级排序
 
-| 优先级 | 项目 | 原因 |
-|---|---|---|
-| P0 | 策略包 `templates` 字段补充（含 4 个新增字段） | Pro 激活后无本地 pro.json，依赖后端提供 |
-| P1 | Pro 规则集通过策略包下发 | 规则文件已从开源仓库删除 |
-| P2 | 管理 API | 方便后期迭代，但非阻塞 |
+| 优先级 | 项目 | 状态 | 说明 |
+|---|---|---|---|
+| P0 | 策略包 `templates` 字段 | 📦 数据已就绪 | 15 个 PromptSegments 字段已打包在 `.kevlar_upload_bundle.json` |
+| P1 | 策略包 `rules` 字段 | 📦 数据已就绪 | 12 规则类 + 9 语义基元 + 9 结构模式，同上文件 |
+| P2 | 管理 API | 🔧 待实现 | `POST /api/v1/admin/templates` — 上传端点 |
+
+**执行方式**：后端建好 `POST /api/v1/admin/templates` 端点后，POST `.kevlar_upload_bundle.json` 内容即可。客户端 `--sync` 会自动拉取最新策略包。
+
+详见 `.kevlar_backend_task.md`（可直接发给后端开发）。
