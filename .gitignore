@@ -26,6 +26,7 @@ docs/*
 !docs/DEPLOY.md
 !docs/preaudit-pipeline.md
 !docs/kevlar-4u-prd.md
+!docs/backend-api-requirements.md
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
