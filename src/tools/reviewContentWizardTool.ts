@@ -1094,6 +1094,7 @@ async function handleInventoryCheck(
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const prompts = await resolvePromptSegments();
+  const upgradeHint = state.tier === "free" ? "\n\n" + prompts.freeTierUpgradeHint : "";
 
   // 无评审员：提示创建，流程暂停
   if (personas.length === 0) {
@@ -1109,6 +1110,7 @@ async function handleInventoryCheck(
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
         "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
+        upgradeHint,
       ].join("\n"),
     );
   }
@@ -1124,6 +1126,7 @@ async function handleInventoryCheck(
       "请选择下一步：",
       "1. 进入「复审」",
       "2. 模拟平台违禁限流排查",
+      upgradeHint,
     ].join("\n"),
   );
 }

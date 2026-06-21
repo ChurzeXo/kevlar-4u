@@ -23,6 +23,9 @@ export interface PromptSegments {
   /** Free-tier upgrade prompt shown after RST review completes */
   freeTierUpgradePrompt: string;
 
+  /** Free-tier upgrade hint shown during persona selection (early stage) */
+  freeTierUpgradeHint: string;
+
   /** Core reasoning framework: 职业黑粉 identity (buildCoreReasoningFramework) */
   coreReasoningFramework: string;
   /** Cold-read protocol steps (buildCoreFrameworkSteps) */
