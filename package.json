@@ -1,6 +1,6 @@
 {
   "name": "kevlar-4u",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Kevlar-4u: A Local-first, MCP-compliant Multi-Agent armor to stress-test your content before the internet does.",
   "main": "dist/index.js",
   "exports": {
