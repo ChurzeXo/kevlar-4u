@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 import {
   NullProRuntimeLoader,
@@ -53,9 +56,15 @@ describe("DynamicImportProRuntimeLoader", () => {
 
 describe("resolveStrategyProvider", () => {
   it("returns FreeStrategyProvider when loader returns null", async () => {
-    const provider = await resolveStrategyProvider(new NullProRuntimeLoader());
-    const plan = await provider.getReviewPlan();
-    assert.equal(plan.tier, "free");
+    // Use temp skills dir to avoid cached bundle from real credential
+    const tmpSkills = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-test-"));
+    try {
+      const provider = await resolveStrategyProvider(new NullProRuntimeLoader(), tmpSkills);
+      const plan = await provider.getReviewPlan();
+      assert.equal(plan.tier, "free");
+    } finally {
+      fs.rmSync(tmpSkills, { recursive: true, force: true });
+    }
   });
 
   it("returns Pro provider when loader returns mock", async () => {
