@@ -179,6 +179,7 @@ export interface ReviewWizardInput {
 }
 
 type ReviewWizardStep =
+  | "waitingForRegionSelection" // 新：询问目标推广地区（Free/Pro 通用）
   | "systemAudit"
   | "waitingForOrchestrationStep0" // 宿主编排 Turn 1: 等待 Step 0 JSON
   | "waitingForOrchestrationAudit" // 宿主编排 Turn 2: 等待维度审计 JSON
@@ -203,6 +204,7 @@ interface ReviewWizardState {
   dimensions: DimensionsConfig;
   preAuditReport?: any;
   tier?: "free" | "pro";
+  targetRegions?: string[];  // 推广目标地区 ["zh-CN", "en-US", ...]
   strategySessionId?: string;
   strategyHash?: string;
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
@@ -280,6 +282,7 @@ export async function handleReviewContentWizard(
     }
     const isFreeTier = state.tier === "free";
 
+    // Free tier: skip system audit, go to persona selection
     if (isFreeTier && state.step === "systemAudit") {
       state.step = "checkPersonaInventory";
       await saveState(tmpDir, state);
@@ -322,7 +325,22 @@ async function advanceWizard(
   plan?: ReviewPlan,
 ): Promise<ToolResult> {
   switch (state.step) {
+    case "waitingForRegionSelection": {
+      const result = await handleRegionSelection(tmpDir, state, userMessage);
+      // If step advanced, save and continue to next step in this same call
+      if ((result as any).stepAdvanced) {
+        await saveState(tmpDir, state);
+        // Tail call: re-enter advanceWizard with the new step
+        return advanceWizard(skillsDir, tmpDir, state, personas, systemAuditors, "", samplingFn, sendProgress, plan);
+      }
+      return result;
+    }
+
     case "systemAudit":
+      // Free tier: skip pre-audit. Env var override for tests.
+      if (state.tier !== "pro" && process.env.KEVLAR_TIER !== "pro") {
+        return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+      }
       return handleSystemAudit(skillsDir, tmpDir, state, personas, systemAuditors, samplingFn, sendProgress);
 
     case "waitingForOrchestrationStep0":
@@ -363,6 +381,66 @@ async function advanceWizard(
     default:
       return toolResponse(state, "未知步骤，请重新开始评测流程。");
   }
+}
+
+// ── 目标推广地区选择 ──────────────────────────────────────────────────────────
+
+const REGION_MAP: Record<string, string> = {
+  "中国": "zh-CN", "大陆": "zh-CN", "内地": "zh-CN", "zh-cn": "zh-CN", "cn": "zh-CN",
+  "台湾": "zh-TW", "香港": "zh-HK", "澳门": "zh-MO",
+  "美国": "en-US", "us": "en-US", "usa": "en-US", "en-us": "en-US",
+  "英国": "en-GB", "uk": "en-GB", "gb": "en-GB",
+  "日本": "ja-JP", "jp": "ja-JP", "ja-jp": "ja-JP",
+  "韩国": "ko-KR", "kr": "ko-KR", "ko-kr": "ko-KR",
+  "全球": "global", "通用": "global", "不限": "global",
+};
+
+function parseRegionInput(userMessage: string): string[] {
+  const normalized = userMessage.toLowerCase().replace(/[，,、\s]+/g, ",");
+  const parts = normalized.split(",").map(s => s.trim()).filter(Boolean);
+  const regions = new Set<string>();
+
+  for (const part of parts) {
+    const code = REGION_MAP[part] || REGION_MAP[part.toLowerCase()];
+    if (code) {
+      regions.add(code);
+    }
+  }
+
+  // Always include global if nothing matched or user says "全球"
+  if (regions.size === 0) regions.add("global");
+  return [...regions];
+}
+
+async function handleRegionSelection(
+  tmpDir: string,
+  state: ReviewWizardState,
+  userMessage: string,
+): Promise<ToolResult> {
+  // Detect if userMessage looks like region input (not the original content)
+  const parsedRegions = parseRegionInput(userMessage);
+  const isRegionInput = parsedRegions.length > 0
+    && userMessage.length < 100;  // Region input is short; content is long
+
+  // First call: userMessage is content, no region keywords detected → ask
+  if (!isRegionInput || (state.targetRegions && state.targetRegions.length > 0)) {
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        "请告知本次内容计划推广的目标国家或地区，用逗号或空格分隔即可。",
+        "",
+        "例如：「中国、美国、日本」「全球」「大陆,台湾」",
+        "",
+        "（我会根据你指定的地区，加载相应的合规规则和文化敏感词库进行审核。）",
+      ].join("\n"),
+    );
+  }
+
+  // Accept region input
+  state.targetRegions = parsedRegions;
+  state.step = "systemAudit";
+  return { stepAdvanced: true } as any;
 }
 
 async function handleSystemAudit(
@@ -556,7 +634,7 @@ async function handleOrchestrationStep0Result(
       );
       state.preAuditReport = preAuditReport;
       state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-      state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
+    state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
       await saveState(tmpDir, state);
       if (state.step === "rstConfirmation") {
         const prompts = await resolvePromptSegments();
@@ -1532,9 +1610,10 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
       return {
         sessionId,
         createdAt: Date.now(),
-        step: "systemAudit",
+        step: "waitingForRegionSelection",
         content: state.content,
         targetPlatforms: [],
+        targetRegions: [],
         selectedPersonaIds: [],
         remainingPersonaIds: [],
         systemAuditorIds: [],
@@ -1550,9 +1629,10 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
   return {
     sessionId,
     createdAt: Date.now(),
-    step: "systemAudit",
+    step: "waitingForRegionSelection",
     content: input.userMessage.trim(),
     targetPlatforms: [],
+    targetRegions: [],
     selectedPersonaIds: [],
     remainingPersonaIds: [],
     systemAuditorIds: [],
