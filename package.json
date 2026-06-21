@@ -56,9 +56,16 @@
   },
   "files": [
     "dist/",
-    "skills/",
     "config/",
-    "scripts/"
+    "scripts/",
+    "skills/auditors.json",
+    "skills/rules_free.json",
+    "skills/templates/",
+    "skills/fallback.json",
+    "skills/xiaohongshu.json",
+    "skills/zhihu.json",
+    "skills/wechat_official.json",
+    "skills/_template.md"
   ],
   "engines": {
     "node": ">=20"

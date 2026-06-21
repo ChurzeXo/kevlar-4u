@@ -2,7 +2,21 @@
 src/pro/
 src/pro/**/*
 
+# Pro strategy bundle cache (downloaded from server)
+skills/strategy-bundle-cache.enc
+
+# Pro rules (backend-only)
+skills/rules_pro.json
+skills/rules_sensitive.json
+skills/rules_lowbrow.json
+
+# Session temp files (wizard drafts)
+skills/tmp/
+
 # Personal development files
 node_modules/
 *.tsbuildinfo
 *.test.ts
+*.test.d.ts
+*.test.d.ts.map
+*.test.js.map
