@@ -22,4 +22,13 @@ export interface PromptSegments {
 
   /** Free-tier upgrade prompt shown after RST review completes */
   freeTierUpgradePrompt: string;
+
+  /** Core reasoning framework: 职业黑粉 identity (buildCoreReasoningFramework) */
+  coreReasoningFramework: string;
+  /** Cold-read protocol steps (buildCoreFrameworkSteps) */
+  coreFrameworkSteps: string;
+  /** Turn 1 global decode protocol system prompt (buildGlobalStep0Prompt) */
+  globalStep0Protocol: string;
+  /** Turn 1 global decode user message template (buildGlobalStep0Message) */
+  globalStep0Message: string;
 }

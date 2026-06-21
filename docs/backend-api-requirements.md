@@ -21,7 +21,7 @@
 
 策略包（`GET /api/v1/strategy/bundle/:bundleId`）的 `templates` 字段需包含完整的 `PromptSegments` JSON。
 
-### 1.3 字段清单
+### 1.3 字段清单（14 个字段）
 
 ```json
 {
@@ -35,12 +35,17 @@
     "finalizerCoreItem4": "4. 场景推演：生成攻击链分析及最坏舆情剧本...",
     "precedentLockedCn": "",
     "precedentLockedEn": "",
-    "freeTierUpgradePrompt": ""
+    "freeTierUpgradePrompt": "",
+    "coreReasoningFramework": "## 【核心思维框架切换：职业黑粉 / 最恶毒评论区模拟模式】\n...",
+    "coreFrameworkSteps": "【第一步：职业黑粉冷读（必须先于一切具体检查执行）】\n...",
+    "globalStep0Protocol": "# [SYSTEM PROTOCOL] 职业黑粉逆向解码协议（Turn 1 全局解码）\n...",
+    "globalStep0Message": "## 【待测文案】\n...\n请严格执行并输出纯 JSON："
   }
 }
 ```
 
 > **Pro 版与 Free 版区别**：Pro 的 `precedentLockedMessage` 为空（允许输出真实品牌名），Free 的为 `"🔒 类似先例已锁定..."`。
+> **新增 4 个字段**：`coreReasoningFramework`, `coreFrameworkSteps`, `globalStep0Protocol`, `globalStep0Message` — 对应 `reviewWizard.ts` 中已提取的攻防链提示词。Free 版内容见 `skills/templates/free.json`。
 
 ---
 
@@ -123,39 +128,24 @@ POST /api/v1/admin/templates
 
 ---
 
-## 四、Prompt 库提取（v1.6 规划）
+## 四、Prompt 库提取 ✅ 已完成
 
-### 4.1 现状
+### 4.1 已提取
 
-`src/prompts/reviewWizard.ts`（1,094 行）包含核心攻防链提示词，硬编码在函数体中：
+`src/prompts/reviewWizard.ts` 中 4 个核心攻防链函数已重构为 `PromptSegments` 字段：
 
-| 函数 | 行数 | 内容 |
+| 函数 | 对应字段 | 状态 |
 |---|---|---|
-| `buildCoreReasoningFramework()` | 212-228 | 职业黑粉核心思维框架 |
-| `buildCoreFrameworkSteps()` | 235-248 | 冷读攻击步骤 |
-| `buildGlobalStep0Prompt()` | 387-426 | 全局逆向解码协议 |
-| `buildGlobalStep0Message()` | 433-475 | 断章取义三步走 |
-| `buildOrchestrationStep0Prompt()` | 504-559 | Turn 1 编排提示词 |
-| `buildOrchestrationFinalizerPrompt()` | 774-870 | Turn 3 交叉验证+仲裁 |
-| `buildPreAuditFinalizerPrompt()` | 1042-1093 | 最终仲裁提示词 |
-| `buildIsolatedSystemAuditorPrompt()` | 873-923 | 单维度审计员提示词 |
+| `buildCoreReasoningFramework()` | `coreReasoningFramework` | ✅ 已提取 |
+| `buildCoreFrameworkSteps()` | `coreFrameworkSteps` | ✅ 已提取 |
+| `buildGlobalStep0Prompt()` | `globalStep0Protocol` | ✅ 已提取 |
+| `buildGlobalStep0Message()` | `globalStep0Message` | ✅ 已提取 |
 
-### 4.2 提取方案
+函数签名改为 `(prompts?: PromptSegments)`，未传入时自动从 `skills/templates/free.json` 加载默认值。
 
-将以上提示词的**文本内容**提取为 `PromptSegments` 的新增字段，函数体中用 `segments.xxx` 替换硬编码字符串。Pro 版 `segments` 从策略包获取，Free 版从 `free.json` 获取。
+### 4.2 后端需配合
 
-### 4.3 新增 PromptSegments 字段（预估）
-
-```
-coreFrameworkText: string          // 职业黑粉核心思维框架
-coreFrameworkSteps: string         // 冷读攻击步骤
-globalDecodeProtocol: string       // 全局逆向解码协议
-globalDecodeMessage: string        // 断章取义三步走
-orchestrationStep0Prompt: string   // Turn 1 编排提示词
-orchestrationFinalizerPrompt: string // Turn 3 交叉验证+仲裁
-preAuditFinalizerPrompt: string    // 最终仲裁提示词
-systemAuditorPromptTemplate: string // 单维度审计员提示词模板
-```
+策略包的 `templates` 字段需包含以上 4 个新字段。Free 版内容参考 `skills/templates/free.json`。Pro 版可在服务端增强（更多攻击场景、更激进的推演逻辑等）。
 
 ---
 
@@ -188,7 +178,6 @@ systemAuditorPromptTemplate: string // 单维度审计员提示词模板
 
 | 优先级 | 项目 | 原因 |
 |---|---|---|
-| P0 | 策略包 `templates` 字段补充 | Pro 激活后无本地 pro.json，依赖后端提供 |
+| P0 | 策略包 `templates` 字段补充（含 4 个新增字段） | Pro 激活后无本地 pro.json，依赖后端提供 |
 | P1 | Pro 规则集通过策略包下发 | 规则文件已从开源仓库删除 |
 | P2 | 管理 API | 方便后期迭代，但非阻塞 |
-| P3 | Prompt 库提取（v1.6） | 改动量大，需客户端+后端联动 |
