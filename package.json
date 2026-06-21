@@ -59,7 +59,6 @@
     "config/",
     "scripts/",
     "skills/auditors.json",
-    "skills/rules_free.json",
     "skills/templates/",
     "skills/fallback.json",
     "skills/xiaohongshu.json",

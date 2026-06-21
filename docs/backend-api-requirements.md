@@ -53,7 +53,7 @@
 
 ### 2.1 现状
 
-开源仓库中已删除 `rules_pro.json`、`rules_sensitive.json`、`rules_lowbrow.json`。客户端 `LocalJsonRuleRepository` 仍会尝试从 `skills/` 目录加载这些文件。
+开源仓库中已删除所有本地规则文件（`rules_free.json`、`rules_pro.json`、`rules_sensitive.json`、`rules_lowbrow.json`）。客户端 `RuleRepository` 现在从策略包缓存 (`skills/strategy-bundle-cache.enc`) 读取规则。
 
 ### 2.2 需求
 

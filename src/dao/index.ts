@@ -1,3 +1,3 @@
 export { IRuleRepository } from "./IRuleRepository.js";
-export { LocalJsonRuleRepository } from "./LocalJsonRuleRepository.js";
+export { RuleRepository } from "./RuleRepository.js";
 export type * from "./types.js";

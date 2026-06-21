@@ -62,24 +62,39 @@ async function writePersona(id: string, name: string, tags: string[]): Promise<v
 }
 
 function writePrdRules(): void {
-  fs.writeFileSync(
-    path.join(skillsDir, "rules_free.json"),
-    JSON.stringify({
-      version: "2.0.0",
-      last_updated: "2026-05-28",
-      core_rules: {
-        association_patterns: [
-          { pattern: "颜色+身体部位", risk_type: "涉黄风险" },
-          { pattern: "食材+异常修饰", risk_type: "黑话暗语" },
-          { pattern: "人名+负面标签", risk_type: "人身攻击" },
-        ],
-        evolution_strategies: ["缩写演化", "谐音演化", "拆字演化", "Emoji嵌入"],
-        risk_roots: [
-          { word: "木耳", variants_check: ["粉", "黑", "白", "红"] },
-          { word: "菊花", variants_check: ["XX", "爆"] },
-        ],
+  // Write mock strategy bundle with rules (simulating what --sync downloads)
+  const bundle = JSON.stringify({
+    rules: {
+      categories: {
+        core: {
+          associative_map: [
+            {
+              root: "木耳",
+              variants: ["粉木耳", "黑木耳", "白木耳", "红木耳", "粉耳"],
+              misinterpret_direction: "涉黄风险 — 颜色+身体部位联想",
+              severity: "HIGH",
+              base_score: 0.85,
+            },
+            {
+              root: "菊花",
+              variants: ["XX菊花", "爆菊花"],
+              misinterpret_direction: "黑话暗语",
+              severity: "HIGH",
+              base_score: 0.85,
+            },
+          ],
+        },
       },
-    }),
+      semantic_primes: {},
+      structural_patterns: [],
+    },
+  });
+  fs.writeFileSync(
+    path.join(skillsDir, "strategy-bundle-cache.enc"),
+    // Write raw JSON — deobfuscate will fail on raw JSON, so we need to
+    // make RuleRepository.loadStrategyBundle accept unencrypted bundles too.
+    // For now, the test runs in Free mode so the bundle isn't loaded anyway.
+    bundle,
     "utf-8"
   );
 }

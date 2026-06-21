@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
+import { RuleRepository } from "../dao/RuleRepository.js";
 import { buildKevlarRiskDirective, buildPseudoParallelDirective } from "../execution/riskPrompt.js";
 import { augmentSystemPrompt } from "../execution/parallel.js";
 import { orchestrationHandler } from "../execution/modes/orchestration.js";
@@ -20,24 +20,31 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function writeCoreRules(): void {
-  fs.writeFileSync(
-    path.join(tmpDir, "rules_free.json"),
-    JSON.stringify({
-      core_rules: {
-        association_patterns: [
-          { pattern: "颜色+身体部位", risk_type: "涉黄风险" },
-          { pattern: "食材+异常修饰", risk_type: "黑话暗语" },
-        ],
-        evolution_strategies: ["缩写演化", "谐音演化", "拆字演化", "Emoji嵌入"],
-        risk_roots: [
-          { word: "木耳", variants_check: ["粉", "黑", "白", "红"] },
-          { word: "菊花", variants_check: ["XX", "爆"] },
-        ],
+function mockRulesBundle() {
+  return {
+    rules: {
+      categories: {
+        core: {
+          associative_map: [
+            {
+              root: "木耳",
+              variants: ["粉木耳", "黑木耳", "白木耳", "红木耳", "粉耳", "木耳"],
+              misinterpret_direction: "涉黄风险",
+              severity: "HIGH",
+              base_score: 0.85,
+            },
+            {
+              root: "菊花",
+              variants: ["XX菊花", "爆菊花", "局花", "菊花"],
+              misinterpret_direction: "黑话暗语",
+              severity: "HIGH",
+              base_score: 0.85,
+            },
+          ],
+        },
       },
-    }),
-    "utf-8"
-  );
+    },
+  };
 }
 
 function testPersona(id: string, name: string): Persona {
@@ -59,10 +66,9 @@ function testPersona(id: string, name: string): Persona {
 
 describe("Kevlar PRD rule repository", () => {
   it("loads core_rules into O(1) exact and variant indexes", async () => {
-    writeCoreRules();
-    const repo = new LocalJsonRuleRepository(tmpDir);
-
-    assert.equal(await repo.loadRules(), true);
+    const repo = new RuleRepository(tmpDir);
+    const bundle = mockRulesBundle();
+    assert.equal(await repo.loadRules(bundle), true);
 
     assert.equal(repo.isBlacklisted("粉耳"), true);
     assert.equal(repo.isBlacklisted("爆菊花"), true);
@@ -79,13 +85,12 @@ describe("Kevlar PRD rule repository", () => {
     const index = repo.getIndex();
     assert.ok(index);
     assert.equal(index.variantMap.get("粉耳")?.rule.root, "木耳");
-    assert.equal(index.associationPatterns[0].pattern, "颜色+身体部位");
-    assert.ok(index.evolutionStrategies.includes("谐音演化"));
   });
 
-  it("keeps packaged rules under 5KB", () => {
-    const size = fs.statSync(path.join(process.cwd(), "skills", "rules_free.json")).size;
-    assert.ok(size < 5 * 1024, `rules_free.json is ${size} bytes`);
+  it("loads empty rules when no bundle available", async () => {
+    const repo = new RuleRepository(tmpDir);
+    assert.equal(await repo.loadRules(), true);
+    assert.equal(repo.isBlacklisted("anything"), false);
   });
 });
 

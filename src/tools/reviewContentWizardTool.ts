@@ -10,7 +10,7 @@ import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import type { ToolModule } from "./types.js";
-import { LocalJsonRuleRepository } from "../dao/LocalJsonRuleRepository.js";
+import { RuleRepository } from "../dao/RuleRepository.js";
 import { isPro } from "../subscription/tier.js";
 import { SaaSClient } from "../utils/saasClient.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
@@ -374,7 +374,7 @@ async function handleSystemAudit(
   samplingFn?: MultiTurnSamplingFunction,
   sendProgress?: (message: string) => void,
 ): Promise<ToolResult> {
-  const localFindings = await buildLocalRuleFindings(skillsDir, state.content);
+  const localFindings = await buildRuleFindings(skillsDir, state.content);
 
   if (systemAuditors.length === 0) {
     const dimensions =
@@ -811,15 +811,14 @@ async function handleOrchestrationFinalResult(
   }
 }
 
-async function buildLocalRuleFindings(skillsDir: string, content: string): Promise<any[]> {
-  const repo = new LocalJsonRuleRepository(skillsDir);
+async function buildRuleFindings(skillsDir: string, content: string): Promise<any[]> {
+  const repo = new RuleRepository(skillsDir);
   const loaded = await repo.loadRules();
   if (!loaded) return [];
 
   const findings: any[] = [];
 
   // ── 0.1 时机节点检测 ───────────────────────────────────────────────────
-  // L1 本地层仅标记命中，不决定风险等级（由 LLM L2 层判定）
   const timingFinding = repo.checkTimingRisk(new Date(), content);
   if (timingFinding) {
     findings.push({

@@ -64,7 +64,7 @@ The pre-audit is orchestrated from `src/tools/reviewContentWizardTool.ts`. Detai
 
 | Step | Executor | What |
 |------|----------|------|
-| 0a | Code | Local rule engine — `buildLocalRuleFindings()`: n-gram sliding window, L2 structural patterns, multi-hop matching against `skills/rules_free.json` |
+| 0a | Code | Rule engine — `buildRuleFindings()`: n-gram sliding window, L2 structural patterns, multi-hop matching against synced rule set |
 | 0b+搜索 | Host AI | `src/prompts/reviewWizard.ts` `buildOrchestrationStep0Prompt()`: ① language boundary detection + wild translation extraction ② black atom extraction ③ emotional reframing ④ web search (host AI's own tool on blackAtoms). Outputs `step0Result` + `webContextMap`. |
 | 1 | Code | Decontextualization — `src/utils/stripContext.ts` `stripContext()`: splits into original/bare/replacements |
 | 2 | LLM | Bare-text audit — 3 dimensions: `context_distortion`, `network_culture_risk`, `cross_lingual_distortion` (injects `webContextMap`) |
@@ -105,7 +105,7 @@ New files are auto-discovered via content sniffing (presence of a `personas` key
 - **API keys never written to config files**: Only env vars (`KEVLAR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Config in `skills/kevlar-config.json` is for preferences only.
 - **sessionId** must match `[a-z0-9-]+` only.
 - **Persona files** are written to `skills/` — path validation enforces this. No files outside `skills/` may be written.
-- **Rule files**: `rules_free.json` (shipped, active). Pro rules (`rules_pro.json`, `rules_sensitive.json`, `rules_lowbrow.json`) are served via strategy bundle from `kevlar4u.xyz` — not included in this repo.
+- **Rule files**: All rules served via strategy bundle from `kevlar4u.xyz`. No rule files are included in this repo.
 - **i18n**: `src/i18n/` powers bilingual output (zh-CN / en-US). The `set_language` MCP tool switches at runtime.
 
 ## Free environment variables

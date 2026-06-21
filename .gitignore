@@ -14,10 +14,8 @@ skills/kevlar-config.json
 # Pro prompt templates (fetched from server, not in public repo)
 skills/templates/pro.json
 
-# Pro & backend rule sets (served via strategy bundle)
-skills/rules_pro.json
-skills/rules_sensitive.json
-skills/rules_lowbrow.json
+# Rule sets (all served via strategy bundle from kevlar4u.xyz)
+skills/rules_*.json
 
 # Ignore all docs except multi-language README translations and ADRs
 docs/*
