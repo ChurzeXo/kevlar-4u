@@ -18,6 +18,13 @@ function resolveSkillsDir(): string {
 export function loadPromptSegments(tier: PromptTier): PromptSegments {
   const skillsDir = resolveSkillsDir();
   const filePath = path.join(skillsDir, "templates", `${tier}.json`);
+
+  // Pro templates come from server via SaaSClient; if local file is absent,
+  // fall back to Free tier gracefully.
+  if (tier === "pro" && !fs.existsSync(filePath)) {
+    return loadPromptSegments("free");
+  }
+
   const raw = fs.readFileSync(filePath, "utf-8");
   return JSON.parse(raw) as PromptSegments;
 }

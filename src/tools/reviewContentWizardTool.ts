@@ -466,7 +466,7 @@ function buildOrchestrationPreAuditContext(
 async function resolvePromptSegments(): Promise<PromptSegments> {
   if (isPro()) {
     const serverPrompts = await SaaSClient.fetchSubscriptionPrompts();
-    return serverPrompts ?? loadPromptSegments("pro");
+    return serverPrompts ?? loadPromptSegments("free");
   }
   return loadPromptSegments("free");
 }

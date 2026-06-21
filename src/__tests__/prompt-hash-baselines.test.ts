@@ -35,6 +35,8 @@ const SAMPLE_AUDITORS: Persona[] = [
 ];
 
 const FREE_SEGMENTS = loadPromptSegments("free");
+// Pro segments now come from server; local pro.json removed.
+// loadPromptSegments("pro") falls back to free when file is absent.
 const PRO_SEGMENTS = loadPromptSegments("pro");
 
 describe("Prompt expansion hash baselines (Step 1)", () => {
@@ -45,10 +47,11 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
     assert.equal(hash, "2095b3d74401d57d062abb1912d05ffdbc9c335ff916f2d8429fcd4e00a8afae", "Free finalizer prompt hash changed — template content drift detected");
   });
 
-  it("buildPreAuditFinalizerPrompt with Pro segments (loaded from file)", () => {
-    const prompt = buildPreAuditFinalizerPrompt(SAMPLE_AUDITORS, [{ event: "test", date: "2024" }], PRO_SEGMENTS);
-    const hash = sha256(prompt);
-    assert.equal(hash, "f1a5e61e70434284c02fc6ca93bf902e09d20e3ac93791a2181f20625b66d670", "Pro finalizer prompt hash changed — template content drift detected");
+  it("buildPreAuditFinalizerPrompt with Pro segments (falls back to Free tier)", () => {
+    const proPrompt = buildPreAuditFinalizerPrompt(SAMPLE_AUDITORS, [{ event: "test", date: "2024" }], PRO_SEGMENTS);
+    const freePrompt = buildPreAuditFinalizerPrompt(SAMPLE_AUDITORS, [{ event: "test", date: "2024" }], FREE_SEGMENTS);
+    // Pro segments fall back to Free when server bundle is absent — prompts should match
+    assert.equal(proPrompt, freePrompt, "Pro prompt should match Free prompt when server unavailable");
   });
 
   it("buildIsolatedSystemAuditorPrompt", () => {
@@ -80,8 +83,8 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
     assert.equal(hash, "72606698ae6d31fa431158a1af3fe664a644b81d3959422965b9828824433b57", "Free orchestration finalizer hash changed — template content drift detected");
   });
 
-  it("buildOrchestrationFinalizerPrompt with Pro segments (loaded from file)", () => {
-    const prompt = buildOrchestrationFinalizerPrompt(
+  it("buildOrchestrationFinalizerPrompt with Pro segments (falls back to Free)", () => {
+    const proPrompt = buildOrchestrationFinalizerPrompt(
       SAMPLE_CONTENT,
       SAMPLE_AUDITORS,
       [],
@@ -90,8 +93,16 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
       [{ event: "test", date: "2024" }],
       PRO_SEGMENTS,
     );
-    const hash = sha256(prompt);
-    assert.equal(hash, "b4d107efdede7ecb182d23cf39e16753007010766063a4bcb313321b777dc47b", "Pro orchestration finalizer hash changed");
+    const freePrompt = buildOrchestrationFinalizerPrompt(
+      SAMPLE_CONTENT,
+      SAMPLE_AUDITORS,
+      [],
+      { triggered: [], overallMultiplier: 1.0, levelUpgrades: [] },
+      { bareOnly: [], fullOnly: [], stable: [] },
+      [{ event: "test", date: "2024" }],
+      FREE_SEGMENTS,
+    );
+    // Pro segments fall back to Free when server unavailable
+    assert.equal(proPrompt, freePrompt, "Pro orchestration prompt should match Free when server unavailable");
   });
-
 });

@@ -11,6 +11,9 @@ dist/
 # Kevlar user config (non-sensitive preferences)
 skills/kevlar-config.json
 
+# Pro prompt templates (fetched from server, not in public repo)
+skills/templates/pro.json
+
 # Ignore all docs except multi-language README translations and ADRs
 docs/*
 !docs/README.*.md

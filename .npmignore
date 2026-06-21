@@ -5,6 +5,9 @@ src/pro/**/*
 # Pro strategy bundle cache (downloaded from server)
 skills/strategy-bundle-cache.enc
 
+# Pro prompt templates (fetched from server)
+skills/templates/pro.json
+
 # Pro rules (backend-only)
 skills/rules_pro.json
 skills/rules_sensitive.json

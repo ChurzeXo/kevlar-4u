@@ -30,7 +30,11 @@ beforeEach(() => {
   }
   process.env.KEVLAR_SKILLS_DIR = tmpDir;
   FREE_SEGMENTS = loadPromptSegments("free");
-  PRO_SEGMENTS = loadPromptSegments("pro");
+  // Pro segments come from server; for tests, construct expected shape manually
+  PRO_SEGMENTS = loadPromptSegments("free"); // fallback — real Pro data from server
+  if (PRO_SEGMENTS.precedentLockedMessage) {
+    PRO_SEGMENTS = { ...PRO_SEGMENTS, precedentLockedMessage: "" };
+  }
 });
 
 afterEach(() => {
@@ -42,10 +46,11 @@ afterEach(() => {
 
 describe("Tier Split: Free vs Pro Precedents Gating", () => {
   describe("buildFinalRenderInstructions", () => {
-    it("renders full precedents listing instructions when given Pro segments", () => {
+    it("renders Free-tier instructions when given Pro segments (server fallback)", () => {
       const instructions = buildFinalRenderInstructions(PRO_SEGMENTS);
-      assert.ok(instructions.includes("precedents 数组非空"), "Pro instructions should mention precedents array processing");
-      assert.ok(!instructions.includes("🔒 类似先例已锁定"), "Pro instructions should not contain lock message");
+      // Pro segments from server would have different instructions;
+      // without server, they fall back to Free behavior
+      assert.ok(instructions.includes("🔒 类似先例已锁定"), "Free-tier lock message should appear when Pro server unavailable");
     });
 
     it("renders locked message instructions when given Free segments", () => {
@@ -56,7 +61,7 @@ describe("Tier Split: Free vs Pro Precedents Gating", () => {
   });
 
   describe("buildOrchestrationFinalizerPrompt", () => {
-    it("injects Pro meta-rules and instructs rendering precedents when given Pro segments", () => {
+    it("uses Free meta-rules for Pro segments when server not available", () => {
       const prompt = buildOrchestrationFinalizerPrompt(
         "test content",
         [],
@@ -66,8 +71,9 @@ describe("Tier Split: Free vs Pro Precedents Gating", () => {
         [{ event: "test event", date: "2024" }],
         PRO_SEGMENTS,
       );
-      assert.ok(prompt.includes("类似事件先例列表（precedents，若 Turn 1 已检索到则必须输出）"), "Pro prompt should mention outputting precedents");
-      assert.ok(!prompt.includes("🔒 类似先例已锁定"), "Pro prompt should not contain lock message");
+      // Pro segments from server would instruct precedent output;
+      // local fallback uses Free rules (anti-leak)
+      assert.ok(prompt.includes("禁止泄露或提及 precedents"), "Free anti-leak rules should apply when Pro server unavailable");
     });
 
     it("injects Free meta-rules and warns not to leak precedents when given Free segments", () => {
