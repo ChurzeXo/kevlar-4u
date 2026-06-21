@@ -26,6 +26,7 @@ docs/*
 !docs/kevlar-4u-prd.md
 !docs/backend-api-requirements.md
 !docs/client-server-audit.md
+!docs/region-rules-plan.md
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
