@@ -105,7 +105,7 @@ New files are auto-discovered via content sniffing (presence of a `personas` key
 - **API keys never written to config files**: Only env vars (`KEVLAR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Config in `skills/kevlar-config.json` is for preferences only.
 - **sessionId** must match `[a-z0-9-]+` only.
 - **Persona files** are written to `skills/` — path validation enforces this. No files outside `skills/` may be written.
-- **Rule files**: `rules_free.json` (shipped, active), `rules_pro.json`/`rules_sensitive.json`/`rules_lowbrow.json` (backend in development / placeholder). `rules_free.json` covers the active rule set.
+- **Rule files**: `rules_free.json` (shipped, active). Pro rules (`rules_pro.json`, `rules_sensitive.json`, `rules_lowbrow.json`) are served via strategy bundle from `kevlar4u.xyz` — not included in this repo.
 - **i18n**: `src/i18n/` powers bilingual output (zh-CN / en-US). The `set_language` MCP tool switches at runtime.
 
 ## Free environment variables

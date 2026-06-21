@@ -19,4 +19,7 @@ export interface PromptSegments {
   precedentLockedCn: string;
   /** Aggregator locked text (en-US) */
   precedentLockedEn: string;
+
+  /** Free-tier upgrade prompt shown after RST review completes */
+  freeTierUpgradePrompt: string;
 }

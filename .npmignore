@@ -8,7 +8,7 @@ skills/strategy-bundle-cache.enc
 # Pro prompt templates (fetched from server)
 skills/templates/pro.json
 
-# Pro rules (backend-only)
+# Pro rules (served via strategy bundle, not in public npm)
 skills/rules_pro.json
 skills/rules_sensitive.json
 skills/rules_lowbrow.json

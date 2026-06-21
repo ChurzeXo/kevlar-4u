@@ -1504,11 +1504,7 @@ async function executeReview(
   const resultText = reviewResult.content[0]?.text || "";
   const upgradePrompt =
     state.tier === "free"
-      ? [
-          "",
-          "---",
-          "💡 本次已完成免费版 RST 仿真评审。专业版可以在本地解锁六维初审管线，进一步检查合规、语境、网络文化、事实与跨语言风险。是否查看升级方式？",
-        ].join("\n")
+      ? "\n\n---\n\n" + (await resolvePromptSegments()).freeTierUpgradePrompt
       : "";
   const response = toolResponse(state, resultText + "\n\n---\n\n评测完成。" + upgradePrompt);
   await cleanupState(tmpDir, state.sessionId);
