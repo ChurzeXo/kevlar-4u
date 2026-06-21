@@ -173,6 +173,42 @@ src/pro/
 
 # Release
 
-- Tags trigger `v*.*.*` → `.github/workflows/release.yml`: builds, packages tarball/zip, creates GitHub Release, publishes to npm.
-- `npm run prepublishOnly` blocks direct publish outside CI.
-- CHANGELOG.md entries are extracted automatically for release notes.
+## Deploy workflow
+
+Full details: `docs/DEPLOY.md`. This section is the checklist for AI agents.
+
+### Free release (public npm)
+
+```bash
+# 1. Pre-flight
+npm run build && npm test                          # build + 315 tests
+ls dist/pro 2>/dev/null && echo "LEAK!" || true   # zero Pro leaks
+npm pack --dry-run | grep "total files"            # should be ~392, no bundle-cache
+
+# 2. Tag → CI auto-publishes
+npm version patch -m "chore: release %s"
+git push origin main --tags
+```
+
+CI (`.github/workflows/release.yml`) handles: build → leak check → test → changelog → GitHub Release → npm publish.
+
+### Pro submodule sync (internal devs only)
+
+```bash
+npm run commit:pro    # auto: submodule push + parent pointer update
+```
+
+### Secrets required for CI
+
+| Secret | Where |
+|--------|-------|
+| `NPM_TOKEN` | GitHub Settings → Secrets → Actions |
+| `PRO_REPO_DEPLOY_KEY` | Same (only for `pro-ci.yml`) |
+
+### Publish the Pro package (GItHub Packages)
+
+```bash
+cd src/pro && npm i --legacy-peer-deps && npx tsc && npm test && git push
+cd ../.. && npm run commit:pro
+npm publish --registry=https://npm.pkg.github.com  # from src/pro/
+```
