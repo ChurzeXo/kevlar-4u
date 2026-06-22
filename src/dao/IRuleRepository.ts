@@ -5,7 +5,7 @@ export interface IRuleRepository {
    * Load or hot-reload the rule base into memory.
    * Returns true on success, false on failure.
    */
-  loadRules(customBundle?: any): Promise<boolean>;
+  loadRules(customBundle?: any, targetRegions?: string[]): Promise<boolean>;
 
   /**
    * Get an associative rule by category and root keyword.

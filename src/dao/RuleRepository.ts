@@ -24,15 +24,20 @@ async function loadStrategyBundle(skillsDir: string): Promise<any | null> {
     const raw = await fs.promises.readFile(bundlePath, "utf-8");
     const trimmed = raw.trim();
 
-    // Try encrypted format (AES-256-GCM — Pro runtime decrypts, not this module)
-    if (trimmed.startsWith("kevlar:")) {
-      // Bundle is encrypted; Pro runtime handles decryption.
-      // For rule loading, fall through to empty rules.
-      logger.debug("Encrypted bundle found — rules require Pro runtime", {
-        event: "bundle_encrypted_skip",
-      });
-      return null;
-    }
+		// Try encrypted format (AES-256-GCM) — use Pro runtime to decrypt
+		if (trimmed.startsWith("kevlar:")) {
+			try {
+				const pro = (await import("@kevlar/pro-runtime")) as any;
+				if (pro.deobfuscate) {
+					const decoded = pro.deobfuscate(trimmed);
+					if (decoded) return JSON.parse(decoded);
+				}
+			} catch { /* Pro runtime not available */ }
+			logger.debug("Encrypted bundle — requires Pro runtime for rule loading", {
+				event: "bundle_encrypted_skip",
+			});
+			return null;
+		}
 
     // Plain JSON (dev/test)
     return JSON.parse(trimmed);
@@ -90,7 +95,7 @@ export class RuleRepository implements IRuleRepository {
     this.skillsDir = skillsDir;
   }
 
-  async loadRules(customBundle?: any): Promise<boolean> {
+  async loadRules(customBundle?: any, targetRegions?: string[]): Promise<boolean> {
     try {
       // ── 1. Try loading rules from cached strategy bundle ─────────────────
       const bundle = customBundle ?? await loadStrategyBundle(this.skillsDir);

@@ -402,13 +402,9 @@ function parseRegionInput(userMessage: string): string[] {
 
   for (const part of parts) {
     const code = REGION_MAP[part] || REGION_MAP[part.toLowerCase()];
-    if (code) {
-      regions.add(code);
-    }
+    if (code) regions.add(code);
   }
 
-  // Always include global if nothing matched or user says "全球"
-  if (regions.size === 0) regions.add("global");
   return [...regions];
 }
 
@@ -419,8 +415,7 @@ async function handleRegionSelection(
 ): Promise<ToolResult> {
   // Detect if userMessage looks like region input (not the original content)
   const parsedRegions = parseRegionInput(userMessage);
-  const isRegionInput = parsedRegions.length > 0
-    && userMessage.length < 100;  // Region input is short; content is long
+  const isRegionInput = parsedRegions.length > 0 && userMessage.length < 100;
 
   // First call: userMessage is content, no region keywords detected → ask
   if (!isRegionInput || (state.targetRegions && state.targetRegions.length > 0)) {
@@ -437,8 +432,8 @@ async function handleRegionSelection(
     );
   }
 
-  // Accept region input
-  state.targetRegions = parsedRegions;
+  // Accept region input (only when user explicitly provides region keywords)
+  state.targetRegions = parsedRegions.length > 0 ? parsedRegions : ["global"];
   state.step = "systemAudit";
   return { stepAdvanced: true } as any;
 }
@@ -452,7 +447,7 @@ async function handleSystemAudit(
   samplingFn?: MultiTurnSamplingFunction,
   sendProgress?: (message: string) => void,
 ): Promise<ToolResult> {
-  const localFindings = await buildRuleFindings(skillsDir, state.content);
+  const localFindings = await buildRuleFindings(skillsDir, state.content, state.targetRegions);
 
   if (systemAuditors.length === 0) {
     const dimensions =
@@ -889,9 +884,9 @@ async function handleOrchestrationFinalResult(
   }
 }
 
-async function buildRuleFindings(skillsDir: string, content: string): Promise<any[]> {
+async function buildRuleFindings(skillsDir: string, content: string, targetRegions?: string[]): Promise<any[]> {
   const repo = new RuleRepository(skillsDir);
-  const loaded = await repo.loadRules();
+  const loaded = await repo.loadRules(undefined, targetRegions);
   if (!loaded) return [];
 
   const findings: any[] = [];
