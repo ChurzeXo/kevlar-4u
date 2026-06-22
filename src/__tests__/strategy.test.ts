@@ -333,7 +333,7 @@ describe("Free mode — skips six-dimensional pre-audit", () => {
 
     const text = textOf(result);
     // Free must NOT show pre-audit results
-    assert.ok(!text.includes("本地规则引擎"), `Free should not show 本地规则引擎: ${text}`);
+    assert.ok(!text.includes("规则引擎"), `Free should not show 规则引擎: ${text}`);
     assert.ok(!text.includes("local_rules"), `Free should not show local_rules: ${text}`);
 
     // Free must go to review decision (personas already exist)
@@ -358,7 +358,7 @@ describe("Free mode — skips six-dimensional pre-audit", () => {
     });
 
     const text = textOf(result);
-    assert.ok(!text.includes("本地规则引擎"), `Free with FreeStrategyProvider should skip pre-audit: ${text}`);
+    assert.ok(!text.includes("规则引擎"), `Free with FreeStrategyProvider should skip pre-audit: ${text}`);
     assert.ok(text.includes("waitingForReviewDecision") || text.includes("请选择下一步"),
       `Free should go to review decision: ${text}`);
   });

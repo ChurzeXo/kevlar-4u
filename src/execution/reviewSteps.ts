@@ -240,7 +240,7 @@ export function mergeLocalFindingsIntoAudits(
   } else {
     merged.unshift({
       id: "local_rule_engine",
-      name: "本地规则引擎",
+      name: "规则引擎",
       findings: localFindings,
       level: getFindingsLevel(localFindings),
     });

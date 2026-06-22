@@ -460,7 +460,7 @@ async function handleSystemAudit(
         ? [
             {
               id: "local_rule_engine",
-              name: "本地规则引擎",
+              name: "规则引擎",
               findings: localFindings,
               level: getFindingsLevel(localFindings),
             },
@@ -477,7 +477,7 @@ async function handleSystemAudit(
       return toolResponse(
         state,
         [
-          "六维初审已完成（本地规则模式）。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "六维初审已完成（规则模式）。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
           "",
           "回复「继续」或「是」进入评审，回复「否」结束。",
         ].join("\n"),
@@ -928,7 +928,7 @@ async function buildRuleFindings(skillsDir: string, content: string): Promise<an
       findings.push({
         dimension: "网络文化误读",
         keyword: candidate,
-        trigger: `本地规则命中：${candidate} -> ${match.rule.root}`,
+        trigger: `规则命中：${candidate} -> ${match.rule.root}`,
         riskDescription: [
           `词根：${match.rule.root}`,
           `风险方向：${match.rule.misinterpret_direction}`,
@@ -1078,7 +1078,7 @@ function getOverallLevel(results: Array<{ level?: string; findings: any[] }>): s
 function summarizePreAuditResults(
   results: Array<{ id?: string; name: string; findings: any[]; level?: string }>,
 ): string {
-  if (results.length === 0) return "本地规则与系统审查员均未命中风险点";
+  if (results.length === 0) return "规则与系统审查员均未命中风险点";
 
   const risky: Array<{ name: string; findings: any[]; id?: string; level?: string }> = [];
 
