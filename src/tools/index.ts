@@ -8,6 +8,7 @@ import { getModesModule } from "./getModesTool.js";
 import { configureModule } from "./configureTool.js";
 import { configureWizardModule } from "./configureWizardTool.js";
 import { languageModule } from "./languageTool.js";
+import { checkUpdateModule } from "./checkUpdateTool.js";
 import type { ToolDependencies, ToolModule } from "./types.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
@@ -24,6 +25,7 @@ const allModules: ToolModule[] = [
   configureWizardModule,
   helpModule,
   languageModule,
+  checkUpdateModule,
 ];
 
 export function createToolRegistry(deps: ToolDependencies): {
