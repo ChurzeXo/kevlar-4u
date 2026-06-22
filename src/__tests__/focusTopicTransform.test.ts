@@ -49,11 +49,11 @@ describe("Focus Topic transformation", () => {
         sourceAuditor: "合规哨兵",
         sourceKeyword: "全网第一",
         matchedTrigger: "overhyped",
-        prompt: "该文本在初审中被检测出在第 1 段存在“过度包装、吹嘘功能”的嫌疑。请以你刻薄、理性的视角，死磕该段落是否在“画饼”或缺乏事实依据。",
+        prompt: "该文本在六维风险检测中被检测出在第 1 段存在“过度包装、吹嘘功能”的嫌疑。请以你刻薄、理性的视角，死磕该段落是否在“画饼”或缺乏事实依据。",
       },
     ]);
 
-    assert.match(section, /狙击手定点复审焦点/);
+    assert.match(section, /舆论仿真推演焦点/);
     assert.match(section, /旁白提示/);
     assert.doesNotMatch(section, /基本盘|系统违规代码|legal_compliance/);
   });

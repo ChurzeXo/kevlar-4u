@@ -342,7 +342,7 @@ ${endMarker}`;
   if (!persona.meta.rst && preAuditReport && preAuditReport.dimensions && preAuditReport.dimensions.length > 0) {
     const hasFindings = preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
     if (hasFindings) {
-      reportContext += `\n\n**🚨 系统初审预警**：\n\n系统初审发现了一些潜在风险点。请结合你的角色身份，判断这些风险在你的圈层中是否真的会引爆，以及影响有多大。\n\n`;
+      reportContext += `\n\n**🚨 六维风险检测预警**：\n\n六维风险检测发现了一些潜在风险点。请结合你的角色身份，判断这些风险在你的圈层中是否真的会引爆，以及影响有多大。\n\n`;
       for (const audit of preAuditReport.dimensions) {
         if (audit.findings && audit.findings.length > 0) {
           reportContext += `【${audit.name}】发现 ${audit.findings.length} 个潜在风险：\n`;

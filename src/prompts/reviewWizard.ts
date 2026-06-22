@@ -39,14 +39,14 @@ const TOOL_CORE_PREFIX = `内容风险评测向导工具。
 
 【接口契约】
 - 输入：待评测的纯文本（不支持图片、音频或文档附件）。
-- 输出：包含结构化数据（表格、分析链）与初步排版的初审报告 payload。
+- 输出：包含结构化数据（表格、分析链）与初步排版的风险检测报告 payload。
 
 【核心控制生命周期】
 1. 捕获输入：调用本工具，传入待评测文本。
-2. 搬运渲染：工具返回初审报告后，你作为外壳，必须严格按照`;
+2. 搬运渲染：工具返回风险检测报告后，你作为外壳，必须严格按照`;
 
 const TOOL_CORE_SUFFIX = `向用户展示最终报告，不得私自截断或增删。
-3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进复审或平台检查流程。`;
+3. 状态冻结：展示完毕后，必须停留在当前状态，静默等待用户明确指令。绝对禁止私自、自动推进舆论仿真推演或目标平台风控模拟流程。`;
 
 // ── Tool descriptions ──────────────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ export const LEGACY_RENDERING_SECTION = `【排版与输出协议（硬性约束
 
 4. [尾部状态询问]
    - 在回复的最终末尾，必须单起一行，原样输出以下文本（连标点符号都不得更改）：
-     "是否需要进入「复审」或「模拟平台违禁限流排查」？"
+     "是否继续进行「舆论仿真推演」或「目标平台风控模拟」？"
 
 【绝对红线（反向约束）】
 - 禁止好心泛滥：绝对禁止提供任何修改建议、润色、重写意见或文案优化方向。
@@ -129,7 +129,7 @@ export function buildFinalRenderInstructions(prompts: PromptSegments): string {
      ${prompts.finalRenderPrecedentInstruction}
 4. **[尾部状态询问]**
    - 在回复的最终末尾，必须单起一行，原样输出以下文本（连标点符号都不得更改）：
-     "是否需要进入「复审」或「模拟平台违禁限流排查」？"
+     "是否继续进行「舆论仿真推演」或「目标平台风控模拟」？"
 `.trim();
 }
 
@@ -419,7 +419,7 @@ export function buildOrchestrationStep0Prompt(
     `# [SYSTEM PROTOCOL] 职业黑粉逆向解码协议（宿主编排 Turn 1）`,
     ``,
     `## 【任务说明】`,
-    `这是初审流程的第一轮（Turn 1）。你需要执行 Step 0 全局解码（提取黑料原子和攻击点 + 类似事件先例检索），**同时使用你的 web search 工具对提取的 blackAtoms 进行联网搜索并检索类似舆情先例**，然后将解码结果和搜索结果以纯 JSON 格式通过调用 review_content_wizard 工具提交。`,
+    `这是六维风险检测的第一轮（Turn 1）。你需要执行 Step 0 全局解码（提取黑料原子和攻击点 + 类似事件先例检索），**同时使用你的 web search 工具对提取的 blackAtoms 进行联网搜索并检索类似舆情先例**，然后将解码结果和搜索结果以纯 JSON 格式通过调用 review_content_wizard 工具提交。`,
     `系统将在收到你的 JSON 后，在 Turn 2 将完整的验证结果反馈给你执行审计。`,
     ``,
     buildCommonRiskRules(),
@@ -704,7 +704,7 @@ export function buildOrchestrationFinalizerPrompt(
     ``,
     `## 【元规则】`,
     `1. 运行环境：单次推理孤岛状态，无外部状态机`,
-    `2. 执行身份：非情感化的【Kevlar-4u 系统初审总仲裁官】`,
+    `2. 执行身份：非情感化的【Kevlar-4u 六维风险检测总仲裁官】`,
     `3. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
     segs.orchestrationMetaRuleItem4,
     ``,
@@ -960,7 +960,7 @@ export function buildPreAuditFinalizerPrompt(
 ): string {
   const segs = prompts ?? loadPromptSegments("free");
   return [
-    `你是 **Kevlar-4u 系统初审总仲裁官**。`,
+    `你是 **Kevlar-4u 六维风险检测总仲裁官**。`,
     ``,
     buildCommonRiskRules(),
     ``,

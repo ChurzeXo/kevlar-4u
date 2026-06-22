@@ -128,11 +128,11 @@ const text = textOf(result);
     await writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
     await writePersona("logic_reader", "逻辑读者", ["知乎", "逻辑"]);
 
-    // Step 1: submit content → waitingForReviewDecision (初审结果 + 询问是否复审)
+    // Step 1: submit content → waitingForReviewDecision (结果 + 询问下一步)
     const started = await startWizardWithRegion("请评测这篇内容：这是一篇新品发布文案。");
 const startText = textOf(started);
-    assert.ok(startText.includes("请选择下一步："));
-    assert.ok(startText.includes("1. 进入「复审」"));
+    assert.ok(startText.includes("请选择"));
+    assert.ok(startText.includes("1. 舆论仿真推演"));
     assert.ok(startText.includes("currentStep: waitingForReviewDecision"));
     assert.ok(!startText.includes("这份内容准备投放在哪些平台"));
     assert.ok(!startText.includes("Kevlar-4u 宿主辅助评测任务"));
@@ -141,19 +141,19 @@ const startText = textOf(started);
     const sessionId = extractSessionId(startText);
     const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始复审",
+      userMessage: "开始舆论仿真推演",
     });
     const confirmText = textOf(confirmed);
     assert.ok(confirmText.includes("当前共有 2 位评审员"));
     assert.ok(confirmText.includes("视觉读者"));
     assert.ok(confirmText.includes("逻辑读者"));
-    assert.ok(confirmText.includes("请回复「开始复审」确认执行"));
+    assert.ok(confirmText.includes("请回复「开始舆论仿真推演」确认执行"));
     assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
 
-    // Step 3: "开始复审" → executes review
+    // Step 3: "开始舆论仿真推演" → executes review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始复审",
+      userMessage: "开始舆论仿真推演",
     });
     const reviewerText = textOf(reviewerDone);
     assert.ok(
@@ -201,7 +201,7 @@ const startText = textOf(started);
     // Step 2: confirm review → waitingForReviewerConfirmation (AI recommends 1-3)
     const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始复审",
+      userMessage: "开始舆论仿真推演",
     });
     const confirmText = textOf(confirmed);
     assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
@@ -213,10 +213,10 @@ const startText = textOf(started);
       confirmText.includes("学生党")
     );
 
-    // Step 3: "开始复审" → executes review
+    // Step 3: "开始舆论仿真推演" → executes review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始复审",
+      userMessage: "开始舆论仿真推演",
     });
     const reviewerText = textOf(reviewerDone);
     assert.ok(
@@ -359,19 +359,19 @@ const text = textOf(started);
             level: "🟡",
           },
         ],
-        summary: "宿主编排初审完成",
+        summary: "宿主编排六维风险检测完成",
       }),
     });
 
     // Orchestration audit result is parsed → goes to inventory check → waitingForReviewDecision
     const parsedText = textOf(parsed);
     assert.ok(parsedText.includes("currentStep: waitingForReviewDecision"));
-    assert.ok(parsedText.includes("宿主编排初审完成"));
+    assert.ok(parsedText.includes("宿主编排六维风险检测完成"));
 
     // Step: confirm review → proceeds to reviewer confirmation
     const confirmed = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
-      userMessage: "开始复审",
+      userMessage: "开始舆论仿真推演",
     });
     const confirmText = textOf(confirmed);
     assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));

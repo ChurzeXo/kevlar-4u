@@ -97,8 +97,8 @@ describe("End-to-End integration test", () => {
 
       assert.ok(step2, "Step 2 response should exist");
       const step2Text = (step2.content as any)[0].text;
-      assert.ok(step2Text.includes("请选择下一步："), "Should ask for the next review action");
-      assert.ok(step2Text.includes("1. 进入「复审」"), "Should offer review as the next action");
+      assert.ok(step2Text.includes("请选择"), "Should ask for the next review action");
+      assert.ok(step2Text.includes("1. 舆论仿真推演"), "Should offer review as the next action");
       assert.ok(step2Text.includes("currentStep: waitingForReviewDecision"), "Should be in review decision step");
 
       // Step 3: confirm review → waitingForReviewerConfirmation
@@ -106,7 +106,7 @@ describe("End-to-End integration test", () => {
         name: "review_content_wizard",
         arguments: {
           sessionId,
-          userMessage: "开始复审",
+          userMessage: "开始舆论仿真推演",
         },
       });
 
@@ -117,12 +117,12 @@ describe("End-to-End integration test", () => {
       assert.ok(step3Text.includes("当前共有 1 位评审员"), "Should show persona count");
       assert.ok(step3Text.includes("currentStep: waitingForReviewerConfirmation"), "Should be in reviewer confirmation step");
 
-      // Step 4: "开始复审" → executes review
+      // Step 4: "开始舆论仿真推演" → executes review
       const step4 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
           sessionId,
-          userMessage: "开始复审",
+          userMessage: "开始舆论仿真推演",
         },
       });
 

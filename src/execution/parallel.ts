@@ -203,7 +203,7 @@ export function buildRSTSection(rst: import("./dimensions.js").RSTConfig): strin
   const platformLabel = rst.platformCulture ? RST_PLATFORM_CULTURES[rst.platformCulture]?.label : null;
 
   const lines = [
-    "## 🧬 互联网反应模拟人格（RST）",
+    "## 🧬 舆论仿真人格配置（RST）",
     "",
     `你的人格底色是「${archetypeLabels}」。`,
     "",

@@ -164,7 +164,7 @@ export const reviewContentWizardToolDefinition: Tool = {
       userMessage: {
         type: "string",
         description:
-          "用户当前输入内容。首次调用时传入待评测的完整文本或评测请求；后续交互时传入用户指令（如「开始复审」或「2 换一位」）。必须为纯文本。",
+          "用户当前输入内容。首次调用时传入待评测的完整文本或评测请求；后续交互时传入用户指令（如「开始舆论仿真推演」或「2 换一位」）。必须为纯文本。",
       },
     },
     required: ["userMessage"],
@@ -473,7 +473,7 @@ async function handleSystemAudit(
       return toolResponse(
         state,
         [
-          "六维初审已完成（规则模式）。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "六维风险检测已完成（规则模式）。是否继续进行舆论仿真推演？",
           "",
           "回复「继续」或「是」进入评审，回复「否」结束。",
         ].join("\n"),
@@ -501,7 +501,7 @@ async function handleSystemAudit(
       return toolResponse(
         state,
         [
-          "六维初审已完成（本地回退模式）。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "六维风险检测已完成（本地回退模式）。是否继续进行舆论仿真推演？",
           "",
           "回复「继续」或「是」进入评审，回复「否」结束。",
         ].join("\n"),
@@ -639,7 +639,7 @@ async function handleOrchestrationStep0Result(
           [
             buildPreAuditSummaryBlock(state, prompts),
             "",
-            "六维初审已完成。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+            "六维风险检测已完成。是否继续进行舆论仿真推演？",
             "",
             "回复「继续」或「是」进入评审，回复「否」结束。",
           ].join("\n"),
@@ -864,7 +864,7 @@ async function handleOrchestrationFinalResult(
         [
           buildPreAuditSummaryBlock(state, prompts),
           "",
-          "六维初审已完成。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+          "六维风险检测已完成。是否继续进行舆论仿真推演？",
           "",
           "回复「继续」或「是」进入评审，回复「否」结束。",
         ].join("\n"),
@@ -1050,7 +1050,7 @@ function formatFindingRiskLine(finding: any): string {
     finding.riskDescription || finding.description,
     finding.propagationRisk,
   ].filter(Boolean);
-  const detail = parts.length > 0 ? parts.join("；") : "存在潜在语义或传播风险，建议进入复审确认。";
+  const detail = parts.length > 0 ? parts.join("；") : "存在潜在语义或传播风险，建议通过舆论仿真推演确认。";
   return `发现 1 项潜在风险：${keyword} ${detail}`;
 }
 
@@ -1119,15 +1119,15 @@ function summarizePreAuditResults(
   ].join("\n");
 }
 
-// ── 辅助：构建初审结果展示块 ─────────────────────────────────────────────────
+// ── 辅助：构建六维风险检测结果展示块 ─────────────────────────────────────────
 
 function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSegments): string {
   const segs = prompts ?? loadPromptSegments("free");
-  const lines: string[] = ["<!-- kevlar:verbatim-pre-audit:start -->", "初审结果"];
+  const lines: string[] = ["<!-- kevlar:verbatim-pre-audit:start -->", "六维风险检测结果"];
   if (state.preAuditReport?.summary) {
     lines.push(state.preAuditReport.summary);
   } else {
-    lines.push("", "未找到系统审查员，跳过初审");
+    lines.push("", "未找到系统审查员，跳过六维风险检测");
   }
 
   // 类似先例：始终渲染此段（无则输出"无"），保证链路完整
@@ -1153,12 +1153,10 @@ function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSeg
 }
 
 
-// ── 初审完成：展示结果并询问是否复审 ─────────────────────────────────────────
+// ── 检测完成：展示结果并询问下一步 ────────────────────────────────────────────
 //
-// 改造说明（原 handleInventoryCheck）：
-// 原版把初审结果、评审员推荐、"开始复审"邀请混在同一条消息里。
-// 改造后只展示初审结果 + 询问"是否需要复审"，step 置为 waitingForReviewDecision。
-// 评审员推荐逻辑移至 handleReviewDecision，用户确认后才执行。
+// Free 版：直接显示 3 个选项（无预检测结果块）
+// Pro 版：显示六维风险检测结果 + 2 个选项
 
 async function handleInventoryCheck(
   tmpDir: string,
@@ -1167,7 +1165,26 @@ async function handleInventoryCheck(
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const prompts = await resolvePromptSegments();
-  const upgradeHint = state.tier === "free" ? "\n\n" + prompts.freeTierUpgradeHint : "";
+  const isFree = state.tier === "free";
+
+  const freeOptions = [
+    "<!-- kevlar:verbatim-options:start -->",
+    "请选择：",
+    "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
+    "2. 目标平台风控模拟（暂未开放，Pro 专属，占位示意）",
+    "3. 六维风险检测 🔓（升级专业版）",
+    "<!-- kevlar:verbatim-options:end -->",
+  ].join("\n");
+
+  const proOptions = [
+    "<!-- kevlar:verbatim-options:start -->",
+    "六维风险检测已完成。请选择：",
+    "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
+    "2. 目标平台风控模拟（暂未开放，敬请期待）",
+    "<!-- kevlar:verbatim-options:end -->",
+  ].join("\n");
+
+  const optionsBlock = isFree ? freeOptions : proOptions;
 
   // 无评审员：提示创建，流程暂停
   if (personas.length === 0) {
@@ -1175,36 +1192,30 @@ async function handleInventoryCheck(
     state.selectedPersonaIds = [];
     state.remainingPersonaIds = [];
     await saveState(tmpDir, state);
+    const summaryBlock = isFree ? "" : buildPreAuditSummaryBlock(state, prompts) + "\n\n";
     return toolResponse(
       state,
       [
-        buildPreAuditSummaryBlock(state, prompts),
-        "",
+        summaryBlock,
         "当前还没有可用评审员。请先创建至少一个角色，再继续这次内容评测。",
         "",
         "我已经暂存了本次待评测内容；创建角色后，带上这个 sessionId 再次调用 review_content_wizard 即可继续。",
-        upgradeHint,
-      ].join("\n"),
+      ].filter(Boolean).join("\n"),
     );
   }
 
-  // 有评审员：展示初审结果，询问下一步
+  // 有评审员：展示结果，询问下一步
   state.step = "waitingForReviewDecision";
   await saveState(tmpDir, state);
+
+  const summaryBlock = isFree ? "" : buildPreAuditSummaryBlock(state, prompts) + "\n\n";
   return toolResponse(
     state,
-    [
-      buildPreAuditSummaryBlock(state, prompts),
-      "",
-      "请选择下一步：",
-      "1. 进入「复审」",
-      "2. 模拟平台违禁限流排查",
-      upgradeHint,
-    ].join("\n"),
+    summaryBlock + optionsBlock,
   );
 }
 
-// ── 用户决定是否复审 ──────────────────────────────────────────────────────────
+// ── 用户选择下一步 ────────────────────────────────────────────────────────────
 
 async function handleReviewDecision(
   skillsDir: string,
@@ -1215,36 +1226,59 @@ async function handleReviewDecision(
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const normalized = userMessage.trim();
+  const isFree = state.tier === "free";
 
-  // 选项 2：模拟平台违禁限流排查（即将开放）
-  if (/^(2|模拟平台违禁限流排查|合规检查|平台检查|平台违禁限流排查|违禁限流排查)$/i.test(normalized)) {
+  // 选项 3（仅 Free 版）：升级 Pro → 六维风险检测
+  if (isFree && /^(3|六维|六维风险检测|升级|pro|专业版|升级专业版|解锁)$/i.test(normalized)) {
     return toolResponse(
       state,
       [
-        "该功能正在开发中，敬请期待。",
+        "六维风险检测是 Pro 版专属功能，可对内容进行合规、语境、网络文化、事实与跨语言全维度深度分析。",
         "",
-        "请选择下一步：",
-        "1. 进入「复审」",
-        "2. 模拟平台违禁限流排查",
+        "升级方式：",
+        "1. 运行 `npx kevlar-4u --activate --code <激活码>`",
+        "2. 或访问 https://kevlar4u.xyz 获取激活码",
+        "",
+        "升级后请重新调用 review_content_wizard 继续评测。",
       ].join("\n"),
     );
   }
 
-  // 选项 1：进入复审
-  const wantsReview = /^(1|需要|开始复审|确认复审|执行复审|继续|好的|好|ok|yes|进入复审|复审|进入「复审」)$/i.test(normalized);
+  // 选项 2：目标平台风控模拟
+  if (/^(2|目标平台风控模拟|平台风控|风控模拟|平台检查|平台违禁限流排查|违禁限流排查)$/i.test(normalized)) {
+    const optionsSuffix = isFree
+      ? "2. 目标平台风控模拟（暂未开放，Pro 专属，占位示意）\n3. 六维风险检测 🔓（升级专业版）"
+      : "2. 目标平台风控模拟（暂未开放，敬请期待）";
+    return toolResponse(
+      state,
+      [
+        "目标平台风控模拟暂未开放，敬请期待。",
+        "",
+        "请选择：",
+        "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
+        optionsSuffix,
+      ].join("\n"),
+    );
+  }
+
+  // 选项 1：舆论仿真推演
+  const wantsReview = /^(1|需要|开始|开始舆论仿真推演|确认|执行|继续|好的|好|ok|yes|舆论仿真推演|舆论仿真|仿真推演)$/i.test(normalized);
 
   if (!wantsReview) {
+    const optionsSuffix = isFree
+      ? "2. 目标平台风控模拟（暂未开放，Pro 专属，占位示意）\n3. 六维风险检测 🔓（升级专业版）"
+      : "2. 目标平台风控模拟（暂未开放，敬请期待）";
     return toolResponse(
       state,
       [
-        "请选择下一步：",
-        "1. 进入「复审」",
-        "2. 模拟平台违禁限流排查",
+        "请选择：",
+        "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
+        optionsSuffix,
       ].join("\n"),
     );
   }
 
-  // 用户确认复审：执行评审员推荐
+  // 用户确认：执行评审员推荐
   // 仅 1-2 位评审员：直接全选
   if (personas.length <= 2) {
     state.selectedPersonaIds = [...personas.map((p) => p.meta.id)];
@@ -1260,7 +1294,7 @@ async function handleReviewDecision(
           (p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"} · ${p.meta.description}`,
         ),
         "",
-        "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
+        "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
       ].join("\n"),
     );
   }
@@ -1287,7 +1321,7 @@ async function handleReviewDecision(
           ]
         : []),
       "",
-      "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
+      "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
     ]
       .filter(Boolean)
       .join("\n"),
@@ -1313,10 +1347,10 @@ async function handleReviewerConfirmation(
     return handleSwapReviewer(tmpDir, state, personas, idx);
   }
 
-  // "开始复审" → 直接执行完整复审
-  if (/^(开始复审|确认复审|执行复审)$/.test(normalized)) {
+  // "开始舆论仿真推演" → 直接执行
+  if (/^(开始舆论仿真推演|开始仿真推演|确认|执行)$/.test(normalized)) {
     if (state.selectedPersonaIds.length === 0) {
-      return toolResponse(state, "❌ 当前没有已选择的复审评审员。请先通过「X 换一位」选择评审员后再试。");
+      return toolResponse(state, "❌ 当前没有已选择的评审员。请先通过「X 换一位」选择评审员后再试。");
     }
     return executeReview(skillsDir, tmpDir, state, samplingFn);
   }
@@ -1328,14 +1362,14 @@ async function handleReviewerConfirmation(
   return toolResponse(
     state,
     [
-      "当前已选复审评审员：",
+      "当前已选评审员：",
       ...selectedUserPersonas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
       "",
       ...(remaining.length > 0
         ? [`备选评审员（共 ${remaining.length} 位）`, "请回复「X 换一位」替换指定评审员（例如：2 换一位）。"]
         : []),
       "",
-      "请回复「开始复审」确认执行，或回复「X 换一位」替换指定评审员。",
+      "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」替换指定评审员。",
     ].join("\n"),
   );
 }
@@ -1351,7 +1385,7 @@ async function handleSwapReviewer(
     return toolResponse(
       state,
       [
-        `❌ 编号 ${position} 超出范围。当前已选复审评审员：`,
+        `❌ 编号 ${position} 超出范围。当前已选评审员：`,
         ...selected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
         "",
         "请重新输入正确的编号。",
@@ -1367,10 +1401,10 @@ async function handleSwapReviewer(
       [
         "⚠️ 备选池已没有可替换的评审员。",
         "",
-        "当前已选复审评审员：",
+        "当前已选评审员：",
         ...selected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
         "",
-        "请回复「开始复审」确认执行。",
+        "请回复「开始舆论仿真推演」确认执行。",
       ].join("\n"),
     );
   }
@@ -1395,11 +1429,11 @@ async function handleSwapReviewer(
     [
       `✅ 已替换：${removedPersona?.meta.name || "未知"} → ${addedPersona?.meta.name || "未知"}`,
       "",
-      "当前已选复审评审员：",
+      "当前已选评审员：",
       ...updatedSelected.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
       "",
       ...(remaining.length > 0 ? [`备选评审员（共 ${remaining.length} 位）`] : []),
-      "请回复「开始复审」确认执行，或回复「X 换一位」继续替换。",
+      "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」继续替换。",
     ].join("\n"),
   );
 }
@@ -1440,7 +1474,7 @@ async function recommendPersonas(
       }
       const response = await samplingFn({
         systemPrompt:
-          '你是评审员推荐助手。根据待评测内容和系统初审报告推荐 1-3 个最匹配的评审员，输出 JSON：{"personaIds":["id"],"assistantMessage":"推荐理由"}。assistantMessage 应包含「根据内容特色和初审发现的风险点，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。',
+          '你是评审员推荐助手。根据待评测内容推荐 1-3 个最匹配的评审员，输出 JSON：{"personaIds":["id"],"assistantMessage":"推荐理由"}。assistantMessage 应包含「根据内容特色，为您推荐了 X 位合适的评审员」及每位推荐评审员的简要理由。不要输出 markdown。',
         messages: [
           {
             role: "user",
@@ -1505,7 +1539,7 @@ async function handleRstConfirmation(
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   const normalized = userMessage.trim().toLowerCase();
-  const wantsRst = /^(是|继续|确认|好的|好|yes|y|1|开始|开始复审|进入复审|继续评审|继续 RST|继续rst)$/i.test(normalized);
+  const wantsRst = /^(是|继续|确认|好的|好|yes|y|1|开始|舆论仿真推演|仿真推演|开始仿真推演|开始舆论仿真推演)$/i.test(normalized);
 
   if (wantsRst) {
     state.step = "checkPersonaInventory";
@@ -1519,13 +1553,13 @@ async function handleRstConfirmation(
   if (wantsSkip) {
     state.step = "completed";
     await saveState(tmpDir, state);
-    return toolResponse(state, "评测已完成，未进入 RST 仿真评审。需要评测新内容时，请重新开始。");
+    return toolResponse(state, "六维风险检测已完成，未进入舆论仿真推演。需要评测新内容时，请重新开始。");
   }
 
   return toolResponse(
     state,
     [
-      "六维初审已完成。是否继续进行 RST 仿真评审，让虚拟读者基于上述风险点模拟真实反应？",
+      "六维风险检测已完成。是否继续进行舆论仿真推演？",
       "",
       "回复「继续」或「是」进入评审，回复「否」结束。",
     ].join("\n"),

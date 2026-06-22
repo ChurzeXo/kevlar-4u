@@ -127,7 +127,7 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
     const hasFindings = options.preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
     if (hasFindings) {
       report += `\n\n---\n\n## 🚨 ${t("report.systemFindings", { ns: "common", defaultValue: "System Initial Findings" })}\n\n`;
-      report += `${t("report.systemFindingsDesc", { ns: "common", defaultValue: "The system initial review scanned the following potential risk points:" })}\n`;
+      report += `${t("report.systemFindingsDesc", { ns: "common", defaultValue: "The six-dimension risk detection scanned the following potential risk points:" })}\n`;
       for (const audit of options.preAuditReport.dimensions) {
         if (audit.findings && audit.findings.length > 0) {
           report += `\n### 【${audit.name}】${t("report.foundRisks", { ns: "common", defaultValue: "Found {{count}} risk items", count: audit.findings.length })}\n`;

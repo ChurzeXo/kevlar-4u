@@ -641,7 +641,7 @@ export function buildReviewUserMessage(
 	if (preAuditReport && Array.isArray(preAuditReport.dimensions)) {
 		const hasFindings = preAuditReport.dimensions.some((d: any) => d.findings && d.findings.length > 0);
 		if (hasFindings) {
-			message += `**🚨 系统初审预警**：\n\n以下是系统在初步审查中发现的潜在风险点。请结合你的角色身份，判断这些风险在你的圈层中是否真的会引爆，以及影响有多大：\n\n`;
+			message += `**🚨 六维风险检测预警**：\n\n以下是六维风险检测中发现的潜在风险点。请结合你的角色身份，判断这些风险在你的圈层中是否真的会引爆，以及影响有多大：\n\n`;
 			for (const audit of preAuditReport.dimensions) {
 				if (audit.findings && audit.findings.length > 0) {
 					message += `【${audit.name}】发现 ${audit.findings.length} 个潜在风险：\n`;
@@ -896,7 +896,7 @@ export function migrateStanceToBias(stance: string | string[] | undefined): Dime
 }
 
 // ── RST v1 — Reaction Simulation Taxonomy ────────────────────────────────────
-// 四层互联网反应模拟人格系统：
+// 四层舆论仿真人格系统：
 //   L1 Archetype   → 基础反馈人格（决定评论角度 + 默认 focus 维度）
 //   L2 Trigger     → 内容敏感触发器（决定哪些表达会引发强烈反应）
 //   L3 Regional    → 地区文化过滤器（提高/降低特定 Trigger 的权重）

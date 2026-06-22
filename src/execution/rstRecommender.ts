@@ -326,7 +326,7 @@ function getDimensionLabel(dim: OffensiveDimensionId): string {
  */
 function buildRecommendationMessage(scored: PersonaScore[]): string {
 	const lines = [
-		"根据内容特色和初审发现的风险点，为您推荐了以下评审员：",
+		"根据内容特色，为您推荐了以下评审员：",
 		"",
 	];
 

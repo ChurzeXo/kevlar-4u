@@ -44,7 +44,7 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
   it("buildPreAuditFinalizerPrompt with Free segments (loaded from file)", () => {
     const prompt = buildPreAuditFinalizerPrompt(SAMPLE_AUDITORS, [], FREE_SEGMENTS);
     const hash = sha256(prompt);
-    assert.equal(hash, "650d7589a3820f465304253ed20b0de58cd1f303ad5ea36f81624dc12d5ccf77", "Free finalizer prompt hash changed — template content drift detected");
+    assert.equal(hash, "7d8e861c036f4408365368410682f146a577493eb2084c337b2947d1caac0e05", "Free finalizer prompt hash changed — template content drift detected");
   });
 
   it("buildPreAuditFinalizerPrompt with Pro segments (falls back to Free tier)", () => {
@@ -80,7 +80,7 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
       FREE_SEGMENTS,
     );
     const hash = sha256(prompt);
-    assert.equal(hash, "a5f95ea07a4e7063bf57667fe05f0a840feeebaa6de09e27bf91015aaab3e26f", "Free orchestration finalizer hash changed — template content drift detected");
+    assert.equal(hash, "b88bf8af0106a34097133fcf9553d2fa6385835f1401f6ae7a9489f5824eab86", "Free orchestration finalizer hash changed — template content drift detected");
   });
 
   it("buildOrchestrationFinalizerPrompt with Pro segments (falls back to Free)", () => {

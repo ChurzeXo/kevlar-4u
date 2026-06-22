@@ -150,7 +150,7 @@ describe("Pro flow — rstConfirmation", () => {
     const text = textOf(result);
     // Pro with no system auditors -> local rule findings -> rstConfirmation
     assert.ok(text.includes("rstConfirmation"), `expected rstConfirmation state, got: ${text}`);
-    assert.ok(text.includes("是否继续进行 RST 仿真评审"));
+    assert.ok(text.includes("是否继续进行舆论仿真推演"));
 
     const sessionId = extractSessionId(text);
 
@@ -179,7 +179,7 @@ describe("Pro flow — rstConfirmation", () => {
     });
 
     const declineText = textOf(declineResult);
-    assert.ok(declineText.includes("评测已完成，未进入 RST 仿真评审"));
+    assert.ok(declineText.includes("六维风险检测已完成，未进入舆论仿真推演"));
     assert.ok(declineText.includes("completed"));
   });
 
@@ -198,7 +198,7 @@ describe("Pro flow — rstConfirmation", () => {
       const text = textOf(result);
       // With system auditors + local fallback + Pro -> rstConfirmation
       assert.ok(text.includes("rstConfirmation"), `expected rstConfirmation, got: ${text}`);
-      assert.ok(text.includes("是否继续进行 RST 仿真评审"));
+      assert.ok(text.includes("是否继续进行舆论仿真推演"));
 
       const sessionId = extractSessionId(text);
 
@@ -237,7 +237,7 @@ describe("Pro flow — rstConfirmation", () => {
       });
 
       const declineText = textOf(declineResult);
-      assert.ok(declineText.includes("评测已完成，未进入 RST 仿真评审"));
+      assert.ok(declineText.includes("六维风险检测已完成，未进入舆论仿真推演"));
       assert.ok(declineText.includes("completed"));
     } finally {
       if (prevFallback === undefined) delete process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK;

@@ -46,9 +46,9 @@ const SYSTEM_AUDITOR_LABELS: Record<string, string> = {
 
 const MATRIX_TRANSLATION_MAP: Record<string, MatrixTranslationFn> = {
 	social_risk: (paragraph) =>
-		`该文本在初审中被检测出在第 ${paragraph} 段可能存在“因谐音、擦边表达或群体措辞引发特定群体反感”的隐患。请根据你的立场，严厉审视该段落是否让你感到被冒犯或不适。`,
+		`该文本在六维风险检测中被检测出在第 ${paragraph} 段可能存在“因谐音、擦边表达或群体措辞引发特定群体反感”的隐患。请根据你的立场，严厉审视该段落是否让你感到被冒犯或不适。`,
 	legal_compliance: (paragraph) =>
-		`该文本在初审中被检测出在第 ${paragraph} 段存在“过度包装、吹嘘功能”的嫌疑。请以你刻薄、理性的视角，死磕该段落是否在“画饼”或缺乏事实依据。`,
+		`该文本在六维风险检测中被检测出在第 ${paragraph} 段存在“过度包装、吹嘘功能”的嫌疑。请以你刻薄、理性的视角，死磕该段落是否在“画饼”或缺乏事实依据。`,
 	context_distortion: (paragraph) =>
 		`该文本在第 ${paragraph} 段的表达极易被脱离上下文单独截图。请模拟恶意网友的放大镜思维，测试能否将该段话歪曲为“精英阶层的傲慢说教”。`,
 	factual_integrity: (paragraph) =>
@@ -56,7 +56,7 @@ const MATRIX_TRANSLATION_MAP: Record<string, MatrixTranslationFn> = {
 	network_culture_risk: (paragraph) =>
 		`该文本在第 ${paragraph} 段疑似使用了未脱敏的网络黑话或烂梗。请站在你的圈层视角，审查作者是否在「盲目蹭热度」，并给出你的排斥性评论。`,
 	cross_lingual_distortion: (paragraph) =>
-		`该文本在第 ${paragraph} 段包含外文表达，初审检测出存在被恶意汉化或野生翻译的风险。请以最挑剔的网民视角，审查这些外文是否容易被曲解成低俗梗或引发群嘲。`,
+		`该文本在第 ${paragraph} 段包含外文表达，六维风险检测出存在被恶意汉化或野生翻译的风险。请以最挑剔的网民视角，审查这些外文是否容易被曲解成低俗梗或引发群嘲。`,
 };
 
 const TRANSLATION_MAP: Record<string, TranslationFn> = {
@@ -90,7 +90,7 @@ const TRANSLATION_MAP: Record<string, TranslationFn> = {
 
 	// context_distortion + clickbait
 	"context_distortion:clickbait": (kw, _rd) =>
-		`初审发现标题或某些表述存在与正文偏差的风险，尤其是「${kw}」。`,
+		`六维风险检测发现标题或某些表述存在与正文偏差的风险，尤其是「${kw}」。`,
 
 	// context_distortion + ai_writing
 	"context_distortion:ai_writing": (kw, _rd) =>
@@ -139,7 +139,7 @@ const TRANSLATION_MAP: Record<string, TranslationFn> = {
 
 // Fallback template when no specific mapping exists
 function fallbackTemplate(auditorName: string, keyword: string): string {
-	return `初审在【${auditorName}】维度发现了「${keyword}」相关问题，请你根据自己的视角判断这是否值得关注。`;
+	return `六维风险检测在【${auditorName}】维度发现了「${keyword}」相关问题，请你根据自己的视角判断这是否值得关注。`;
 }
 
 // ── Core Transform Pipeline ────────────────────────────────────────────────
@@ -300,7 +300,7 @@ export function formatFocusTopicsForPrompt(topics: FocusTopic[]): string {
 	if (!topics.length) return "";
 
 	const lines = [
-		"# 🎯 狙击手定点复审焦点（核心火力集中点）",
+		"# 🎯 舆论仿真推演焦点（核心火力集中点）",
 		"",
 		"系统在文本雷达扫描中发现了以下可疑点，请你作为狙击手，执行定向抗压测试：",
 		"",
