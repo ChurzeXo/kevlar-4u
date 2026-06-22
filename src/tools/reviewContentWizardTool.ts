@@ -13,6 +13,7 @@ import type { ToolModule } from "./types.js";
 import { RuleRepository } from "../dao/RuleRepository.js";
 import { isPro } from "../subscription/tier.js";
 import { SaaSClient } from "../utils/saasClient.js";
+import { checkForUpdate } from "./checkUpdateTool.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
 import type { StrategyProvider, ReviewPlan } from "../execution/strategy.js";
@@ -1581,7 +1582,14 @@ async function executeReview(
     state.tier === "free"
       ? "\n\n---\n\n" + (await resolvePromptSegments()).freeTierUpgradePrompt
       : "";
-  const response = toolResponse(state, resultText + "\n\n---\n\n评测完成。" + upgradePrompt);
+
+  // Check for kevlar-4u update (non-blocking)
+  const updateNote = await checkForUpdate().catch(() => null);
+
+  const response = toolResponse(
+    state,
+    resultText + "\n\n---\n\n评测完成。" + upgradePrompt + (updateNote ?? "")
+  );
   await cleanupState(tmpDir, state.sessionId);
   return response;
 }
