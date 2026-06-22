@@ -536,8 +536,8 @@ function backupIfExists(filePath: string): string | null {
 // ── Entry builder ────────────────────────────────────────────────
 
 function getMcpEntry(client: ClientDef, cmd: string, args: string[]): Record<string, unknown> {
-  // OpenCode local format uses a specific structure
-  if (client.format === "json-mcp-local" && cmd !== "npx") {
+  // OpenCode uses { type: "local", command: [...], enabled: true } format
+  if (client.format === "json-mcp-local") {
     return {
       type: "local",
       command: [cmd, ...args],
