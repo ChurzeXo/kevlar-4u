@@ -48,6 +48,9 @@ import {
   normalizePreAuditDimensions,
   mergeLocalFindingsIntoAudits,
   computeDeltaAnalysis,
+  crossValidateRiskyDimensions,
+  finalizePreAuditReport,
+  runSystemAuditors,
   executeFullPipeline,
   stepStripContext,
   stepBareAudit,
@@ -835,30 +838,130 @@ async function handleSubagentAuditResult(
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+    const content = state.content;
+    const step0Result = state.orchestrationPreAuditContext?.step0Result;
+    const webContextMap = state.orchestrationPreAuditContext?.webContextMap ?? {};
+    const precedents = state.orchestrationPreAuditContext?.precedents ?? [];
 
-    // Step 5: code-layer deterministic merge (same as orchestration Turn 2)
+    // ── Step 4: Delta analysis (code step, needs bare-text findings) ──────────
+    // Run bare-text audit for the 3 "bare" dimensions, then compute delta
+    const bareOnlyAuditors = systemAuditors.filter(
+      (a) =>
+        a.meta.id === "context_distortion" ||
+        a.meta.id === "network_culture_risk" ||
+        a.meta.id === "cross_lingual_distortion",
+    );
+    const stripped = stripContext(content);
+    const caller = resolveSystemAuditCaller(samplingFn);
+    let deltaRisks = parsed.deltaRisks ?? null;
+
+    if (bareOnlyAuditors.length > 0 && caller) {
+      try {
+        // Re-run bare-text audit to get bareFindings for delta analysis
+        const bareFindingsRaw = await runSystemAuditors(
+          stripped.bare,
+          bareOnlyAuditors,
+          caller,
+          undefined,
+          localFindings,
+          step0Result,
+          webContextMap,
+        );
+        const normalizedBare = normalizePreAuditDimensions(bareFindingsRaw, bareOnlyAuditors);
+        const normalizedFull = normalizePreAuditDimensions(parsed.dimensions, systemAuditors);
+        deltaRisks = computeDeltaAnalysis(normalizedBare, normalizedFull);
+      } catch (deltaErr) {
+        logger.warn("Step 4 delta analysis failed, using empty deltaRisks", {
+          event: "subagent_step4_delta_failed",
+          error: getErrorInfo(deltaErr).message,
+        });
+        deltaRisks = deltaRisks ?? buildEmptyDeltaRisks();
+      }
+    } else {
+      deltaRisks = deltaRisks ?? buildEmptyDeltaRisks();
+    }
+
+    // ── Step 5: Merge local findings into audit results (code step) ───────────
     const mergedDimensions = normalizePreAuditDimensions(
-      mergeLocalFindingsIntoAudits(normalizePreAuditDimensions(parsed.dimensions, systemAuditors), localFindings),
+      mergeLocalFindingsIntoAudits(
+        normalizePreAuditDimensions(parsed.dimensions, systemAuditors),
+        localFindings,
+      ),
       systemAuditors,
     );
 
-    // Step 7: code-layer deterministic synergy calculation
+    // ── Step 6: Cross-validation (LLM step, fallback if host didn't do it) ───
+    let crossValidatedDimensions = mergedDimensions;
+    if (caller && (!parsed.attackChainAnalysis || parsed.attackChainAnalysis.trim() === "")) {
+      try {
+        crossValidatedDimensions = await crossValidateRiskyDimensions(
+          content,
+          mergedDimensions,
+          systemAuditors,
+          caller,
+        );
+      } catch (cvErr) {
+        logger.warn("Step 6 cross-validation failed, using merged dimensions", {
+          event: "subagent_step6_crossval_failed",
+          error: getErrorInfo(cvErr).message,
+        });
+        crossValidatedDimensions = mergedDimensions;
+      }
+    }
+
+    // ── Step 7: Synergy calculation (code step) ──────────────────────────────
     const dimensionLevels: Record<string, string> = {};
-    for (const dim of mergedDimensions) {
+    for (const dim of crossValidatedDimensions) {
       dimensionLevels[dim.id] = dim.level ?? "🟢";
     }
     const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
     const synergyResult = calculateSynergy(dimensionLevels, timingFlag);
 
-    // Build pre-audit report
-    const preAuditReport = {
-      dimensions: mergedDimensions,
-      attackChainAnalysis: parsed.attackChainAnalysis ?? "",
-      worstCaseNarrative: parsed.worstCaseNarrative ?? "",
-      riskProfile: parsed.riskProfile ?? {},
-      synergyFlags: parsed.synergyFlags ?? { triggered: [], levelUpgrades: [] },
-      deltaRisks: parsed.deltaRisks ?? buildEmptyDeltaRisks(),
-    };
+    // ── Step 8: Final arbitration (LLM step, fallback if host didn't do it) ───
+    let preAuditReport: PreAuditReport;
+    if (caller && (!parsed.worstCaseNarrative || parsed.worstCaseNarrative.trim() === "")) {
+      try {
+        preAuditReport = await finalizePreAuditReport(
+          content,
+          localFindings,
+          mergedDimensions,
+          crossValidatedDimensions,
+          systemAuditors,
+          caller,
+          synergyResult,
+          deltaRisks,
+          precedents,
+          await resolvePromptSegments(),
+        );
+      } catch (faErr) {
+        logger.warn("Step 8 final arbitration failed, building report from parsed + synergy", {
+          event: "subagent_step8_finalize_failed",
+          error: getErrorInfo(faErr).message,
+        });
+        preAuditReport = buildFallbackReport(
+          crossValidatedDimensions,
+          synergyResult,
+          deltaRisks,
+          parsed,
+          precedents,
+        );
+      }
+    } else {
+      // Host already did Step 8, use parsed results
+      const dimSummary = crossValidatedDimensions.some((d) => d.findings.length > 0)
+        ? `${crossValidatedDimensions.filter((d) => d.findings.length > 0).length}/${crossValidatedDimensions.length} 个维度存在风险发现`
+        : "全部维度通过";
+      preAuditReport = {
+        dimensions: crossValidatedDimensions,
+        summary: dimSummary,
+        attackChainAnalysis: parsed.attackChainAnalysis ?? "",
+        worstCaseNarrative: parsed.worstCaseNarrative ?? "",
+        riskProfile: parsed.riskProfile ?? {},
+        synergyFlags: parsed.synergyFlags ?? { triggered: [], levelUpgrades: [] },
+        deltaRisks,
+        precedents,
+      };
+    }
 
     // Apply synergy level upgrades
     if (synergyResult.levelUpgrades.length > 0) {
@@ -875,9 +978,12 @@ async function handleSubagentAuditResult(
     state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
 
-    logger.info("Subagent audit result processed", {
+    logger.info("Subagent audit result processed (with Step 4/6/8)", {
       event: "subagent_audit_processed",
-      dimensionCount: mergedDimensions.length,
+      dimensionCount: preAuditReport.dimensions.length,
+      hasDeltaRisks: !!deltaRisks && deltaRisks.bareOnly?.length > 0,
+      hasAttackChain: !!preAuditReport.attackChainAnalysis,
+      hasWorstCase: !!preAuditReport.worstCaseNarrative,
       synergyTriggered: synergyResult.triggered.length > 0,
     });
 
@@ -907,6 +1013,36 @@ async function handleSubagentAuditResult(
       ].join("\n"),
     );
   }
+}
+
+/** Build a fallback PreAuditReport when Step 8 LLM call fails */
+function buildFallbackReport(
+  dimensions: PreAuditDimensionResult[],
+  synergy: { triggered: string[]; overallMultiplier: number; levelUpgrades?: any[] },
+  deltaRisks: any,
+  parsed: any,
+  precedents?: Precedent[],
+): PreAuditReport {
+  // Apply synergy upgrades to dimensions
+  const dims = dimensions.map((d) => ({ ...d, findings: [...d.findings] }));
+  if (synergy?.levelUpgrades) {
+    for (const upgrade of synergy.levelUpgrades) {
+      const dim = dims.find((d: any) => d.id === upgrade.dimension);
+      if (dim && dim.level === upgrade.from) dim.level = upgrade.to;
+    }
+  }
+  return {
+    dimensions: dims,
+    summary: dims.some((d) => d.findings.length > 0)
+      ? `${dims.filter((d) => d.findings.length > 0).length}/${dims.length} 个维度存在风险发现`
+      : "全部维度通过",
+    riskProfile: parsed?.riskProfile ?? {},
+    synergyFlags: { triggered: synergy?.triggered ?? [], overallMultiplier: synergy?.overallMultiplier ?? 1, levelUpgrades: synergy?.levelUpgrades ?? [] },
+    deltaRisks,
+    attackChainAnalysis: "",
+    worstCaseNarrative: "",
+    precedents,
+  };
 }
 
 /**
