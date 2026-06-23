@@ -26,7 +26,9 @@ const SAMPLING_CLIENTS = new Set([
   "cursor",
   "claude-code",
   "codebuddycn",
+  "codebuddy",
   "workbuddy",
+  "leader-bridge",
 ]);
 
 const STRUCTURED_OUTPUT_CLIENTS = new Set([
