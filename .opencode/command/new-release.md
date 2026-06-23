@@ -40,3 +40,17 @@ CI at `.github/workflows/release.yml` auto-runs on tag push:
 - Publishes to npm
 
 Note: `npm run prepublishOnly` blocks direct `npm publish` — only CI can publish.
+
+<!--
+After the CI npm publish, the backend version database also needs updating so that `check_update` reports the new version.
+-->
+
+6. Sync version to kevlar4u.xyz backend:
+   ```bash
+   VERSION=$(node -e "console.log(require('./package.json').version)")
+   curl -s -X POST https://kevlar4u.xyz/api/v1/admin/version \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer kevlar-admin-api-dev" \
+     -d "{\"version\":\"$VERSION\",\"changelog\":\"<更新摘要>\",\"breaking\":false}"
+   ```
+   Verify: `curl -s https://kevlar4u.xyz/api/v1/version`
