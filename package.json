@@ -42,13 +42,13 @@
     "kevlar-4u": "dist/scripts/cli.js"
   },
   "scripts": {
-    "build": "tsc -b && cp -r src/i18n/locales dist/i18n/locales",
+    "build": "tsc -b && cp -r src/i18n/locales dist/i18n/locales && chmod +x dist/scripts/cli.js",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "setup": "tsx scripts/setup.ts",
     "kevlar-4u": "tsx scripts/cli.ts",
     "auto-install": "tsx scripts/cli.ts --auto",
-    "build:scripts": "tsc -b tsconfig.scripts.json",
+    "build:scripts": "tsc -b tsconfig.scripts.json && chmod +x dist/scripts/cli.js",
     "test": "tsx --test src/__tests__/*.test.ts",
     "test:watch": "tsx --test --watch src/__tests__/*.test.ts",
     "commit:pro": "node ./scripts/sync-pro-submodule.js",
