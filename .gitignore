@@ -28,6 +28,7 @@ docs/*
 !docs/client-server-audit.md
 !docs/region-rules-plan.md
 !docs/backend-version-api.md
+!docs/subagent-refactor.md
 
 # Kevlar runtime state (wizard sessions, drafts)
 skills/tmp/
