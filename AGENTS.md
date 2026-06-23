@@ -53,7 +53,8 @@ All local testing uses `tsx` directly — no build needed:
 
 ## Free Architecture
 
-- **Execution modes** (`src/execution/index.ts`): `orchestration` (priority 30, always available), `direct_api` (20), `mcp_sampling` (10). Auto-resolved: config → `KEVLAR_MODE` env → capability detection.
+- **Execution modes** (`src/execution/index.ts`): `orchestration` (priority 30, always available), `direct_api` (20), `mcp_sampling` (10), `mcp_subagent` (15). Auto-resolved: config → `KEVLAR_MODE` env → capability detection. Priority order: `mcp_sampling` (10) → `mcp_subagent` (15) → `direct_api` (20) → `orchestration` (30).
+- **mcp_subagent mode**: Instructs host AI to spawn subagents for parallel execution of system audit dimensions. Provides true isolation and parallelism (unlike serial role-play in orchestration mode). Requires host AI to support Task/Subagent tools (e.g., Claude Code, opencode). Falls back to orchestration if not supported. See `docs/subagent-refactor.md` for details.
 - **Non-orchestration modes** use a review lock with 5min TTL (`src/execution/lock.ts`) to prevent concurrent runs. Orchestration is exempt.
 - **Two-stage pipeline**: System pre-audit (9-step pipeline) → RST review (user personas with Focus Topic transformation).
 - **State machine wizards** (`src/tools/`): `review_content_wizard`, `create_persona_wizard`, `configure_wizard`, `delete_persona_wizard`. All persist state to `skills/tmp/`. Stale drafts (>24h) are cleaned on server startup.

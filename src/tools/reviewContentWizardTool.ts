@@ -359,6 +359,9 @@ async function advanceWizard(
         samplingFn,
       );
 
+    case "waitingForSubagentAudit":
+      return handleSubagentAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
+
     case "waitingForOrchestrationAudit":
       return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
 
@@ -807,6 +810,100 @@ async function handleOrchestrationAuditResult(
         "❌ 无法解析宿主 AI 返回的 Turn 2 审计 JSON。",
         `错误：${info.message}`,
         "请让宿主 AI 仅返回包含 dimensions 和 deltaRisks 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
+      ].join("\n"),
+    );
+  }
+}
+
+/**
+ * Handle subagent audit result: parse the aggregated result from host AI
+ * after it has executed the subagent dispatch prompt.
+ *
+ * This is similar to handleOrchestrationAuditResult, but instead of
+ * advancing to Turn 3 (waitingForOrchestrationFinal), it advances directly
+ * to rstConfirmation or checkPersonaInventory because the subagent dispatch
+ * prompt already asks the host AI to do the cross-validation and final arbitration.
+ */
+async function handleSubagentAuditResult(
+  tmpDir: string,
+  state: ReviewWizardState,
+  userPersonas: Persona[],
+  systemAuditors: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  try {
+    const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+    const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+
+    // Step 5: code-layer deterministic merge (same as orchestration Turn 2)
+    const mergedDimensions = normalizePreAuditDimensions(
+      mergeLocalFindingsIntoAudits(normalizePreAuditDimensions(parsed.dimensions, systemAuditors), localFindings),
+      systemAuditors,
+    );
+
+    // Step 7: code-layer deterministic synergy calculation
+    const dimensionLevels: Record<string, string> = {};
+    for (const dim of mergedDimensions) {
+      dimensionLevels[dim.id] = dim.level ?? "🟢";
+    }
+    const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
+    const synergyResult = calculateSynergy(dimensionLevels, timingFlag);
+
+    // Build pre-audit report
+    const preAuditReport = {
+      dimensions: mergedDimensions,
+      attackChainAnalysis: parsed.attackChainAnalysis ?? "",
+      worstCaseNarrative: parsed.worstCaseNarrative ?? "",
+      riskProfile: parsed.riskProfile ?? {},
+      synergyFlags: parsed.synergyFlags ?? { triggered: [], levelUpgrades: [] },
+      deltaRisks: parsed.deltaRisks ?? buildEmptyDeltaRisks(),
+    };
+
+    // Apply synergy level upgrades
+    if (synergyResult.levelUpgrades.length > 0) {
+      for (const upgrade of synergyResult.levelUpgrades) {
+        const dim = preAuditReport.dimensions.find((d: any) => d.id === upgrade.dimension);
+        if (dim && dim.level === upgrade.from) {
+          dim.level = upgrade.to;
+        }
+      }
+    }
+
+    state.preAuditReport = preAuditReport;
+    state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
+    state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
+    await saveState(tmpDir, state);
+
+    logger.info("Subagent audit result processed", {
+      event: "subagent_audit_processed",
+      dimensionCount: mergedDimensions.length,
+      synergyTriggered: synergyResult.triggered.length > 0,
+    });
+
+    if (state.step === "rstConfirmation") {
+      const prompts = await resolvePromptSegments();
+      return toolResponse(
+        state,
+        [
+          buildPreAuditSummaryBlock(state, prompts),
+          "",
+          "六维风险检测已完成（Subagent 并行模式）。是否继续进行舆论仿真推演？",
+          "",
+          "回复「继续」或「是」进入评审，回复「否」结束。",
+        ].join("\n"),
+      );
+    }
+    return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
+  } catch (err) {
+    const info = getErrorInfo(err);
+    await rollbackState(tmpDir, state.sessionId);
+    return toolResponse(
+      state,
+      [
+        "❌ 无法解析宿主 AI 返回的 Subagent 审计 JSON。",
+        `错误：${info.message}`,
+        "请让宿主 AI 仅返回包含 dimensions 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
       ].join("\n"),
     );
   }
