@@ -57,18 +57,15 @@
     1. 调 kevlar 工具拿 Step 0a 规则结果 + Step 1 脱嵌文本
     2. 启动 Step 0b subagent（含联网搜索），拿到 step0Result + webContextMap
     3. 并行启动 6 个维度 subagent，注入 buildIsolatedSystemAuditorPrompt()
-    4. 收结果 → 调 kevlar merge + synergy（code steps）
-    5. 【当前实现跳过】启动 subagent 做交叉验证（Step 6）+ 最终仲裁（Step 8）
-    6. 返回最终报告
+    4. 收结果 → kevlar 在 handleSubagentAuditResult() 中执行：
+       Step 4 (delta) → Step 5 (merge) → Step 6 (cross-validation, fallback)
+       → Step 7 (synergy) → Step 8 (final arbitration, fallback)
+    5. 返回最终报告
 ```
 
-> **⚠️ 实现状态说明**（与文档初版相比）：
-> 当前 `handleSubagentAuditResult()`（`reviewContentWizardTool.ts:827-886`）只实现了
-> Step 5（merge）和 Step 7（synergy），**跳过了 Step 4（delta 分析）、
-> Step 6（交叉验证）和 Step 8（最终仲裁）**。这些步骤当前依赖宿主在 subagent
-> 调度 prompt 中一次性完成（见 `buildSubagentDispatchPrompt()` 要求宿主聚合时
-> 包含 `attackChainAnalysis` 和 `worstCaseNarrative`）。后续应将 Step 6/8
-> 改为独立的 subagent 派发，以实现真正的并行隔离。
+> **实现状态**：Step 4/5/6/7/8 已在 `handleSubagentAuditResult()` 中实现（commit `5f4e2bd`）。
+> Step 6/8 在没有 `caller`（无 samplingFn 且无 API key）时跳过，依赖宿主在 subagent
+> 调度 prompt 中完成。后续可考虑在无 caller 时也通过宿主 subagent 派发这两步。
 
 ---
 
