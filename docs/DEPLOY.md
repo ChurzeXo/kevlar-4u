@@ -200,10 +200,64 @@ npm install @kevlar/pro-runtime  # Pro 私有包
 
 ---
 
-## 五、环境变量速查
+## 五、后端数据库写入
+
+npm publish 只推送包到 registry。`check_update` 查版本和 Pro 激活都需要 `kevlar4u.xyz` 后端数据库中有对应记录。发布新版本后必须同步更新后端。
+
+### 5.1 Admin Token
+
+`POST /api/v1/admin/version` 需要 admin token。通过 `ADMIN_API_TOKEN` 环境变量配置（开发环境默认值：`kevlar-admin-api-dev`）。
+
+生成随机 token：
+
+```bash
+openssl rand -hex 32
+```
+
+Vercel 部署时在 Environment Variables 面板设置 `ADMIN_API_TOKEN`。
+
+### 5.2 更新版本号
+
+每次发布新版本后执行：
+
+```bash
+curl -s -X POST https://kevlar4u.xyz/api/v1/admin/version \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ADMIN_API_TOKEN>" \
+  -d '{"version":"1.6.2","changelog":"更新摘要","breaking":false}'
+```
+
+响应：
+
+```json
+{"ok":true,"version":"1.6.2","releasedAt":"2026-06-23T08:43:17.780Z"}
+```
+
+验证：
+
+```bash
+curl -s https://kevlar4u.xyz/api/v1/version
+```
+
+### 5.3 生成 Pro 激活码
+
+```bash
+curl -s https://kevlar4u.xyz/api/v1/admin/seed
+```
+
+返回一次性激活码（30 分钟有效）：
+
+```json
+{"code":"KV-ACT-xxxxxxxx-xxxxxx-EXPIRES-30MIN","expiresAt":"2026-06-23T09:09:36.312Z"}
+```
+
+---
+
+## 六、环境变量速查
 
 | 变量 | 用途 |
 |---|---|
+| `ADMIN_API_TOKEN` | 后端 admin API 鉴权 token（Vercel 部署需配置） |
 | `KEVLAR_SKIP_PRO_IMPORT` | `"1"` 时跳过 `@kevlar/pro-runtime` 加载（测试用） |
 | `KEVLAR_TIER` | 设为 `"pro"` 强制使用 Pro 模式 |
 | `KEVLAR_SKILLS_DIR` | 覆盖默认的 `skills/` 路径 |
@@ -212,7 +266,7 @@ npm install @kevlar/pro-runtime  # Pro 私有包
 
 ---
 
-## 六、本地开发说明
+## 七、本地开发说明
 
 子模块 + tsconfig paths 方案，无需 npm link。
 

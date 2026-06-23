@@ -9,7 +9,9 @@
  */
 
 import { setClientInfo, isSamplingSupported } from "./client.js";
+import { getSamplingClientList } from "./client.js";
 import type { MultiTurnSamplingFunction } from "./base.js";
+import { logger } from "../utils/logger.js";
 
 export interface SamplingResolverDeps {
   /** Returns raw client version info from the MCP connection handshake. */
@@ -26,10 +28,26 @@ export function resolveSamplingFn(
   }
 
   const cv = deps.getClientVersion();
-  if (!cv) return undefined;
+  if (!cv) {
+    logger.debug("No client version info available, sampling disabled", { event: "sampling_no_client" });
+    return undefined;
+  }
+
+  logger.debug("Resolving sampling support", {
+    event: "sampling_resolve",
+    clientName: cv.name,
+    clientVersion: cv.version,
+    knownClients: getSamplingClientList(),
+  });
 
   setClientInfo(cv.name, cv.version);
-  if (!isSamplingSupported(cv.name)) return undefined;
+  if (!isSamplingSupported(cv.name)) {
+    logger.debug("Client not in sampling whitelist", {
+      event: "sampling_not_whitelisted",
+      clientName: cv.name,
+    });
+    return undefined;
+  }
 
   return deps.createFn();
 }
