@@ -1006,3 +1006,93 @@ export function buildPreAuditFinalizerPrompt(
     `注意：除了 dimensions、attackChainAnalysis 和 worstCaseNarrative 外，其余字段均为可选字段，如果不可用则设为 null 或省略。`,
   ].join("\n");
 }
+
+/**
+ * Build the subagent dispatch prompt for mcp_subagent mode
+ * 
+ * This prompt instructs the host AI to spawn subagents for parallel execution
+ * of system audit dimensions. It's a replacement for the 3-turn orchestration
+ * mode, providing true isolation and parallelism.
+ * 
+ * @param params - Dispatch parameters including content, bareText, step0Result, etc.
+ * @returns The dispatch prompt for the host AI
+ */
+export function buildSubagentDispatchPrompt(params: {
+  content: string;
+  bareText: string;
+  step0Result: Step0Result;
+  webContextMap: Record<string, string>;
+  auditors: Persona[];
+  localFindings?: any[];
+  timingContext?: string;
+}): string {
+  const { content, bareText, step0Result, webContextMap, auditors, localFindings, timingContext } = params;
+
+  return [
+    `# Kevlar-4u 系统初审 — Subagent 并行调度`,
+    ``,
+    `你是一个调度器。请使用你的 Task/Subagent 工具，并行启动以下审计任务。`,
+    ``,
+    `## 全局上下文（所有 subagent 共享）`,
+    ``,
+    `### 原始文案`,
+    content,
+    ``,
+    `### 脱嵌文本（去除语境提示后的裸文）`,
+    bareText,
+    ``,
+    `### Step 0 全局解码结果`,
+    JSON.stringify(step0Result, null, 2),
+    ``,
+    `### 联网验证结果`,
+    JSON.stringify(webContextMap, null, 2),
+    ``,
+    localFindings && localFindings.length > 0 ? [
+      `### 规则引擎预警`,
+      JSON.stringify(localFindings, null, 2),
+      ``,
+    ].join("\n") : ``,
+    timingContext ? [
+      `### 时机上下文`,
+      timingContext,
+      ``,
+    ].join("\n") : ``,
+    ``,
+    `## 并行审计任务`,
+    ``,
+    `请并行启动以下 ${auditors.length} 个审计 subagent（每个 subagent 独立执行，互不干扰）：`,
+    ``,
+    ...auditors.map((auditor, index) => [
+      `### Subagent #${index + 1}: ${auditor.meta.name} (${auditor.meta.id})`,
+      ``,
+      `System Prompt:`,
+      buildIsolatedSystemAuditorPrompt(auditor),
+      ``,
+      `User Message:`,
+      buildIsolatedSystemAuditorMessage(content, auditor, {
+        localFindings,
+        step0Result,
+        timingContext,
+        webContext: Object.values(webContextMap).join("\n"),
+      }),
+      ``,
+      `要求：`,
+      `- 每个 subagent 必须在独立的 context window 中执行`,
+      `- 所有 subagent 必须并行启动，不能串行`,
+      `- 每个 subagent 返回结构化 JSON 结果`,
+      ``,
+    ].join("\n")),
+    ``,
+    `## 结果聚合`,
+    ``,
+    `所有 subagent 完成后，请聚合结果并调用 kevlar 的 merge 工具（如果有）或直接返回聚合结果。`,
+    `聚合结果必须遵守 ${LEGACY_RENDERING_SECTION} 的格式约束。`,
+    ``,
+    `## 重要提示`,
+    ``,
+    `- 必须使用 Task/Subagent 工具并行执行，不能在一个 prompt 里串行执行`,
+    `- 每个 subagent 的 context window 必须独立，不能共享推理状态`,
+    `- 如果某个 subagent 执行失败，记录错误并继续处理其他 subagent 的结果`,
+    `- 最终报告必须遵守 LEGACY_RENDERING_SECTION 的格式约束`,
+  ].join("\n");
+}

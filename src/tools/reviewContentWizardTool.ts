@@ -2,7 +2,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
-import { MultiTurnSamplingFunction } from "../execution/base.js";
+import { MultiTurnSamplingFunction, ExecutionMode } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { handleReviewContent } from "./reviewTool.js";
 import { DEFAULT_DIMENSIONS_CONFIG, DEFENSIVE_DIMENSION_IDS, type DimensionsConfig } from "../execution/dimensions.js";
@@ -30,6 +30,8 @@ import {
   type Precedent,
   type Step0Result,
 } from "../prompts/reviewWizard.js";
+import { isSubagentDispatchSupported } from "../execution/client.js";
+import { buildSubagentDispatchPromptForWizard } from "../execution/modes/subagent.js";
 import {
   type AuditLlmCaller,
   type PreAuditDimensionResult,
@@ -185,6 +187,7 @@ type ReviewWizardStep =
   | "waitingForOrchestrationStep0" // 宿主编排 Turn 1: 等待 Step 0 JSON
   | "waitingForOrchestrationAudit" // 宿主编排 Turn 2: 等待维度审计 JSON
   | "waitingForOrchestrationFinal" // 宿主编排 Turn 3: 等待交叉验证 + 最终仲裁 JSON
+  | "waitingForSubagentAudit" // Subagent 并行调度：等待 subagent 审计结果
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
   | "waitingForReviewDecision"
@@ -196,6 +199,7 @@ interface ReviewWizardState {
   sessionId: string;
   createdAt: number;
   step: ReviewWizardStep;
+  mode?: ExecutionMode;
   content: string;
   context?: string;
   targetPlatforms: string[];
@@ -609,6 +613,22 @@ async function handleOrchestrationStep0Result(
 
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
+
+    // Check if we should use subagent dispatch mode
+    if (state.mode === "mcp_subagent" && isSubagentDispatchSupported()) {
+      const dispatchPrompt = buildSubagentDispatchPromptForWizard({
+        content: state.content,
+        bareText: stripped.bare,
+        step0Result,
+        webContextMap,
+        auditors: systemAuditors,
+        localFindings,
+        timingContext: localFindings.find((f: any) => f.timingDescription)?.timingDescription,
+      });
+      state.step = "waitingForSubagentAudit";
+      await saveState(tmpDir, state);
+      return toolResponse(state, dispatchPrompt);
+    }
 
     // Check if we have an LLM caller (Direct API / Sampling mode)
     const caller = resolveSystemAuditCaller(samplingFn);

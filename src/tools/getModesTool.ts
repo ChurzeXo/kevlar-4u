@@ -23,6 +23,10 @@ const MODE_LABELS: Record<string, { name: string; desc: string }> = {
     name: "MCP 采样模式",
     desc: "真正并行执行，深度分析，需宿主客户端支持",
   },
+  mcp_subagent: {
+    name: "Subagent 并行调度模式",
+    desc: "使用宿主 Task/Subagent 工具并行执行审计，零额外成本，真正隔离",
+  },
   direct_api: {
     name: "直接 API 模式",
     desc: "需设置 KEVLAR_API_KEY 环境变量",
@@ -32,6 +36,7 @@ const MODE_LABELS: Record<string, { name: string; desc: string }> = {
 const RECOMMENDED_LABELS: Record<string, string> = {
   orchestration: "宿主辅助兜底模式（零成本、低隔离 fallback）",
   mcp_sampling: "MCP 采样模式（推荐：并行深度分析）",
+  mcp_subagent: "Subagent 并行调度模式（推荐：零成本 + 真隔离）",
   direct_api: "直接 API 模式（完全自主控制）",
 };
 

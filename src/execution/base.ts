@@ -7,7 +7,7 @@ import type { DimensionsConfig } from "./dimensions.js";
 
 // ── Execution Mode Types ───────────────────────────────────────────────────────
 
-export type ExecutionMode = "orchestration" | "mcp_sampling" | "direct_api";
+export type ExecutionMode = "orchestration" | "mcp_sampling" | "direct_api" | "mcp_subagent";
 
 export type ResolveableMode = ExecutionMode | "auto";
 

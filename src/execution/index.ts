@@ -11,6 +11,7 @@ import { isSamplingSupported } from "./client.js";
 import { orchestrationHandler } from "./modes/orchestration.js";
 import { samplingHandler } from "./modes/sampling.js";
 import { directApiHandler } from "./modes/direct_api.js";
+import { subagentHandler } from "./modes/subagent.js";
 import { apiCircuitBreaker, CircuitBreakerOpenError } from "./limiter.js";
 import { generateTraceId, generateSpanId, withTraceContext } from "../utils/observability.js";
 import { toFrame } from "./base.js";
@@ -31,6 +32,7 @@ import type {
 const handlers: ExecutionHandler[] = [
   orchestrationHandler, // priority: 30 (fallback)
   samplingHandler,      // priority: 10 (preferred)
+  subagentHandler,      // priority: 15 (subagent dispatch)
   directApiHandler,     // priority: 20 (medium)
 ];
 

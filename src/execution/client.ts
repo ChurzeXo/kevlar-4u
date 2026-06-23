@@ -47,6 +47,27 @@ export function isStructuredOutputSupported(): boolean {
   return clientCapabilities?.structuredOutput !== undefined;
 }
 
+/**
+ * Detect if the host AI supports Task tool (for subagent dispatch)
+ * Uses heuristic detection based on client name + capability negotiation
+ */
+export function isSubagentDispatchSupported(): boolean {
+  // If explicitly enabled via env var, return true
+  if (process.env.KEVLAR_ENABLE_SUBAGENT === "true") return true;
+
+  // If client info is not available, cannot detect
+  if (!clientInfo?.name) return false;
+
+  // Heuristic detection based on known clients that support Task/subagent
+  const name = clientInfo.name.toLowerCase();
+  if (name.includes("opencode")) return true;
+  if (name.includes("claude-code") || name.includes("cline")) return true;
+  if (name.includes("workbuddy") || name.includes("cursor")) return true;
+
+  // TODO: Add runtime detection in future (send test prompt to verify)
+  return false;
+}
+
 // ── Composite Capability Query (MECP §1) ──────────────────────────────────────
 
 export function getCapabilities(): Capabilities {
