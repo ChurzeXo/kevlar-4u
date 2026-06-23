@@ -29,11 +29,11 @@ export function resolveSamplingFn(
 
   const cv = deps.getClientVersion();
   if (!cv) {
-    logger.debug("No client version info available, sampling disabled", { event: "sampling_no_client" });
+    logger.info("No client version info available, sampling disabled", { event: "sampling_no_client" });
     return undefined;
   }
 
-  logger.debug("Resolving sampling support", {
+  logger.info("Resolving sampling support", {
     event: "sampling_resolve",
     clientName: cv.name,
     clientVersion: cv.version,
@@ -42,7 +42,7 @@ export function resolveSamplingFn(
 
   setClientInfo(cv.name, cv.version);
   if (!isSamplingSupported(cv.name)) {
-    logger.debug("Client not in sampling whitelist", {
+    logger.info("Client not in sampling whitelist", {
       event: "sampling_not_whitelisted",
       clientName: cv.name,
     });
