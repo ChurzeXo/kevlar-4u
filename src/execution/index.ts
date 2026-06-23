@@ -159,10 +159,6 @@ async function resolveMode(): Promise<ExecutionMode> {
 
   // 3. Select first available by priority
   const sorted = [...handlers].sort((a, b) => a.priority - b.priority);
-  logger.info("Auto-resolving execution mode (priority order)", {
-    event: "mode_auto_resolve",
-    candidates: sorted.map(h => ({ mode: h.mode, priority: h.priority, canExecute: h.canExecute() })),
-  });
   for (const h of sorted) {
     if (h.canExecute()) {
       logger.debug("Auto-resolved mode", { event: "mode_auto", mode: h.mode });

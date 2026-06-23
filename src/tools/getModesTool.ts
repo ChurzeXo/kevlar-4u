@@ -7,9 +7,9 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ToolResult } from "../utils/types.js";
 import { getModesInfo } from "../execution/index.js";
-import { readConfigAsync } from "../execution/config.js";
+import { readConfig } from "../execution/config.js";
 import { hasApiKey } from "../execution/modes/direct_api.js";
-import { getSamplingClientList, isSamplingSupported, getCapabilitiesSummary } from "../execution/client.js";
+import { isSamplingSupported, getCapabilitiesSummary } from "../execution/client.js";
 import type { ToolModule } from "./types.js";
 
 // ── Static Labels ──────────────────────────────────────────────────────────────
@@ -61,12 +61,11 @@ function formatReason(
   defaultDesc: string,
   apiKeyConfigured: boolean,
   samplingSupported: boolean,
-  samplingClients: string[],
 ): string {
   if (available) return defaultDesc;
 
   if (mode === "mcp_sampling" && !samplingSupported) {
-    return `当前宿主客户端不支持。支持的客户端：${samplingClients.join("、")}`;
+    return "当前宿主客户端未在 initialize 中声明 sampling 能力。";
   }
   if (mode === "direct_api" && !apiKeyConfigured) {
     return "未配置 API Key。请设置 KEVLAR_API_KEY 环境变量。";
@@ -77,18 +76,15 @@ function formatReason(
 
 export async function handleGetModes(): Promise<ToolResult> {
   try {
-    const [modesInfo, config] = await Promise.all([
-      Promise.resolve(getModesInfo()),
-      readConfigAsync(),
-    ]);
-    const samplingClients = getSamplingClientList();
+    const modesInfo = getModesInfo();
+    const config = readConfig();
     const samplingSupported = isSamplingSupported();
     const apiKeyConfigured = hasApiKey();
 
     const rows = modesInfo.modes.map((m) => {
       const label = MODE_LABELS[m.mode] ?? { name: m.mode, desc: "" };
       const status = formatStatus(m.mode, m.available);
-      const reason = formatReason(m.mode, m.available, label.desc, apiKeyConfigured, samplingSupported, samplingClients);
+      const reason = formatReason(m.mode, m.available, label.desc, apiKeyConfigured, samplingSupported);
       return `| ${label.name} | ${status} | ${reason} |`;
     });
 

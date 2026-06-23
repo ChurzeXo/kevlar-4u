@@ -12,7 +12,7 @@ import {
 } from "../execution/modes/orchestration.js";
 
 import { hasApiKey, maskApiKey } from "../execution/modes/direct_api.js";
-import { setClientInfo, isSamplingSupported, getSamplingClientList } from "../execution/client.js";
+import { setClientInfo, setClientCapabilities, isSamplingSupported } from "../execution/client.js";
 import { setConfigPath, readConfig, updateConfig, isValidMode, isValidConcurrency } from "../execution/config.js";
 import { RateLimiter, withRetry, isRetryableError } from "../execution/limiter.js";
 import { ResultAggregator, generateAggregatedReport, estimateTokenCost, checkBudget } from "../execution/aggregator.js";
@@ -123,26 +123,30 @@ describe("maskApiKey", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("isSamplingSupported", () => {
-  it("returns true for claude-ai", () => {
-    assert.ok(isSamplingSupported("claude-ai"));
-    assert.ok(isSamplingSupported("Claude-AI"));
+  it("returns true when client capabilities include sampling", () => {
+    setClientCapabilities({ sampling: {} });
+    assert.ok(isSamplingSupported());
   });
 
-  it("returns false for unknown clients", () => {
-    assert.ok(!isSamplingSupported("unknown-client"));
+  it("returns false when client capabilities do not include sampling", () => {
+    setClientCapabilities({});
+    assert.ok(!isSamplingSupported());
   });
 
-  it("returns false when no client info is set", () => {
-    setClientInfo("unknown");
+  it("returns false when no client capabilities are set", () => {
+    setClientCapabilities(null);
     assert.ok(!isSamplingSupported());
   });
 });
 
-describe("getSamplingClientList", () => {
-  it("returns an array with claude-ai", () => {
-    const list = getSamplingClientList();
-    assert.ok(Array.isArray(list));
-    assert.ok(list.includes("claude-ai"));
+describe("KEVLAR_ENABLE_SAMPLING override", () => {
+  it("returns true when KEVLAR_ENABLE_SAMPLING=true", () => {
+    process.env.KEVLAR_ENABLE_SAMPLING = "true";
+    try {
+      assert.ok(isSamplingSupported());
+    } finally {
+      delete process.env.KEVLAR_ENABLE_SAMPLING;
+    }
   });
 });
 
@@ -485,7 +489,7 @@ describe("executeReview", () => {
   describe("mcp_sampling mode", () => {
     beforeEach(() => {
       // Set client to claude-ai so isSamplingSupported() returns true
-      setClientInfo("claude-ai");
+      setClientCapabilities({ sampling: {} });
     });
 
     it("throws when samplingFn not provided", async () => {
@@ -516,7 +520,7 @@ describe("executeReview", () => {
 
   it("throws when mode not available (client not supported)", async () => {
     // Set client to unknown
-    setClientInfo("unknown-client");
+    setClientCapabilities({});
     
     await assert.rejects(
       async () => {
@@ -906,7 +910,7 @@ describe("samplingHandler", () => {
   });
 
   afterEach(() => {
-    setClientInfo("unknown");
+    setClientCapabilities({});
     if (previousEnv === undefined) delete process.env.KEVLAR_ENABLE_SAMPLING;
     else process.env.KEVLAR_ENABLE_SAMPLING = previousEnv;
   });
@@ -917,23 +921,23 @@ describe("samplingHandler", () => {
   });
 
   it("canExecute returns true when client supports sampling", () => {
-    setClientInfo("claude-ai");
+    setClientCapabilities({ sampling: {} });
     assert.ok(samplingHandler.canExecute());
   });
 
   it("canExecute returns false when client does not support sampling", () => {
-    setClientInfo("unknown-client");
+    setClientCapabilities({});
     assert.ok(!samplingHandler.canExecute());
   });
 
   it("canExecute returns true when KEVLAR_ENABLE_SAMPLING=true", () => {
-    setClientInfo("unknown-client");
+    setClientCapabilities({});
     process.env.KEVLAR_ENABLE_SAMPLING = "true";
     assert.ok(samplingHandler.canExecute());
   });
 
   it("throws when no samplingFn provided on execute", async () => {
-    setClientInfo("claude-ai");
+    setClientCapabilities({ sampling: {} });
     await assert.rejects(
       () => samplingHandler.execute({
         skillsDir: "/tmp",
@@ -945,7 +949,7 @@ describe("samplingHandler", () => {
   });
 
   it("executes with samplingFn", async () => {
-    setClientInfo("claude-ai");
+    setClientCapabilities({ sampling: {} });
     const result = await samplingHandler.execute({
       skillsDir: "/tmp",
       personas: [makePersona("p1", "A"), makePersona("p2", "B")],

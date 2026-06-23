@@ -14,6 +14,7 @@ import { logger } from "./utils/logger.js";
 import { formatErrorResponse } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
+import { setClientInfo, setClientCapabilities } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
 import { SERVER_INSTRUCTIONS } from "./prompts/instructions.js";
@@ -130,11 +131,22 @@ async function buildToolDependencies(
   const proLoader = new DynamicImportProRuntimeLoader();
   const strategyProvider = await resolveStrategyProvider(proLoader, skillsDir);
 
+  // Eagerly capture client capabilities for isSamplingSupported() checks
+  const clientVersion = underlyingServer.getClientVersion();
+  if (clientVersion) {
+    setClientInfo(clientVersion.name, clientVersion.version);
+  }
+  const clientCaps = underlyingServer.getClientCapabilities();
+  if (clientCaps) {
+    setClientCapabilities(clientCaps);
+  }
+
   return {
     skillsDir,
     tmpDir,
     resolveSamplingFn: () => resolveSamplingFn({
       getClientVersion: () => underlyingServer.getClientVersion(),
+      getClientCapabilities: () => underlyingServer.getClientCapabilities(),
       createFn: () => createMultiTurnSamplingFn(underlyingServer),
     }),
     sendProgress: (message: string) => {

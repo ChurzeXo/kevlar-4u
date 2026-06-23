@@ -19,49 +19,32 @@ export interface Capabilities {
   toolCalling: CapabilityDetail;
 }
 
-// ── Sampling-Supported Clients ─────────────────────────────────────────────────
-
-const SAMPLING_CLIENTS = new Set([
-  "claude-ai",
-  "cursor",
-  "claude-code",
-  "codebuddycn",
-  "codebuddy",
-  "workbuddy",
-  "leader-bridge",
-]);
-
-const STRUCTURED_OUTPUT_CLIENTS = new Set([
-  "claude-ai",
-  "claude-code",
-]);
-
 // ── Client Info Store ─────────────────────────────────────────────────────────
 
 let clientInfo: { name: string; version?: string } | null = null;
+let clientCapabilities: Record<string, unknown> | null = null;
 
 export function setClientInfo(name: string, version?: string): void {
   clientInfo = { name: name.toLowerCase(), version };
 }
 
+export function setClientCapabilities(caps: Record<string, unknown> | null): void {
+  clientCapabilities = caps;
+}
+
 // ── Individual Capability Checks ──────────────────────────────────────────────
 
-export function isSamplingSupported(clientName?: string): boolean {
+export function isSamplingSupported(): boolean {
   if (process.env.KEVLAR_ENABLE_SAMPLING === "true") return true;
 
-  const name = clientName ?? clientInfo?.name;
-  if (!name) return false;
-  return SAMPLING_CLIENTS.has(name.toLowerCase());
+  // Primary: check client-declared MCP capabilities (spec §5.2)
+  if (clientCapabilities?.sampling !== undefined) return true;
+
+  return false;
 }
 
-export function isStructuredOutputSupported(clientName?: string): boolean {
-  const name = clientName ?? clientInfo?.name;
-  if (!name) return true; // most modern LLMs support JSON mode
-  return STRUCTURED_OUTPUT_CLIENTS.has(name.toLowerCase());
-}
-
-export function getSamplingClientList(): string[] {
-  return Array.from(SAMPLING_CLIENTS);
+export function isStructuredOutputSupported(): boolean {
+  return clientCapabilities?.structuredOutput !== undefined;
 }
 
 // ── Composite Capability Query (MECP §1) ──────────────────────────────────────
