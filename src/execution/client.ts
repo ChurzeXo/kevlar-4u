@@ -59,8 +59,10 @@ export function isSubagentDispatchSupported(): boolean {
   if (!clientInfo?.name) return false;
 
   // Heuristic detection based on known clients that support Task/subagent
+  // NOTE: OpenCode supports Task tools, but actual capability depends on the
+  // underlying model (e.g. DeepSeek cannot autonomously dispatch subagents).
+  // OpenCode users must explicitly set KEVLAR_ENABLE_SUBAGENT=true to opt-in.
   const name = clientInfo.name.toLowerCase();
-  if (name.includes("opencode")) return true;
   if (name.includes("claude-code") || name.includes("cline")) return true;
   if (name.includes("workbuddy") || name.includes("cursor")) return true;
 

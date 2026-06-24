@@ -128,6 +128,8 @@ export interface ExecutionHandler {
   mode: ExecutionMode;
   /** Check if current environment supports this mode */
   canExecute(): boolean;
+  /** Get specific reason why it cannot be executed */
+  getReason?: () => string;
   /** Execute the review */
   execute(ctx: ExecutionContext): Promise<ExecutionResult>;
   /** Default priority (lower number = higher priority) */

@@ -138,6 +138,12 @@ export async function executeReview(
 // ── Mode Resolution ──────────────────────────────────────────────────────────
 
 async function resolveMode(): Promise<ExecutionMode> {
+  // Helper to check if a mode can execute
+  const canExec = (modeName: ExecutionMode) => {
+    const h = handlers.find(h => h.mode === modeName);
+    return h ? h.canExecute() : false;
+  };
+
   // 1. Check persisted config (user preference, highest priority)
   const config = readConfig();
   if (config.mode && config.mode !== "auto") {
@@ -147,6 +153,9 @@ async function resolveMode(): Promise<ExecutionMode> {
         mode: config.mode,
       });
     } else {
+      if (!canExec(config.mode)) {
+        logger.warn(`Persisted mode ${config.mode} cannot execute in current environment. Will be silently downgraded.`, { event: "mode_silent_downgrade", mode: config.mode });
+      }
       logger.debug("Using persisted mode", { event: "mode_persist", mode: config.mode });
       return config.mode;
     }
@@ -155,6 +164,9 @@ async function resolveMode(): Promise<ExecutionMode> {
   // 2. Check KEVLAR_MODE env var (global default, overridden by config)
   const envMode = process.env.KEVLAR_MODE as ResolveableMode | undefined;
   if (envMode && envMode !== "auto" && isValidMode(envMode)) {
+    if (!canExec(envMode)) {
+      logger.warn(`Env var mode ${envMode} cannot execute in current environment. Will be silently downgraded.`, { event: "mode_silent_downgrade", mode: envMode });
+    }
     logger.debug("Using env var mode", { event: "mode_env", mode: envMode });
     return envMode;
   }
@@ -181,7 +193,7 @@ export function getModesInfo(): ModesInfo {
   const modes: ModeStatus[] = handlers.map((h) => ({
     mode: h.mode,
     available: h.canExecute(),
-    reason: h.canExecute() ? undefined : "当前环境不支持",
+    reason: h.canExecute() ? undefined : (h.getReason ? h.getReason() : "当前环境不支持"),
   }));
 
   // Determine recommended mode

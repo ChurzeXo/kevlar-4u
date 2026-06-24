@@ -29,6 +29,10 @@ export const subagentHandler: ExecutionHandler = {
     return isSubagentDispatchSupported();
   },
 
+  getReason(): string {
+    return "未检测到兼容客户端，或未显式设置 KEVLAR_ENABLE_SUBAGENT=true";
+  },
+
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     // This handler doesn't execute the review itself.
     // Instead, it returns a prompt that instructs the host AI

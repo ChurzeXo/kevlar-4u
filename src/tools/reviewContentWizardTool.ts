@@ -369,6 +369,7 @@ async function advanceWizard(
         systemAuditors,
         userMessage,
         samplingFn,
+        sendProgress,
         strategyProvider,
       );
 
@@ -577,6 +578,7 @@ async function handleOrchestrationStep0Result(
   systemAuditors: Persona[],
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
+  sendProgress?: (message: string) => void,
   strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   try {
@@ -631,8 +633,14 @@ async function handleOrchestrationStep0Result(
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
 
+    if (state.mode === "mcp_subagent" && !isSubagentDispatchSupported()) {
+      sendProgress?.("系统检测到当前环境未显式启用并行调度能力，已自动降级为 orchestration (宿主辅助兜底) 模式进行处理。");
+      logger.warn("Downgrading mcp_subagent to orchestration due to missing capability", { event: "mode_downgrade" });
+      state.mode = "orchestration";
+    }
+
     // Check if we should use subagent dispatch mode
-    if (state.mode === "mcp_subagent" && isSubagentDispatchSupported()) {
+    if (state.mode === "mcp_subagent") {
       const dispatchPrompt = buildSubagentDispatchPromptForWizard({
         content: state.content,
         bareText: stripped.bare,

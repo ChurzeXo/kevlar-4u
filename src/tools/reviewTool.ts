@@ -4,7 +4,7 @@ import { executeReview, loadPersonasForReview, MAX_PERSONAS } from "../execution
 import type { ExecutionContext, ResolveableMode, ReviewRunContext, SamplingFunction } from "../execution/base.js";
 import type { DimensionsConfig } from "../execution/dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG } from "../execution/dimensions.js";
-import { getErrorInfo } from "../utils/observability.js";
+import { getErrorInfo, logger } from "../utils/observability.js";
 
 const MAX_CONTENT_LENGTH = 100_000;
 const MAX_CONTEXT_LENGTH = 5_000;
@@ -195,7 +195,13 @@ export async function handleReviewContent(
       tier: input.tier,
     };
 
-    const result = await executeReview(mode, ctx);
+    let resolvedMode = mode;
+    if (resolvedMode === "mcp_subagent") {
+      logger.warn("Downgrading mcp_subagent to orchestration in legacy review tool", { event: "mode_downgrade" });
+      resolvedMode = "orchestration";
+    }
+
+    const result = await executeReview(resolvedMode, ctx);
     const continuationNote = buildContinuationNote(remainingPersonas);
 
     return {

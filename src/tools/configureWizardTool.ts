@@ -53,6 +53,7 @@ const MODE_RULES: ReadonlyArray<{
 }> = [
 	{ pattern: /direct[\s_-]*api|直接\s*api|直连/i, mode: "direct_api" },
 	{ pattern: /mcp[\s_-]*sampling|sampling|采样/i, mode: "mcp_sampling" },
+	{ pattern: /mcp[\s_-]*subagent|subagent|子代理|并行调度/i, mode: "mcp_subagent" },
 	{ pattern: /orchestration|编排|兜底|宿主辅助/i, mode: "orchestration" },
 	{ pattern: /auto|自动/i, mode: "auto" },
 ];
@@ -157,10 +158,15 @@ function validatePending(pending: ConfigureInput): void {
 	}
 }
 
+import { isSubagentDispatchSupported } from "../execution/client.js";
+
 function buildPreviewMessage(pending: ConfigureInput): string {
 	const lines = ["准备修改配置：", ""];
 	if (pending.mode) {
 		lines.push(`- 执行模式：${modeLabel(pending.mode)}`);
+		if (pending.mode === "mcp_subagent" && !isSubagentDispatchSupported()) {
+			lines.push(`  ⚠️ 警告：系统检测到当前环境未显式启用并行调度。请确保您使用的是兼容客户端或已设置 KEVLAR_ENABLE_SUBAGENT=true，否则执行时将自动降级。`);
+		}
 	}
 	if (pending.maxConcurrency !== undefined) {
 		lines.push(`- 并发数：${pending.maxConcurrency}`);
