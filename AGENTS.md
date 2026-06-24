@@ -246,8 +246,8 @@ Host github-churzexo
 ## User Identity
 
 ```
-git config user.name  → Qiuzer
-git config user.email → churze.9@gmail.com
+git config user.name  → ChurzeXo
+git config user.email → c0529q@gmail.com
 ```
 
 ## Key Paths
