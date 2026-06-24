@@ -213,3 +213,53 @@ cd src/pro && npm i --legacy-peer-deps && npx tsc && npm test && git push
 cd ../.. && npm run commit:pro
 npm publish --registry=https://npm.pkg.github.com  # from src/pro/
 ```
+
+---
+
+# Git Configuration
+
+## SSH Host Mapping
+
+This project uses the `ChurzeXo` GitHub account. SSH is configured in `~/.ssh/config`:
+
+```
+# ChurzeXo 账号
+Host github-churzexo
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_churzexo
+```
+
+> **Multi-account note**: The `9Churze` account uses `~/.ssh/id_ed25519` via `Host github-9churze`. Never mix keys — the remote URL's host alias determines which key is used. This repo's remote is `git@github-churzexo:ChurzeXo/kevlar-4u.git` so it always uses the ChurzeXo key.
+
+## Remote
+
+| Name | URL |
+|---|---|
+| `origin` | `git@github-churzexo:ChurzeXo/kevlar-4u.git` |
+
+## Branch
+
+- Default: `main`
+- Always push/commit to `main` unless explicitly working on a feature branch.
+
+## User Identity
+
+```
+git config user.name  → Qiuzer
+git config user.email → churze.9@gmail.com
+```
+
+## Key Paths
+
+| Account | Key |
+|---|---|
+| ChurzeXo | `~/.ssh/id_ed25519_churzexo` |
+| 9Churze (default) | `~/.ssh/id_ed25519` |
+
+## Multi-Account Rules
+
+1. **Never change the remote URL** — the host alias `github-churzexo` is the only thing binding this repo to the correct SSH key.
+2. **If cloning fresh**, use `git clone git@github-churzexo:ChurzeXo/kevlar-4u.git` (not the HTTPS URL or default `git@github.com:...`).
+3. **Before any `git push`**, verify `git remote -v` shows `github-churzexo` as the host.
+4. **Do not run `git config` commands** that change `user.name` or `user.email` at the repo level — the global defaults are correct for this repo.
