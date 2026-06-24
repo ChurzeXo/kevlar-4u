@@ -55,12 +55,14 @@ const SYNERGY_RULES: SynergyRule[] = [
 export function calculateSynergy(
   dimensionLevels: Record<string, string>,
   extraFlags?: string[],
+  customRules?: SynergyRule[],
 ): SynergyResult {
+  const rules = customRules && customRules.length > 0 ? customRules : SYNERGY_RULES;
   const details: SynergyResult['details'] = [];
   const levelUpgrades: SynergyResult['levelUpgrades'] = [];
   let overallMultiplier = 1.0;
 
-  for (const rule of SYNERGY_RULES) {
+  for (const rule of rules) {
     let matched: boolean;
 
     if (rule.dimensions.includes('timing_risk')) {

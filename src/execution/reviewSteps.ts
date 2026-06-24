@@ -76,6 +76,14 @@ export interface ReviewStepContext {
     details?: Array<{ rule: any; matched: boolean }>;
   };
   prompts?: PromptSegments;
+  /** Bundle-delivered synergy rules (overrides hardcoded defaults). */
+  synergyRules?: Array<{
+    dimensions: string[];
+    condition: "ALL" | "ANY";
+    multiplier: number;
+    upgradeLevel: boolean;
+    label: string;
+  }>;
 }
 
 export interface ReviewStepResult {
@@ -586,7 +594,7 @@ export const stepSynergyWeighting: InlineStep = {
       dimensionLevels[dim.id] = dim.level ?? "🟢";
     }
     const timingFlag = ctx.localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
-    const synergy = calculateSynergy(dimensionLevels, timingFlag);
+    const synergy = calculateSynergy(dimensionLevels, timingFlag, ctx.synergyRules);
     ctx.synergy = synergy;
     return { stepId: "synergy_weighting", output: synergy };
   },
@@ -702,6 +710,13 @@ export async function executeFullPipeline(
   timingContext?: string,
   sendProgress?: (message: string) => void,
   prompts?: PromptSegments,
+  synergyRules?: Array<{
+    dimensions: string[];
+    condition: "ALL" | "ANY";
+    multiplier: number;
+    upgradeLevel: boolean;
+    label: string;
+  }>,
 ): Promise<PreAuditReport> {
   const emit = (msg: string) => {
     try {
@@ -750,7 +765,7 @@ export async function executeFullPipeline(
     dimensionLevels[dim.id] = dim.level ?? "🟢";
   }
   const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
-  const synergy = calculateSynergy(dimensionLevels, timingFlag);
+  const synergy = calculateSynergy(dimensionLevels, timingFlag, synergyRules);
 
   // Step 8: Final arbitration
   emit("⚖️ [4/4] 正在进行最终仲裁（Step 8）...");

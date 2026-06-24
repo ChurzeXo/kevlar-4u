@@ -37,13 +37,6 @@ import {
   type AuditLlmCaller,
   type PreAuditDimensionResult,
   type PreAuditReport,
-  type ReviewStepId,
-  type ReviewStepKind,
-  type BaseReviewStep,
-  type InlineStep,
-  type OrchestrationTurnStep,
-  type ReviewStepContext,
-  type ReviewStepResult,
   getFindingsLevel,
   buildEmptyDeltaRisks,
   normalizePreAuditDimensions,
@@ -53,17 +46,6 @@ import {
   finalizePreAuditReport,
   runSystemAuditors,
   executeFullPipeline,
-  stepStripContext,
-  stepBareAudit,
-  stepFullAudit,
-  stepDeltaAnalysis,
-  stepMergeLocalFindings,
-  stepCrossValidation,
-  stepSynergyWeighting,
-  stepFinalArbitration,
-  orchestrationStep0,
-  orchestrationAudit,
-  orchestrationFinal,
 } from "../execution/reviewSteps.js";
 
 
@@ -385,13 +367,14 @@ async function advanceWizard(
         systemAuditors,
         userMessage,
         samplingFn,
+        input.strategyProvider,
       );
 
     case "waitingForSubagentAudit":
-      return handleSubagentAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
+      return handleSubagentAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, input.strategyProvider);
 
     case "waitingForOrchestrationAudit":
-      return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
+      return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, input.strategyProvider);
 
     case "waitingForOrchestrationFinal":
       return handleOrchestrationFinalResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);
@@ -592,6 +575,7 @@ async function handleOrchestrationStep0Result(
   systemAuditors: Persona[],
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
+  strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
@@ -678,6 +662,7 @@ async function handleOrchestrationStep0Result(
         precedents,
         timingContext,
         undefined, // sendProgress not available in orchestration path
+        strategyProvider,
       );
       state.preAuditReport = preAuditReport;
       state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
@@ -755,6 +740,7 @@ async function executeLlmSystemAudit(
   precedents?: Precedent[],
   timingContext?: string,
   sendProgress?: (message: string) => void,
+  strategyProvider?: StrategyProvider,
 ): Promise<PreAuditReport> {
   const prompts = await resolvePromptSegments();
   return executeFullPipeline(
@@ -768,6 +754,7 @@ async function executeLlmSystemAudit(
     timingContext,
     sendProgress,
     prompts,
+    strategyProvider?.getSynergyRules?.(),
   );
 }
 
@@ -778,6 +765,7 @@ async function handleOrchestrationAuditResult(
   systemAuditors: Persona[],
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
+  strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
@@ -795,7 +783,7 @@ async function handleOrchestrationAuditResult(
       dimensionLevels[dim.id] = dim.level ?? "🟢";
     }
     const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
-    const synergyResult = calculateSynergy(dimensionLevels, timingFlag);
+    const synergyResult = calculateSynergy(dimensionLevels, timingFlag, strategyProvider?.getSynergyRules?.());
 
     // Extract deltaRisks from Turn 2 (with fallback)
     const deltaRisks = parsed.deltaRisks ?? buildEmptyDeltaRisks();
@@ -859,6 +847,7 @@ async function handleSubagentAuditResult(
   systemAuditors: Persona[],
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
+  strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
@@ -940,7 +929,7 @@ async function handleSubagentAuditResult(
       dimensionLevels[dim.id] = dim.level ?? "🟢";
     }
     const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
-    const synergyResult = calculateSynergy(dimensionLevels, timingFlag);
+    const synergyResult = calculateSynergy(dimensionLevels, timingFlag, strategyProvider?.getSynergyRules?.());
 
     // ── Step 8: Final arbitration (LLM step, fallback if host didn't do it) ───
     let preAuditReport: PreAuditReport;

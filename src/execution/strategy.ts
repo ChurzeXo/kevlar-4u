@@ -53,6 +53,14 @@ export interface StrategyProvider {
   getPromptTemplate?(id: string, ctx?: StrategyContext): Promise<string | null>;
   getWeights?(ctx?: StrategyContext): Promise<SynergyWeights>;
   getVisibilityPolicy?(ctx?: StrategyContext): Promise<ReviewPlan["visibility"]>;
+  /** Returns bundle-delivered synergy rules, or undefined to use hardcoded defaults. */
+  getSynergyRules?(): Array<{
+    dimensions: string[];
+    condition: "ALL" | "ANY";
+    multiplier: number;
+    upgradeLevel: boolean;
+    label: string;
+  }>;
 }
 
 const FREE_PLAN: ReviewPlan = {
