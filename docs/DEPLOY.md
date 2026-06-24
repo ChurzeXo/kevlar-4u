@@ -206,7 +206,11 @@ npm publish 只推送包到 registry。`check_update` 查版本和 Pro 激活都
 
 ### 5.1 Admin Token
 
-`POST /api/v1/admin/version` 需要 admin token。通过 `ADMIN_API_TOKEN` 环境变量配置（开发环境默认值：`kevlar-admin-api-dev`）。
+`POST /api/v1/admin/version` 需要 admin token，由 `ADMIN_API_TOKEN` 环境变量控制。
+
+**开发环境默认值**：`kevlar-admin-api-dev`（无需在 Vercel 额外设置即生效）。
+
+**生产环境**：需自行生成并在 Vercel Environment Variables 面板配置。
 
 生成随机 token：
 
@@ -214,16 +218,35 @@ npm publish 只推送包到 registry。`check_update` 查版本和 Pro 激活都
 openssl rand -hex 32
 ```
 
-Vercel 部署时在 Environment Variables 面板设置 `ADMIN_API_TOKEN`。
+**本地执行 curl 时**，避免 token 写入 shell 历史：
+
+```bash
+# 方式一：环境变量注入（推荐）
+ADMIN_API_TOKEN="kevlar-admin-api-dev" bash -c 'curl -s -X POST https://kevlar4u.xyz/api/v1/admin/version \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  -d "{\"version\":\"1.6.7\",\"changelog\":\"...\",\"breaking\":false}"'
+
+# 方式二：写入 .env（不提交到 git）
+echo 'ADMIN_API_TOKEN=kevlar-admin-api-dev' >> .env
+source .env
+curl -s ... -H "Authorization: Bearer $ADMIN_API_TOKEN" ...
+```
+
+> **注意**：`ADMIN_API_TOKEN` 是后端环境变量，不存储在 kevlar-4u 仓库中。开发环境默认值仅用于本地测试。
 
 ### 5.2 更新版本号
 
 每次发布新版本后执行：
 
 ```bash
+# 方式一：npm 命令（推荐）
+ADMIN_API_TOKEN="kevlar-admin-api-dev" npm run sync:backend -- "更新摘要"
+
+# 方式二：curl 直接调用
 curl -s -X POST https://kevlar4u.xyz/api/v1/admin/version \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <ADMIN_API_TOKEN>" \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   -d '{"version":"1.6.2","changelog":"更新摘要","breaking":false}'
 ```
 

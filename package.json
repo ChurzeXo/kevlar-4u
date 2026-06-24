@@ -52,6 +52,7 @@
     "test": "tsx --test src/__tests__/*.test.ts",
     "test:watch": "tsx --test --watch src/__tests__/*.test.ts",
     "commit:pro": "node ./scripts/sync-pro-submodule.js",
+    "sync:backend": "node ./scripts/sync-backend-version.js",
     "prepublishOnly": "if [ -z \"$CI\" ]; then echo '⚠️  请通过 CI 发布：git tag vX.X.X && git push origin vX.X.X'; exit 1; fi"
   },
   "files": [
