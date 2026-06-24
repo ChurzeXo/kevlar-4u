@@ -12,6 +12,7 @@ import { isValidSessionId } from "../utils/sessionId.js";
 import type { ToolModule } from "./types.js";
 import { RuleRepository } from "../dao/RuleRepository.js";
 import { isPro } from "../subscription/tier.js";
+import { readConfig, isValidMode } from "../execution/config.js";
 import { SaaSClient } from "../utils/saasClient.js";
 import { checkForUpdate } from "./checkUpdateTool.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
@@ -30,7 +31,7 @@ import {
   type Precedent,
   type Step0Result,
 } from "../prompts/reviewWizard.js";
-import { isSubagentDispatchSupported } from "../execution/client.js";
+import { isSubagentDispatchSupported, isSamplingSupported } from "../execution/client.js";
 import { buildSubagentDispatchPromptForWizard } from "../execution/modes/subagent.js";
 import {
   type AuditLlmCaller,
@@ -273,6 +274,30 @@ export async function handleReviewContentWizard(
       state.tier = plan.tier;
       state.strategySessionId = plan.strategySessionId;
       state.strategyHash = plan.strategyHash;
+
+      // Resolve execution mode once for the session (mirrors resolveMode() in index.ts)
+      if (state.mode === undefined) {
+        const config = readConfig();
+        if (config.mode && config.mode !== "auto" && isValidMode(config.mode)) {
+          state.mode = config.mode;
+        } else {
+          const envMode = process.env.KEVLAR_MODE as string | undefined;
+          if (envMode && envMode !== "auto" && isValidMode(envMode)) {
+            state.mode = envMode as ExecutionMode;
+          } else {
+            // Auto-detect by priority
+            if (isSamplingSupported()) {
+              state.mode = "mcp_sampling";
+            } else if (isSubagentDispatchSupported()) {
+              state.mode = "mcp_subagent";
+            } else if (hasApiKey()) {
+              state.mode = "direct_api";
+            } else {
+              state.mode = "orchestration";
+            }
+          }
+        }
+      }
     } else if (state.strategySessionId) {
       // Reconstruct plan from frozen state (no re-resolution)
       plan = {
