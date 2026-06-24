@@ -240,10 +240,13 @@ curl -s ... -H "Authorization: Bearer $ADMIN_API_TOKEN" ...
 每次发布新版本后执行：
 
 ```bash
-# 方式一：npm 命令（推荐）
+# 方式一：一键发布（推荐）
+ADMIN_API_TOKEN="kevlar-admin-api-dev" npm run deploy:all -- "更新摘要"
+
+# 方式二：npm 命令
 ADMIN_API_TOKEN="kevlar-admin-api-dev" npm run sync:backend -- "更新摘要"
 
-# 方式二：curl 直接调用
+# 方式三：curl 直接调用
 curl -s -X POST https://kevlar4u.xyz/api/v1/admin/version \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $ADMIN_API_TOKEN" \
