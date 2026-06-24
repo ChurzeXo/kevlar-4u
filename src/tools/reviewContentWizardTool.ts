@@ -313,6 +313,7 @@ export async function handleReviewContentWizard(
       input.samplingFn,
       input.sendProgress,
       plan,
+      strategyProvider,
     );
   } catch (err) {
     const info = getErrorInfo(err);
@@ -338,6 +339,7 @@ async function advanceWizard(
   samplingFn?: MultiTurnSamplingFunction,
   sendProgress?: (message: string) => void,
   plan?: ReviewPlan,
+  strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   switch (state.step) {
     case "waitingForRegionSelection": {
@@ -346,7 +348,7 @@ async function advanceWizard(
       if ((result as any).stepAdvanced) {
         await saveState(tmpDir, state);
         // Tail call: re-enter advanceWizard with the new step
-        return advanceWizard(skillsDir, tmpDir, state, personas, systemAuditors, "", samplingFn, sendProgress, plan);
+        return advanceWizard(skillsDir, tmpDir, state, personas, systemAuditors, "", samplingFn, sendProgress, plan, strategyProvider);
       }
       return result;
     }
@@ -367,14 +369,14 @@ async function advanceWizard(
         systemAuditors,
         userMessage,
         samplingFn,
-        input.strategyProvider,
+        strategyProvider,
       );
 
     case "waitingForSubagentAudit":
-      return handleSubagentAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, input.strategyProvider);
+      return handleSubagentAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, strategyProvider);
 
     case "waitingForOrchestrationAudit":
-      return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, input.strategyProvider);
+      return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, strategyProvider);
 
     case "waitingForOrchestrationFinal":
       return handleOrchestrationFinalResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn);

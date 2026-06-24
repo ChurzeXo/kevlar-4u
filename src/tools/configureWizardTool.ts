@@ -264,6 +264,7 @@ function modeLabel(mode: NonNullable<ConfigureInput["mode"]>): string {
 		auto: "自动",
 		orchestration: "宿主辅助兜底模式",
 		mcp_sampling: "MCP 采样模式",
+		mcp_subagent: "MCP Subagent 并行调度模式",
 		direct_api: "直接 API 模式",
 	};
 	return labels[mode];
