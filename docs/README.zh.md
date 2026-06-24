@@ -402,7 +402,7 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 | 4 | 代码 | Delta 分析 — 内联于 `executeLlmSystemAudit()`，对比 bare vs full 发现，提取脱嵌放大型风险和全文特有风险 |
 | 5 | 代码 | 合并 — 本地规则 findings 注入 `network_culture_risk` 维度（纯内存合并，无二次联网） |
 | 6 | LLM | 交叉验证 — 跨维度互验（6 对：network↔context, cross_lingual↔network, social→factual, legal→social） |
-| 7 | 代码 | 协同加权 — `calculateSynergy(dimensionLevels, extraFlags?)` 检测跨维度组合风险，🟡→🔴 升级判定 |
+| 7 | 代码 | 协同加权 — `calculateSynergy(dimensionLevels, extraFlags?, customRules?)` 检测跨维度组合风险，🟡→🔴 升级判定（Pro 从策略包注入自定义规则） |
 | 8 | LLM | 最终仲裁 — 合并重复 findings、强化攻击链、生成 worstCaseNarrative，并输出 precedents 供后续参考 |
 | 9 | 代码 | 结果展示 — 用户看到初审结果（含 📌 类似先例），选择进入复审或平台合规检查 |
 
@@ -417,7 +417,7 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 | Step 4 | `src/tools/reviewContentWizardTool.ts` | 内联于 `executeLlmSystemAudit()` |
 | Step 5 | `src/tools/reviewContentWizardTool.ts` | `mergeLocalFindingsIntoAudits()` |
 | Step 6 | `src/tools/reviewContentWizardTool.ts` | `crossValidateRiskyDimensions()` |
-| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy(dimensionLevels, extraFlags?)` |
+| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy(dimensionLevels, extraFlags?, customRules?)` |
 | Step 8 | `src/tools/reviewContentWizardTool.ts` | `finalizePreAuditReport()` / `buildPreAuditFinalizerPrompt()` |
 
 ### 联网验证说明

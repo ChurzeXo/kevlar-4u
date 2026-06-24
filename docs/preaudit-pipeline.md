@@ -86,9 +86,9 @@ Step 6: 交叉验证
   ▼
 Step 7: 协同加权
 ═══════════════════════════════════════════════════════════════════
-  │  calculateSynergy(dimensionLevels, extraFlags?)
+  │  calculateSynergy(dimensionLevels, extraFlags?, customRules?)
   │  ├─ 检测跨维度组合风险
-  │  └─ 🟡 → 🔴 升级判定
+  │  └─ 🟡 → 🔴 升级判定（Pro 从策略包注入自定义规则）
   │
   │  输出：synergy { triggered, overallMultiplier, levelUpgrades }
   ▼
@@ -138,7 +138,7 @@ Step 9: 结果展示
 | Step 4 | `src/tools/reviewContentWizardTool.ts` | 内联于 `executeLlmSystemAudit()` |
 | Step 5 | `src/tools/reviewContentWizardTool.ts` | `mergeLocalFindingsIntoAudits()` |
 | Step 6 | `src/tools/reviewContentWizardTool.ts` | `crossValidateRiskyDimensions()` |
-| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy(dimensionLevels, extraFlags?)` |
+| Step 7 | `src/execution/synergyCalculator.ts` | `calculateSynergy(dimensionLevels, extraFlags?, customRules?)` |
 | Step 8 | `src/tools/reviewContentWizardTool.ts` | `finalizePreAuditReport()` / `buildPreAuditFinalizerPrompt()` |
 
 ## 联网验证说明
