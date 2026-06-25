@@ -3,7 +3,16 @@
  *
  * Negotiates capabilities with the host client using a versioned schema
  * similar to HTTP content negotiation.
+ *
+ * v3 revision replaces name-based heuristics with an optimistic approach
+ * and adds structured-result classification for host orchestration.
  */
+
+import type {
+  ClientFingerprint,
+  HostStructuredCapabilityStatus,
+  DispatchFailureReason,
+} from "./plan.js";
 
 // ── Capability Interfaces (MECP §1) ────────────────────────────────────────────
 
@@ -24,12 +33,82 @@ export interface Capabilities {
 let clientInfo: { name: string; version?: string } | null = null;
 let clientCapabilities: Record<string, unknown> | null = null;
 
+/**
+ * Lazy provider for client info, invoked on first access when {@link clientInfo}
+ * is still null. Set during server setup; the provider is called at tool
+ * invocation time (after the MCP initialize handshake), not at construction time.
+ */
+let clientInfoProvider: (() => { name: string; version?: string } | null) | null = null;
+
 export function setClientInfo(name: string, version?: string): void {
   clientInfo = { name: name.toLowerCase(), version };
 }
 
+/** Register a lazy getter that will be tried when clientInfo hasn't been set yet. */
+export function setClientInfoProvider(
+  provider: () => { name: string; version?: string } | null,
+): void {
+  clientInfoProvider = provider;
+}
+
 export function setClientCapabilities(caps: Record<string, unknown> | null): void {
   clientCapabilities = caps;
+}
+
+/**
+ * Try to fill clientInfo from the lazy provider if it hasn't been set.
+ * Safe to call multiple times — only fires the provider once.
+ */
+function ensureClientInfo(): void {
+  if (!clientInfo && clientInfoProvider) {
+    const info = clientInfoProvider();
+    if (info) {
+      setClientInfo(info.name, info.version);
+    }
+  }
+}
+
+/**
+ * Lazy provider for client capabilities, invoked on first access when
+ * {@link clientCapabilities} is still null. Same rationale as clientInfo:
+ * set during server setup, called at tool invocation time (after the MCP
+ * initialize handshake).
+ */
+let clientCapabilitiesProvider: (() => Record<string, unknown> | null) | null = null;
+
+/** Register a lazy getter that will be tried when clientCapabilities hasn't been set yet. */
+export function setClientCapabilitiesProvider(
+  provider: () => Record<string, unknown> | null,
+): void {
+  clientCapabilitiesProvider = provider;
+}
+
+/** Try to fill clientCapabilities from the lazy provider. Idempotent. */
+function ensureClientCapabilities(): void {
+  if (!clientCapabilities && clientCapabilitiesProvider) {
+    const caps = clientCapabilitiesProvider();
+    if (caps) {
+      setClientCapabilities(caps);
+    }
+  }
+}
+
+// ── Client Fingerprint ────────────────────────────────────────────────────────
+
+/**
+ * Build a lightweight, privacy-safe identifier for the connected Host.
+ *
+ * The fingerprint is used as part of the structured-observation cache key
+ * so that observations about one Host (e.g. "CodeBuddy v2.3") are not
+ * incorrectly applied to another.
+ */
+export function getClientFingerprint(): ClientFingerprint {
+  ensureClientInfo();
+  return {
+    name: clientInfo?.name,
+    version: clientInfo?.version,
+    transport: "stdio", // Kevlar only supports stdio transport
+  };
 }
 
 // ── Individual Capability Checks ──────────────────────────────────────────────
@@ -37,8 +116,22 @@ export function setClientCapabilities(caps: Record<string, unknown> | null): voi
 export function isSamplingSupported(): boolean {
   if (process.env.KEVLAR_ENABLE_SAMPLING === "true") return true;
 
+  // Lazy-init: try the provider if clientCapabilities wasn't set at construction time
+  ensureClientCapabilities();
+
   // Primary: check client-declared MCP capabilities (spec §5.2)
-  if (clientCapabilities?.sampling !== undefined) return true;
+  const hasSampling = clientCapabilities?.sampling !== undefined;
+  if (hasSampling) return true;
+
+  // Fallback: some clients (e.g. WorkBuddy via custom MCP connectors) don't
+  // advertise sampling in capabilities, but do support it. Detect by client name.
+  ensureClientInfo();
+  if (clientInfo?.name) {
+    const name = clientInfo.name;
+    if (name.includes("connector:custom-mcp:") || name.includes("workbuddy")) {
+      return true;
+    }
+  }
 
   return false;
 }
@@ -48,26 +141,27 @@ export function isStructuredOutputSupported(): boolean {
 }
 
 /**
- * Detect if the host AI supports Task tool (for subagent dispatch)
- * Uses heuristic detection based on client name + capability negotiation
+ * Detect if the host AI supports subagent dispatch.
+ *
+ * @deprecated Since v3, this always returns true (optimistic approach).
+ * Kevlar no longer attempts to detect "real" Subagent capability through
+ * name-based heuristics. The Host is always assumed capable of structured
+ * collaboration; actual capability is verified at runtime through the
+ * structured-result classification flow.
+ *
+ * Previously this function used name-based string matching on clientInfo.name
+ * to guess subagent support. That approach had structural problems:
+ * - False negatives for unknown clients
+ * - False positives for clients whose MCP connector doesn't route Task tools
+ * - Conceptual confusion between JSON formatting and real task dispatch
  */
 export function isSubagentDispatchSupported(): boolean {
-  // If explicitly enabled via env var, return true
-  if (process.env.KEVLAR_ENABLE_SUBAGENT === "true") return true;
+  // If explicitly disabled via env var, still honor the override
+  if (process.env.KEVLAR_DISABLE_SUBAGENT === "true") return false;
 
-  // If client info is not available, cannot detect
-  if (!clientInfo?.name) return false;
-
-  // Heuristic detection based on known clients that support Task/subagent
-  // NOTE: OpenCode supports Task tools, but actual capability depends on the
-  // underlying model (e.g. DeepSeek cannot autonomously dispatch subagents).
-  // OpenCode users must explicitly set KEVLAR_ENABLE_SUBAGENT=true to opt-in.
-  const name = clientInfo.name.toLowerCase();
-  if (name.includes("claude-code") || name.includes("cline")) return true;
-  if (name.includes("workbuddy") || name.includes("cursor")) return true;
-
-  // TODO: Add runtime detection in future (send test prompt to verify)
-  return false;
+  // Optimistic: assume the Host can participate in structured collaboration.
+  // Actual capability is verified at runtime via classifyHostStructuredResult().
+  return true;
 }
 
 // ── Composite Capability Query (MECP §1) ──────────────────────────────────────
@@ -89,4 +183,145 @@ export function getCapabilitiesSummary(): string {
   if (caps.structuredOutput.supported) lines.push("structured output");
   if (caps.toolCalling.supported) lines.push("tool calling");
   return lines.length > 0 ? lines.join(", ") : "none detected";
+}
+
+// ── Structured Result Classification ──────────────────────────────────────────
+
+/**
+ * Safe JSON parse that never throws.
+ */
+function tryParseJson(raw: string):
+  | { ok: true; value: unknown }
+  | { ok: false; error: Error } {
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error : new Error("invalid_json") };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Detect explicit host rejection of the structured collaboration protocol.
+ *
+ * Only checks protocol control fields — does NOT scan raw text.
+ * Reviewer findings may contain natural language like "not supported by
+ * evidence" that should NOT be misinterpreted as Host rejection.
+ */
+export function isExplicitHostRejection(parsed: unknown): boolean {
+  if (!isRecord(parsed)) return false;
+  return (
+    parsed.protocol === "kevlar-host-guided/v1" &&
+    parsed.status === "rejected"
+  );
+}
+
+/**
+ * Verify that a parsed JSON object conforms to the Kevlar host-guided
+ * result schema: protocol marker + completed status + non-empty dimensions.
+ */
+export function isKevlarHostGuidedResult(parsed: unknown): boolean {
+  if (!isRecord(parsed)) return false;
+  if (parsed.protocol !== "kevlar-host-guided/v1") return false;
+  if (parsed.status !== "completed") return false;
+  if (!Array.isArray(parsed.dimensions) || parsed.dimensions.length === 0) return false;
+
+  return parsed.dimensions.every((dimension) => {
+    if (!isRecord(dimension)) return false;
+    return (
+      typeof dimension.id === "string" &&
+      dimension.id.length > 0 &&
+      Array.isArray(dimension.findings)
+    );
+  });
+}
+
+/**
+ * Count unclosed JSON structural characters to detect truncation.
+ * Returns the net depth of unclosed { [ structures.
+ */
+function getJsonStructureDepth(raw: string): number {
+  let depth = 0;
+  for (const ch of raw) {
+    if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") depth--;
+  }
+  return Math.max(0, depth);
+}
+
+/**
+ * Rough token count estimation (~4 chars per token for English, ~1.5 for CJK).
+ */
+function estimateTokens(text: string): number {
+  let cjk = 0;
+  let other = 0;
+  for (const ch of text) {
+    if (ch >= "\u4e00" && ch <= "\u9fff") cjk++;
+    else other++;
+  }
+  return Math.ceil(cjk / 1.5 + other / 4);
+}
+
+/**
+ * Heuristic: does the raw response look like it was truncated mid-output?
+ *
+ * Only returns true when multiple signals agree:
+ * - Unclosed JSON structures
+ * - AND (abrupt ending OR near token budget)
+ */
+function looksLikelyTruncated(raw: string, maxTokens?: number): boolean {
+  const trimmed = raw.trim();
+  const hasUnclosedStructure = getJsonStructureDepth(trimmed) > 0;
+  const endsAbruptly = /[:,]$/.test(trimmed) || !/[}\]"'`]$/.test(trimmed);
+  const nearBudget = maxTokens !== undefined && estimateTokens(trimmed) >= maxTokens * 0.9;
+  return hasUnclosedStructure && (endsAbruptly || nearBudget);
+}
+
+/**
+ * Classify the raw text output from a host structured collaboration attempt.
+ *
+ * Four-step judgment:
+ *   1. Empty response → failed / no_response
+ *   2. Invalid JSON → failed / invalid_json (or likely_output_truncated)
+ *   3. Explicit rejection → unsupported / host_rejected
+ *   4. Schema match → format_verified / kevlar_result_schema_matched
+ *
+ * "JSON parseable" is NOT sufficient for schema success.
+ */
+export function classifyHostStructuredResult(
+  raw: string | undefined,
+  options?: { maxTokens?: number },
+): {
+  status: HostStructuredCapabilityStatus;
+  reason: "kevlar_result_schema_matched" | DispatchFailureReason;
+} {
+  if (!raw?.trim()) {
+    return { status: "failed", reason: "no_response" };
+  }
+
+  const parsedResult = tryParseJson(raw);
+
+  if (!parsedResult.ok) {
+    return {
+      status: "failed",
+      reason: looksLikelyTruncated(raw, options?.maxTokens)
+        ? "likely_output_truncated"
+        : "invalid_json",
+    };
+  }
+
+  const parsed = parsedResult.value;
+
+  if (isExplicitHostRejection(parsed)) {
+    return { status: "unsupported", reason: "host_rejected" };
+  }
+
+  if (!isKevlarHostGuidedResult(parsed)) {
+    return { status: "failed", reason: "schema_mismatch" };
+  }
+
+  return { status: "format_verified", reason: "kevlar_result_schema_matched" };
 }

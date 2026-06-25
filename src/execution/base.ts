@@ -5,7 +5,29 @@
 import type { Persona } from "../utils/parser.js";
 import type { DimensionsConfig } from "./dimensions.js";
 
-// ── Execution Mode Types ───────────────────────────────────────────────────────
+// ── Execution Plan Types (v3) ─────────────────────────────────────────────────
+// Re-export the new ExecutionPlan type system from plan.ts.
+// ExecutionMode is kept for backward compatibility — existing code in
+// aggregator.ts, parallel.ts, config.ts, reviewContentWizardTool.ts, and
+// all mode handlers still references it. Migration will be incremental.
+
+export type {
+  ExecutionBackend,
+  ExecutionPlan,
+  HostOrchestrationStrategy,
+  HostStructuredCapabilityStatus,
+  DispatchFailureReason,
+  PreAuditContext,
+  ClientFingerprint,
+  TaskClass,
+  StructuredObservationKey,
+  HostStructuredObservation,
+  SamplingExecutionPolicy,
+} from "./plan.js";
+
+export { DEFAULT_SAMPLING_POLICY } from "./plan.js";
+
+// ── Execution Mode Types (legacy — kept for backward compat) ──────────────────
 
 export type ExecutionMode = "orchestration" | "mcp_sampling" | "direct_api" | "mcp_subagent";
 

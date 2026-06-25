@@ -7,18 +7,24 @@
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { logger } from "../utils/logger.js";
 import { readConfig, isValidMode } from "./config.js";
-import { isSamplingSupported } from "./client.js";
+import { isSamplingSupported, getClientFingerprint } from "./client.js";
+import {
+  getHostStructuredObservation,
+  inferTaskClass,
+} from "./observations.js";
+import type { ClientFingerprint, HostOrchestrationStrategy } from "./plan.js";
 import { orchestrationHandler } from "./modes/orchestration.js";
 import { samplingHandler } from "./modes/sampling.js";
-import { directApiHandler } from "./modes/direct_api.js";
+import { directApiHandler, hasApiKey } from "./modes/direct_api.js";
 import { subagentHandler } from "./modes/subagent.js";
 import { apiCircuitBreaker, CircuitBreakerOpenError } from "./limiter.js";
 import { generateTraceId, generateSpanId, withTraceContext } from "../utils/observability.js";
-import { toFrame } from "./base.js";
+import { toFrame, DEFAULT_SAMPLING_POLICY } from "./base.js";
 import type {
   ExecutionContext,
   ExecutionHandler,
   ExecutionMode,
+  ExecutionPlan,
   ExecutionResult,
   Frame,
   ModesInfo,
@@ -184,6 +190,107 @@ async function resolveMode(): Promise<ExecutionMode> {
   return "orchestration";
 }
 
+// ── Execution Plan Resolution (v3) ────────────────────────────────────────────
+
+/**
+ * Resolve the ExecutionPlan for the current environment.
+ *
+ * Unlike {@link resolveMode} (which returns the legacy flat ExecutionMode
+ * string), this returns an {@link ExecutionPlan} that separates the execution
+ * backend from the host orchestration strategy.
+ *
+ * Priority (auto mode):
+ *   1. direct_api        — Kevlar has its own API keys, fully controlled
+ *   2. mcp_sampling      — Host declared sampling via MCP capabilities
+ *   3. host_orchestration + structured — optimistic first attempt
+ *   4. host_orchestration + standard   — fallback after structured fails
+ *
+ * Explicit mode via KEVLAR_MODE env or persisted config overrides auto.
+ * Legacy values "mcp_subagent" and "host_guided_dispatch" are migrated to
+ * `{ backend: "host_orchestration", strategy: "structured" }`.
+ */
+export function resolveExecutionPlan(
+  options?: { fingerprint?: ClientFingerprint; content?: string },
+): { plan: ExecutionPlan; legacyMode: ExecutionMode } {
+  // 1. Check persisted config (user preference, highest priority)
+  const config = readConfig();
+  if (config.mode && config.mode !== "auto" && isValidMode(config.mode)) {
+    const mode = config.mode as ExecutionMode;
+    return { plan: legacyModeToPlan(mode), legacyMode: mode };
+  }
+
+  // 2. Check KEVLAR_MODE env var
+  const envMode = process.env.KEVLAR_MODE as ResolveableMode | undefined;
+  if (envMode && envMode !== "auto" && isValidMode(envMode)) {
+    const mode = envMode as ExecutionMode;
+    return { plan: legacyModeToPlan(mode), legacyMode: mode };
+  }
+
+  // 3. Auto-resolve: direct_api > mcp_sampling > host_orchestration
+  if (hasApiKey()) {
+    return { plan: { backend: "direct_api" }, legacyMode: "direct_api" };
+  }
+
+  if (isSamplingSupported()) {
+    return {
+      plan: { backend: "mcp_sampling", policy: DEFAULT_SAMPLING_POLICY },
+      legacyMode: "mcp_sampling",
+    };
+  }
+
+  // 4. No Direct API / Sampling available → Host Orchestration
+  // Check observation cache: if we've previously observed this Host fail
+  // at structured collaboration for this task class, start with standard.
+  const fingerprint = options?.fingerprint ?? getClientFingerprint();
+  const taskClass = inferTaskClass(options?.content);
+  const cachedObs = getHostStructuredObservation({
+    fingerprint,
+    protocolVersion: "kevlar-host-guided/v1",
+    taskClass,
+  });
+
+  const strategy: HostOrchestrationStrategy =
+    cachedObs && (cachedObs.status === "unsupported" || cachedObs.status === "failed")
+      ? "standard"
+      : "structured";
+
+  logger.debug("Host orchestration strategy resolved", {
+    event: "host_orchestration_strategy",
+    strategy,
+    cachedStatus: cachedObs?.status ?? "none",
+    taskClass,
+  });
+
+  return {
+    plan: { backend: "host_orchestration", strategy },
+    legacyMode: strategy === "structured"
+      ? ("mcp_subagent" as ExecutionMode)
+      : "orchestration",
+  };
+}
+
+/**
+ * Map legacy flat ExecutionMode strings to the new ExecutionPlan type.
+ *
+ * - direct_api / mcp_sampling / orchestration → self-explanatory
+ * - mcp_subagent → { host_orchestration, strategy: "structured" }
+ *   (mcp_subagent was never a real backend; it was always host-guided)
+ */
+function legacyModeToPlan(mode: ExecutionMode): ExecutionPlan {
+  switch (mode) {
+    case "direct_api":
+      return { backend: "direct_api" };
+    case "mcp_sampling":
+      return { backend: "mcp_sampling", policy: DEFAULT_SAMPLING_POLICY };
+    case "orchestration":
+      return { backend: "host_orchestration", strategy: "standard" };
+    case "mcp_subagent":
+      // Legacy: mcp_subagent was never an independent backend.
+      // It was always host-guided structured collaboration.
+      return { backend: "host_orchestration", strategy: "structured" };
+  }
+}
+
 // ── Mode Information ──────────────────────────────────────────────────────────
 
 export function getModesInfo(): ModesInfo {
@@ -270,3 +377,22 @@ export async function loadPersonasForReview(
 // ── Sampling Support Check ────────────────────────────────────────────────────
 
 export { isSamplingSupported };
+
+// ── Re-exports (v3) ───────────────────────────────────────────────────────────
+
+export { getClientFingerprint } from "./client.js";
+export { hasApiKey } from "./modes/direct_api.js";
+export type { AuditCheckpoint, ExecutionTransition } from "./checkpoint.js";
+export type {
+  ExecutionPlan,
+  ExecutionBackend,
+  HostOrchestrationStrategy,
+  HostStructuredCapabilityStatus,
+  DispatchFailureReason,
+  PreAuditContext,
+  ClientFingerprint,
+  TaskClass,
+  StructuredObservationKey,
+  HostStructuredObservation,
+  SamplingExecutionPolicy,
+} from "./plan.js";

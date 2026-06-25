@@ -3,6 +3,7 @@ import { createPersonaWizardModule } from "./createPersonaWizardTool.js";
 import { deletePersonaModule } from "./deletePersonaTool.js";
 import { deletePersonaWizardModule } from "./deletePersonaWizardTool.js";
 import { reviewContentWizardModule } from "./reviewContentWizardTool.js";
+import { reviewContentWizardContinueModule } from "./continueWizardTool.js";
 import { helpModule } from "./helpTool.js";
 import { getModesModule } from "./getModesTool.js";
 import { configureModule } from "./configureTool.js";
@@ -20,6 +21,7 @@ const allModules: ToolModule[] = [
   deletePersonaModule,
   deletePersonaWizardModule,
   reviewContentWizardModule,
+  reviewContentWizardContinueModule,
   getModesModule,
   configureModule,
   configureWizardModule,

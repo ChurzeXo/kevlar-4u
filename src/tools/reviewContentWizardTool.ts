@@ -32,6 +32,16 @@ import {
   type Step0Result,
 } from "../prompts/reviewWizard.js";
 import { isSubagentDispatchSupported, isSamplingSupported } from "../execution/client.js";
+import {
+  resolveExecutionPlan,
+  type ExecutionPlan,
+  type AuditCheckpoint,
+  type DispatchFailureReason,
+  type ExecutionTransition,
+} from "../execution/index.js";
+import { classifyHostStructuredResult, isKevlarHostGuidedResult, getClientFingerprint } from "../execution/client.js";
+import type { ClientFingerprint } from "../execution/plan.js";
+import { recordCapabilityObservation, inferTaskClass } from "../execution/observations.js";
 import { buildSubagentDispatchPromptForWizard } from "../execution/modes/subagent.js";
 import {
   type AuditLlmCaller,
@@ -186,6 +196,19 @@ interface ReviewWizardState {
   createdAt: number;
   step: ReviewWizardStep;
   mode?: ExecutionMode;
+  // v3: New execution plan system
+  executionPlan?: ExecutionPlan;
+  checkpoint?: AuditCheckpoint;
+  structuredDowngraded?: boolean;
+  capabilityStatus?: import("../execution/plan.js").HostStructuredCapabilityStatus;
+  executionTransitions?: import("../execution/checkpoint.js").ExecutionTransition[];
+  // v3: Continuation contract fields
+  revision?: number;
+  activeContinuation?: {
+    continuationId: string;
+    checkpoint: import("../execution/checkpoint.js").AuditCheckpoint;
+    expiresAt: number;
+  };
   content: string;
   context?: string;
   targetPlatforms: string[];
@@ -228,6 +251,31 @@ export const reviewContentWizardModule: ToolModule = {
   },
 };
 
+// ── v3: Continuation Contract Helper ───────────────────────────────────────────
+
+/**
+ * Set up a continuation contract on the wizard state.
+ *
+ * When Kevlar asks the Host to submit results (after Step 0, after audit,
+ * after final), it emits a continuation contract containing a unique
+ * continuationId and the current revision. The Host must pass these back
+ * when calling review_content_wizard_continue to prevent stale submissions.
+ */
+function setContinuation(
+  state: ReviewWizardState,
+  step: ReviewWizardStep,
+  checkpoint: AuditCheckpoint,
+): void {
+  // Map step to the checkpoint expected when the Host calls back
+  const continuationId = `${state.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  state.revision = (state.revision ?? 0) + 1;
+  state.activeContinuation = {
+    continuationId,
+    checkpoint,
+    expiresAt: Date.now() + 30 * 60 * 1000, // 30 min timeout
+  };
+}
+
 export async function handleReviewContentWizard(
   skillsDir: string,
   tmpDir: string,
@@ -257,28 +305,29 @@ export async function handleReviewContentWizard(
       state.strategySessionId = plan.strategySessionId;
       state.strategyHash = plan.strategyHash;
 
-      // Resolve execution mode once for the session (mirrors resolveMode() in index.ts)
-      if (state.mode === undefined) {
-        const config = readConfig();
-        if (config.mode && config.mode !== "auto" && isValidMode(config.mode)) {
-          state.mode = config.mode;
-        } else {
-          const envMode = process.env.KEVLAR_MODE as string | undefined;
-          if (envMode && envMode !== "auto" && isValidMode(envMode)) {
-            state.mode = envMode as ExecutionMode;
-          } else {
-            // Auto-detect by priority
-            if (isSamplingSupported()) {
-              state.mode = "mcp_sampling";
-            } else if (isSubagentDispatchSupported()) {
-              state.mode = "mcp_subagent";
-            } else if (hasApiKey()) {
-              state.mode = "direct_api";
-            } else {
-              state.mode = "orchestration";
-            }
-          }
-        }
+      // Resolve execution mode once for the session (v3: ExecutionPlan)
+      if (state.mode === undefined && state.executionPlan === undefined) {
+        // v3: Use ExecutionPlan-based resolution with correct priority
+        // direct_api > mcp_sampling > host_orchestration+structured > host_orchestration+standard
+        const planResult = resolveExecutionPlan({
+          fingerprint: getClientFingerprint(),
+          content: state.content,
+        });
+
+        // Store the execution plan (v3 structured type)
+        state.executionPlan = planResult.plan;
+
+        // Map plan back to legacy ExecutionMode for backward compat with existing wizard flows
+        state.mode = planResult.legacyMode;
+
+        // Initialize checkpoint tracking
+        state.checkpoint = "initiated";
+        state.structuredDowngraded = false;
+        state.revision = state.revision ?? 1;
+      } else if (state.checkpoint === undefined) {
+        // Backward compat: existing wizard states that pre-date checkpoint tracking
+        state.checkpoint = "initiated";
+        state.structuredDowngraded = false;
       }
     } else if (state.strategySessionId) {
       // Reconstruct plan from frozen state (no re-resolution)
@@ -535,6 +584,7 @@ async function handleSystemAudit(
   const stripped = stripContext(state.content);
   state.step = "waitingForOrchestrationStep0";
   state.orchestrationPreAuditContext = { localFindings, stripped };
+  setContinuation(state, "waitingForOrchestrationStep0", "step0_completed");
   await saveState(tmpDir, state);
   return toolResponse(
     state,
@@ -651,6 +701,7 @@ async function handleOrchestrationStep0Result(
         timingContext: localFindings.find((f: any) => f.timingDescription)?.timingDescription,
       });
       state.step = "waitingForSubagentAudit";
+      setContinuation(state, "waitingForSubagentAudit", "step0_completed");
       await saveState(tmpDir, state);
       return toolResponse(state, dispatchPrompt);
     }
@@ -704,6 +755,7 @@ async function handleOrchestrationStep0Result(
     );
     state.orchestrationPreAuditContext.stripped = stripped;
     state.step = "waitingForOrchestrationAudit";
+    setContinuation(state, "waitingForOrchestrationAudit", "preaudit_started");
     await saveState(tmpDir, state);
 
     return toolResponse(
@@ -805,6 +857,7 @@ async function handleOrchestrationAuditResult(
       deltaRisks,
     };
     state.step = "waitingForOrchestrationFinal";
+    setContinuation(state, "waitingForOrchestrationFinal", "preaudit_completed");
     await saveState(tmpDir, state);
 
     logger.info("Orchestration Turn 2 processed, emitting Turn 3 prompt", {
@@ -861,6 +914,15 @@ async function handleSubagentAuditResult(
 ): Promise<ToolResult> {
   try {
     const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+
+    // Record positive observation: Host successfully returned structured JSON
+    recordCapabilityObservation(
+      getClientFingerprint(),
+      inferTaskClass(state.content),
+      "format_verified",
+      "kevlar_result_schema_matched",
+    );
+
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const content = state.content;
     const step0Result = state.orchestrationPreAuditContext?.step0Result;
@@ -1026,14 +1088,123 @@ async function handleSubagentAuditResult(
     }
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {
+    // ── v3: Structured result classification + auto-degradation ──────────
+    // Instead of immediately showing an error, classify the Host's response.
+    // If it's a structured execution failure, automatically degrade to
+    // standard orchestration and continue the audit.
+    const rawResponse = userMessage?.trim() ?? "";
+    const classification = classifyHostStructuredResult(rawResponse || undefined);
+
+    if (!state.structuredDowngraded) {
+      // Only attempt auto-degradation once per session.
+      // Skip if already format_verified (shouldn't happen in catch block but defensive).
+
+      // Narrow reason to DispatchFailureReason for resumeFromStructuredFailure
+      const failureReason: DispatchFailureReason =
+        classification.reason === "kevlar_result_schema_matched"
+          ? "schema_mismatch" // Defensive: if somehow format_verified but parse failed
+          : classification.reason;
+
+      // Record negative observation for future cache lookup
+      recordCapabilityObservation(
+        getClientFingerprint(),
+        inferTaskClass(state.content),
+        classification.status === "unsupported" ? "unsupported" : "failed",
+        failureReason,
+      );
+
+      // Structured execution failed → auto-degrade to standard orchestration
+      logger.warn("Structured collaboration failed, downgrading to standard orchestration", {
+        event: "host_structured_degraded",
+        reason: failureReason,
+        capabilityStatus: classification.status,
+        sessionId: state.sessionId,
+      });
+
+      // Apply degradation
+      const recovery: import("../execution/checkpoint.js").StructuredFailureResumeState & { executionPlan: import("../execution/plan.js").ExecutionPlan } = state as any;
+      const degraded = (await import("../execution/checkpoint.js")).resumeFromStructuredFailure(recovery, failureReason);
+
+      state.executionPlan = degraded.executionPlan;
+      state.checkpoint = degraded.checkpoint;
+      state.structuredDowngraded = degraded.structuredDowngraded;
+      state.capabilityStatus = degraded.capabilityStatus;
+      state.executionTransitions = degraded.executionTransitions;
+      state.mode = "orchestration";
+
+      // Try to continue with internal LLM audit from the saved Step 0 context
+      const caller = resolveSystemAuditCaller(samplingFn);
+      if (caller && state.orchestrationPreAuditContext) {
+        try {
+          const ctx = state.orchestrationPreAuditContext;
+          const prompts = await resolvePromptSegments();
+          const preAuditReport = await executeFullPipeline(
+            state.content,
+            systemAuditors,
+            ctx.localFindings ?? [],
+            caller,
+            ctx.step0Result,
+            ctx.webContextMap,
+            ctx.precedents,
+            ctx.localFindings?.find((f: any) => f.timingDescription)?.timingDescription,
+            undefined, // sendProgress not available in catch block
+            prompts,
+            strategyProvider?.getSynergyRules?.(),
+          );
+          state.preAuditReport = preAuditReport;
+          state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
+          state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
+          await saveState(tmpDir, state);
+
+          if (state.step === "rstConfirmation") {
+            return toolResponse(
+              state,
+              [
+                "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式继续审计。\n",
+                buildPreAuditSummaryBlock(state, prompts),
+                "",
+                "六维风险检测已完成。是否继续进行舆论仿真推演？",
+                "",
+                "回复「继续」或「是」进入评审，回复「否」结束。",
+              ].join("\n"),
+            );
+          }
+          return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
+        } catch (internalErr) {
+          logger.warn("Internal audit after structured degradation also failed", {
+            event: "structured_degraded_internal_failed",
+            error: getErrorInfo(internalErr).message,
+          });
+        }
+      }
+
+      // No LLM caller or internal audit failed → fall through to Host orchestration
+      await saveState(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。",
+          "",
+          "请使用以下方式之一继续：",
+          "1. 重新提交之前的 Step 0 JSON 结果，系统将进入标准编排审计流程",
+          "2. 调用 review_content_wizard_continue 工具继续审计",
+          "",
+          `SessionId: \`${state.sessionId}\``,
+        ].join("\n"),
+      );
+    }
+
+    // Already downgraded before, or format_verified but parse still failed (edge case)
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
-        "❌ 无法解析宿主 AI 返回的 Subagent 审计 JSON。",
+        "❌ 无法解析宿主 AI 返回的审计 JSON。",
         `错误：${info.message}`,
-        "请让宿主 AI 仅返回包含 dimensions 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
+        state.structuredDowngraded
+          ? "结构化协作已降级过一次，请检查 Host 输出格式后重试。"
+          : "请让宿主 AI 仅返回包含 dimensions 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
       ].join("\n"),
     );
   }

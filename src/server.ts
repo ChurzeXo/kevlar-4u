@@ -16,6 +16,7 @@ import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
 import { setClientInfo, setClientCapabilities } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
+import { setObservationCacheDir } from "./execution/observations.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
 import { SERVER_INSTRUCTIONS } from "./prompts/instructions.js";
 import { DynamicImportProRuntimeLoader, resolveStrategyProvider } from "./execution/proRuntime.js";
@@ -223,6 +224,7 @@ export async function createKevlarServer(): Promise<McpServer> {
   const tmpDir = path.join(skillsDir, "tmp");
 
   setConfigPath(skillsDir);
+  setObservationCacheDir(tmpDir);
   ensureSkillsDirectory(skillsDir);
   cleanStaleDrafts(tmpDir).catch(() => {});
 
