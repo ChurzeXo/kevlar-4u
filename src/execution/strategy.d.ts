@@ -30,6 +30,14 @@ export interface StrategyProvider {
     getPromptTemplate?(id: string, ctx?: StrategyContext): Promise<string | null>;
     getWeights?(ctx?: StrategyContext): Promise<SynergyWeights>;
     getVisibilityPolicy?(ctx?: StrategyContext): Promise<ReviewPlan["visibility"]>;
+    /** Returns bundle-delivered synergy rules, or undefined to use hardcoded defaults. */
+    getSynergyRules?(): Array<{
+        dimensions: string[];
+        condition: "ALL" | "ANY";
+        multiplier: number;
+        upgradeLevel: boolean;
+        label: string;
+    }>;
 }
 export declare class FreeStrategyProvider implements StrategyProvider {
     getEntitlement(): Promise<Entitlement>;
@@ -41,5 +49,12 @@ export declare class InMemoryProStrategyProvider implements StrategyProvider {
     getPromptTemplate(_id: string): Promise<string | null>;
     getWeights(): Promise<SynergyWeights>;
     getVisibilityPolicy(): Promise<ReviewPlan["visibility"]>;
+    getSynergyRules(): Array<{
+        dimensions: string[];
+        condition: "ALL" | "ANY";
+        multiplier: number;
+        upgradeLevel: boolean;
+        label: string;
+    }>;
 }
 //# sourceMappingURL=strategy.d.ts.map

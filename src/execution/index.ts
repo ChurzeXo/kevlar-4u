@@ -254,15 +254,18 @@ export function resolveExecutionPlan(
       ? "standard"
       : "structured";
 
+  const lighterTaskMatch = cachedObs?.isLighter === true;
+
   logger.debug("Host orchestration strategy resolved", {
     event: "host_orchestration_strategy",
     strategy,
     cachedStatus: cachedObs?.status ?? "none",
     taskClass,
+    lighterTaskMatch,
   });
 
   return {
-    plan: { backend: "host_orchestration", strategy },
+    plan: { backend: "host_orchestration", strategy, lighterTaskMatch: lighterTaskMatch || undefined },
     legacyMode: strategy === "structured"
       ? ("mcp_subagent" as ExecutionMode)
       : "orchestration",

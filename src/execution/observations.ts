@@ -149,8 +149,8 @@ function keyMatches(
   // but lighter stored observations CANNOT satisfy heavier queries.
   if (stored.taskClass === query.taskClass) return "exact";
   if (TASK_CLASS_RANK[stored.taskClass] > TASK_CLASS_RANK[query.taskClass]) return "exact";
-  // stored rank is lower than query rank → lighter observation is insufficient
-  return "none";
+  // stored task is lighter than query → match exists but at lower confidence
+  return "lighter";
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -196,11 +196,10 @@ export function getHostStructuredObservation(
   }
 
   if (bestMatch && bestRank === "lighter") {
-    // Annotate that this match came from a smaller task
     return {
       ...bestMatch,
       status: "format_verified" as const,
-      // The caller should interpret lighter matches with caution
+      isLighter: true,
     };
   }
 

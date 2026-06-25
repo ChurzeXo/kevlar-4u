@@ -683,6 +683,14 @@ async function handleOrchestrationStep0Result(
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
 
+    state.orchestrationPreAuditContext = {
+      localFindings,
+      stripped,
+      step0Result,
+      webContextMap,
+      precedents,
+    };
+
     if (state.mode === "mcp_subagent" && !isSubagentDispatchSupported()) {
       sendProgress?.("系统检测到当前环境未显式启用并行调度能力，已自动降级为 orchestration (宿主辅助兜底) 模式进行处理。");
       logger.warn("Downgrading mcp_subagent to orchestration due to missing capability", { event: "mode_downgrade" });
@@ -1179,18 +1187,20 @@ async function handleSubagentAuditResult(
       }
 
       // No LLM caller or internal audit failed → fall through to Host orchestration
+      state.mode = "orchestration";
+      state.step = "waitingForOrchestrationAudit";
+      setContinuation(state, "waitingForOrchestrationAudit", "preaudit_started");
       await saveState(tmpDir, state);
+
       return toolResponse(
         state,
-        [
-          "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。",
-          "",
-          "请使用以下方式之一继续：",
-          "1. 重新提交之前的 Step 0 JSON 结果，系统将进入标准编排审计流程",
-          "2. 调用 review_content_wizard_continue 工具继续审计",
-          "",
-          `SessionId: \`${state.sessionId}\``,
-        ].join("\n"),
+        "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。\n" +
+        ORCHESTRATION_AUDIT_GUIDANCE +
+        buildOrchestrationAuditPrompt(
+          state.content,
+          systemAuditors,
+          state.orchestrationPreAuditContext!,
+        ),
       );
     }
 
@@ -2024,7 +2034,7 @@ async function executeReview(
     content: state.content,
     persona_ids: state.selectedPersonaIds,
     context: state.context,
-    mode: "auto",
+    mode: state.mode || "auto",
     dimensions: state.dimensions,
     preAuditReport: state.preAuditReport,
     samplingFn: samplingFn

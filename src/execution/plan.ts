@@ -31,7 +31,7 @@ export type HostOrchestrationStrategy = "structured" | "standard";
 export type ExecutionPlan =
   | { backend: "direct_api" }
   | { backend: "mcp_sampling"; policy?: SamplingExecutionPolicy }
-  | { backend: "host_orchestration"; strategy: HostOrchestrationStrategy };
+  | { backend: "host_orchestration"; strategy: HostOrchestrationStrategy; lighterTaskMatch?: boolean };
 
 // ── Sampling Execution Policy ─────────────────────────────────────────────────
 
@@ -156,4 +156,7 @@ export interface HostStructuredObservation {
 
   observedAt: number;
   expiresAt: number;
+
+  /** True when this observation came from a lighter task class than the query. */
+  isLighter?: boolean;
 }

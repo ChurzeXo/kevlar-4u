@@ -284,7 +284,7 @@ describe("taskClass matching", () => {
     assert.equal(result!.status, "unsupported");
   });
 
-  it("lighter task observation does NOT satisfy heavier query (short ↛ long)", () => {
+  it("lighter task observation returns with isLighter flag (short → long)", () => {
     recordHostStructuredObservation({
       key: makeKey(FP_A, "short"),
       status: "format_verified",
@@ -292,7 +292,9 @@ describe("taskClass matching", () => {
     });
 
     const result = getHostStructuredObservation(makeKey(FP_A, "long"));
-    assert.equal(result, undefined);
+    assert.ok(result);
+    assert.equal(result!.status, "format_verified");
+    assert.equal(result!.isLighter, true);
   });
 
   it("prefers exact match over lighter match", () => {
