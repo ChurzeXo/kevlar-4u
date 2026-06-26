@@ -22,14 +22,9 @@ export type {
   TaskClass,
   StructuredObservationKey,
   HostStructuredObservation,
-  SamplingExecutionPolicy,
 } from "./plan.js";
 
-export { DEFAULT_SAMPLING_POLICY } from "./plan.js";
-
-// ── Execution Mode Types (legacy — kept for backward compat) ──────────────────
-
-export type ExecutionMode = "orchestration" | "mcp_sampling" | "direct_api" | "mcp_subagent";
+export type ExecutionMode = "orchestration" | "mcp_subagent";
 
 export type ResolveableMode = ExecutionMode | "auto";
 

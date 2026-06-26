@@ -1,8 +1,8 @@
 /**
  * Parallel execution utilities for multi-agent modes
  *
- * Extracts the common parallel persona execution pattern shared
- * between mcp_sampling and direct_api modes.
+ * Extracts the common parallel persona execution pattern used
+ * by the orchestration execution pipeline.
  */
 
 import type { Persona } from "../utils/parser.js";
@@ -117,7 +117,7 @@ export async function executePersonasInParallel(
  *        RST section → Focus Topics → dimensions (offensive) → tone constraint
  * 
  * Semantic baseline: orchestration mode prompt protocol (reviewWizard.ts)
- * Execution baseline: sampling/direct_api parallel pipeline
+ * Execution baseline: orchestration parallel pipeline
  */
 export function augmentSystemPrompt(
   persona: Persona,

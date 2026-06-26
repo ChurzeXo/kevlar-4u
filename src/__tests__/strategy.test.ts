@@ -368,14 +368,10 @@ describe("Free mode — skips six-dimensional pre-audit", () => {
 
 import { executeReview } from "../execution/index.js";
 import { orchestrationHandler } from "../execution/modes/orchestration.js";
-import { directApiHandler } from "../execution/modes/direct_api.js";
-import { samplingHandler } from "../execution/modes/sampling.js";
 import type { ExecutionContext, ExecutionHandler } from "../execution/base.js";
 
 const ALL_HANDLERS: ExecutionHandler[] = [
   orchestrationHandler,
-  directApiHandler,
-  samplingHandler,
 ];
 
 function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext {
@@ -388,7 +384,7 @@ function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext {
   };
 }
 
-describe("Matrix: Free/Pro × 3 execution modes", () => {
+describe("Matrix: Free/Pro × execution modes", () => {
   for (const tier of ["free", "pro"] as const) {
     for (const handler of ALL_HANDLERS) {
       const mode = handler.mode;
@@ -401,7 +397,7 @@ describe("Matrix: Free/Pro × 3 execution modes", () => {
 
   for (const handler of ALL_HANDLERS) {
     it(`${handler.mode} handler is registered in executeReview registry`, () => {
-      const modes = [orchestrationHandler, directApiHandler, samplingHandler].map(h => h.mode);
+      const modes = [orchestrationHandler].map(h => h.mode);
       assert.ok(modes.includes(handler.mode));
     });
 

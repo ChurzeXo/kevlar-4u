@@ -18,7 +18,6 @@ import { checkForUpdate } from "./checkUpdateTool.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
 import type { StrategyProvider, ReviewPlan } from "../execution/strategy.js";
-import { callConfiguredDirectApi, hasApiKey } from "../execution/modes/direct_api.js";
 import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
 import {
@@ -31,18 +30,19 @@ import {
   type Precedent,
   type Step0Result,
 } from "../prompts/reviewWizard.js";
-import { isSubagentDispatchSupported, isSamplingSupported } from "../execution/client.js";
+import { isSamplingSupported } from "../execution/client.js";
 import {
   resolveExecutionPlan,
   type ExecutionPlan,
   type AuditCheckpoint,
   type DispatchFailureReason,
   type ExecutionTransition,
+  type AgentBlueprint,
+  type AgentDefinition,
 } from "../execution/index.js";
 import { classifyHostStructuredResult, isKevlarHostGuidedResult, getClientFingerprint } from "../execution/client.js";
 import type { ClientFingerprint } from "../execution/plan.js";
 import { recordCapabilityObservation, inferTaskClass } from "../execution/observations.js";
-import { buildSubagentDispatchPromptForWizard } from "../execution/modes/subagent.js";
 import {
   type AuditLlmCaller,
   type PreAuditDimensionResult,
@@ -59,7 +59,7 @@ import {
 } from "../execution/reviewSteps.js";
 
 
-const ORCHESTRATION_STEP0_GUIDANCE = [
+export const ORCHESTRATION_STEP0_GUIDANCE = [
   "⚠️ **当前无独立 LLM 能力，需要你执行 Turn 1：Step 0 全局解码**",
   "",
   "请按以下步骤操作：",
@@ -83,7 +83,7 @@ const ORCHESTRATION_STEP0_GUIDANCE = [
   "",
 ].join("\n");
 
-const ORCHESTRATION_AUDIT_GUIDANCE = [
+export const ORCHESTRATION_AUDIT_GUIDANCE = [
   "---",
   "",
   "> ⏳ **Kevlar 审计进行中，请稍候...**",
@@ -307,8 +307,8 @@ export async function handleReviewContentWizard(
 
       // Resolve execution mode once for the session (v3: ExecutionPlan)
       if (state.mode === undefined && state.executionPlan === undefined) {
-        // v3: Use ExecutionPlan-based resolution with correct priority
-        // direct_api > mcp_sampling > host_orchestration+structured > host_orchestration+standard
+        // v3: Use ExecutionPlan-based resolution
+        // host_orchestration+structured > host_orchestration+standard
         const planResult = resolveExecutionPlan({
           fingerprint: getClientFingerprint(),
           content: state.content,
@@ -580,7 +580,25 @@ async function handleSystemAudit(
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   }
 
-  // All modes: host AI performs Step 0b (decoding) + web search
+  // ── Kevlar Execution Protocol v1 Blueprint Dispatch ────────────────────────
+  const plan = state.executionPlan;
+  if (plan?.backend === "host_orchestration" && plan.strategy === "structured") {
+    const stripped = stripContext(state.content);
+    state.orchestrationPreAuditContext = { localFindings, stripped };
+    state.step = "waitingForSubagentAudit";
+    setContinuation(state, "waitingForSubagentAudit", "preaudit_completed");
+
+    const blueprint = buildAgentBlueprint(state, systemAuditors);
+    (state as any).blueprint = blueprint;
+
+    await saveState(tmpDir, state);
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(blueprint, null, 2) }],
+    };
+  }
+
+  // Standard Fallback: host AI performs Step 0b (decoding) + web search
   const stripped = stripContext(state.content);
   state.step = "waitingForOrchestrationStep0";
   state.orchestrationPreAuditContext = { localFindings, stripped };
@@ -590,6 +608,55 @@ async function handleSystemAudit(
     state,
     ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
   );
+}
+
+function buildAgentBlueprint(state: ReviewWizardState, systemAuditors: Persona[]): AgentBlueprint {
+  const agents: AgentDefinition[] = systemAuditors.map((auditor) => {
+    let role = "safety_reviewer";
+    if (auditor.meta.id === "legal_compliance") role = "policy_reviewer";
+    else if (auditor.meta.id === "context_distortion") role = "context_reviewer";
+
+    return {
+      id: auditor.meta.id,
+      role,
+      instructions: auditor.systemPrompt || "",
+      input: {
+        contentRef: "content",
+      },
+      outputSchema: "kevlar.reviewer/v1",
+    };
+  });
+
+  const activeCont = state.activeContinuation;
+
+  return {
+    protocol: "kevlar.exec/v1",
+    execution: {
+      mode: "ephemeral_agents",
+      allowedModes: ["native_subagent", "simulated_agent"],
+      concurrency: systemAuditors.length,
+      isolation: {
+        required: true,
+        level: "best_effort",
+      },
+    },
+    agents,
+    aggregation: {
+      strategy: "host_merge",
+      rules: {
+        requireAllAgents: true,
+        conflictResolution: "risk_maximization",
+        outputSchema: "kevlar.audit/v1",
+      },
+    },
+    continuation: {
+      tool: "review_content_wizard_continue",
+      sessionId: state.sessionId,
+      checkpoint: activeCont?.checkpoint || "preaudit_completed",
+      expectedRevision: state.revision ?? 1,
+      idempotencyKey: activeCont?.continuationId,
+    },
+  };
 }
 
 function buildOrchestrationPreAuditContext(
@@ -691,69 +758,7 @@ async function handleOrchestrationStep0Result(
       precedents,
     };
 
-    if (state.mode === "mcp_subagent" && !isSubagentDispatchSupported()) {
-      sendProgress?.("系统检测到当前环境未显式启用并行调度能力，已自动降级为 orchestration (宿主辅助兜底) 模式进行处理。");
-      logger.warn("Downgrading mcp_subagent to orchestration due to missing capability", { event: "mode_downgrade" });
-      state.mode = "orchestration";
-    }
-
-    // Check if we should use subagent dispatch mode
-    if (state.mode === "mcp_subagent") {
-      const dispatchPrompt = buildSubagentDispatchPromptForWizard({
-        content: state.content,
-        bareText: stripped.bare,
-        step0Result,
-        webContextMap,
-        auditors: systemAuditors,
-        localFindings,
-        timingContext: localFindings.find((f: any) => f.timingDescription)?.timingDescription,
-      });
-      state.step = "waitingForSubagentAudit";
-      setContinuation(state, "waitingForSubagentAudit", "step0_completed");
-      await saveState(tmpDir, state);
-      return toolResponse(state, dispatchPrompt);
-    }
-
-    // Check if we have an LLM caller (Direct API / Sampling mode)
-    const caller = resolveSystemAuditCaller(samplingFn);
-    if (caller) {
-      // Direct API / Sampling mode: run Steps 1-9 internally
-      const timingFinding = localFindings.find((f) => f.timingDescription);
-      const timingContext = timingFinding?.timingDescription as string | undefined;
-
-      const preAuditReport = await executeLlmSystemAudit(
-        state.content,
-        systemAuditors,
-        localFindings,
-        caller,
-        step0Result,
-        webContextMap,
-        precedents,
-        timingContext,
-        undefined, // sendProgress not available in orchestration path
-        strategyProvider,
-      );
-      state.preAuditReport = preAuditReport;
-      state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-    state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
-      await saveState(tmpDir, state);
-      if (state.step === "rstConfirmation") {
-        const prompts = await resolvePromptSegments();
-        return toolResponse(
-          state,
-          [
-            buildPreAuditSummaryBlock(state, prompts),
-            "",
-            "六维风险检测已完成。是否继续进行舆论仿真推演？",
-            "",
-            "回复「继续」或「是」进入评审，回复「否」结束。",
-          ].join("\n"),
-        );
-      }
-      return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
-    }
-
-    // Orchestration mode: build context and emit Turn 2 audit prompt
+    // Orchestration mode (Protocol v1): build context and emit Turn 2 audit prompt
     state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(
       state.content,
       localFindings,
@@ -785,20 +790,7 @@ async function handleOrchestrationStep0Result(
   }
 }
 
-function resolveSystemAuditCaller(samplingFn?: MultiTurnSamplingFunction): AuditLlmCaller | undefined {
-  if (samplingFn) return samplingFn;
-  if (!hasApiKey()) return undefined;
-  return async (params) => {
-    const response = await callConfiguredDirectApi({
-      model: process.env.KEVLAR_MODEL || "",
-      system: params.systemPrompt,
-      messages: params.messages.map((message) => ({ role: "user", content: message.content })),
-      maxTokens: params.maxTokens,
-      temperature: 0.2,
-    });
-    return { content: response.content, stopReason: response.stopReason };
-  };
-}
+// resolveSystemAuditCaller removed — Protocol v1 delegates all LLM calls to Host.
 
 async function executeLlmSystemAudit(
   content: string,
@@ -933,151 +925,68 @@ async function handleSubagentAuditResult(
 
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const content = state.content;
-    const step0Result = state.orchestrationPreAuditContext?.step0Result;
-    const webContextMap = state.orchestrationPreAuditContext?.webContextMap ?? {};
     const precedents = state.orchestrationPreAuditContext?.precedents ?? [];
 
-    // ── Step 4: Delta analysis (code step, needs bare-text findings) ──────────
-    // Run bare-text audit for the 3 "bare" dimensions, then compute delta
-    const bareOnlyAuditors = systemAuditors.filter(
-      (a) =>
-        a.meta.id === "context_distortion" ||
-        a.meta.id === "network_culture_risk" ||
-        a.meta.id === "cross_lingual_distortion",
-    );
-    const stripped = stripContext(content);
-    const caller = resolveSystemAuditCaller(samplingFn);
-    let deltaRisks = parsed.deltaRisks ?? null;
-
-    if (bareOnlyAuditors.length > 0 && caller) {
-      try {
-        // Re-run bare-text audit to get bareFindings for delta analysis
-        const bareFindingsRaw = await runSystemAuditors(
-          stripped.bare,
-          bareOnlyAuditors,
-          caller,
-          undefined,
-          localFindings,
-          step0Result,
-          webContextMap,
-        );
-        const normalizedBare = normalizePreAuditDimensions(bareFindingsRaw, bareOnlyAuditors);
-        const normalizedFull = normalizePreAuditDimensions(parsed.dimensions, systemAuditors);
-        deltaRisks = computeDeltaAnalysis(normalizedBare, normalizedFull);
-      } catch (deltaErr) {
-        logger.warn("Step 4 delta analysis failed, using empty deltaRisks", {
-          event: "subagent_step4_delta_failed",
-          error: getErrorInfo(deltaErr).message,
-        });
-        deltaRisks = deltaRisks ?? buildEmptyDeltaRisks();
-      }
-    } else {
-      deltaRisks = deltaRisks ?? buildEmptyDeltaRisks();
+    const aggregation = parsed.aggregation || parsed.output || (parsed.dimensions ? parsed : null);
+    if (!aggregation) {
+      throw new Error("Missing aggregation report in ExecutionReceipt");
     }
 
-    // ── Step 5: Merge local findings into audit results (code step) ───────────
+    const crossValidatedDimensions = aggregation.dimensions || [];
+    const worstCaseNarrative = aggregation.worstCaseNarrative || "";
+    const attackChainAnalysis = aggregation.attackChainAnalysis || "";
+    const riskProfile = aggregation.riskProfile || {};
+    const deltaRisks = aggregation.deltaRisks || buildEmptyDeltaRisks();
+
+    // ── Step 5: Merge local findings into audit results (code step)
     const mergedDimensions = normalizePreAuditDimensions(
       mergeLocalFindingsIntoAudits(
-        normalizePreAuditDimensions(parsed.dimensions, systemAuditors),
+        normalizePreAuditDimensions(crossValidatedDimensions, systemAuditors),
         localFindings,
       ),
       systemAuditors,
     );
 
-    // ── Step 6: Cross-validation (LLM step, fallback if host didn't do it) ───
-    let crossValidatedDimensions = mergedDimensions;
-    if (caller && (!parsed.attackChainAnalysis || parsed.attackChainAnalysis.trim() === "")) {
-      try {
-        crossValidatedDimensions = await crossValidateRiskyDimensions(
-          content,
-          mergedDimensions,
-          systemAuditors,
-          caller,
-        );
-      } catch (cvErr) {
-        logger.warn("Step 6 cross-validation failed, using merged dimensions", {
-          event: "subagent_step6_crossval_failed",
-          error: getErrorInfo(cvErr).message,
-        });
-        crossValidatedDimensions = mergedDimensions;
-      }
-    }
-
-    // ── Step 7: Synergy calculation (code step) ──────────────────────────────
+    // ── Step 7: Synergy calculation (code step)
     const dimensionLevels: Record<string, string> = {};
-    for (const dim of crossValidatedDimensions) {
+    for (const dim of mergedDimensions) {
       dimensionLevels[dim.id] = dim.level ?? "🟢";
     }
     const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
     const synergyResult = calculateSynergy(dimensionLevels, timingFlag, strategyProvider?.getSynergyRules?.());
 
-    // ── Step 8: Final arbitration (LLM step, fallback if host didn't do it) ───
-    let preAuditReport: PreAuditReport;
-    if (caller && (!parsed.worstCaseNarrative || parsed.worstCaseNarrative.trim() === "")) {
-      try {
-        preAuditReport = await finalizePreAuditReport(
-          content,
-          localFindings,
-          mergedDimensions,
-          crossValidatedDimensions,
-          systemAuditors,
-          caller,
-          synergyResult,
-          deltaRisks,
-          precedents,
-          await resolvePromptSegments(),
-        );
-      } catch (faErr) {
-        logger.warn("Step 8 final arbitration failed, building report from parsed + synergy", {
-          event: "subagent_step8_finalize_failed",
-          error: getErrorInfo(faErr).message,
-        });
-        preAuditReport = buildFallbackReport(
-          crossValidatedDimensions,
-          synergyResult,
-          deltaRisks,
-          parsed,
-          precedents,
-        );
-      }
-    } else {
-      // Host already did Step 8, use parsed results
-      const dimSummary = crossValidatedDimensions.some((d) => d.findings.length > 0)
-        ? `${crossValidatedDimensions.filter((d) => d.findings.length > 0).length}/${crossValidatedDimensions.length} 个维度存在风险发现`
-        : "全部维度通过";
-      preAuditReport = {
-        dimensions: crossValidatedDimensions,
-        summary: dimSummary,
-        attackChainAnalysis: parsed.attackChainAnalysis ?? "",
-        worstCaseNarrative: parsed.worstCaseNarrative ?? "",
-        riskProfile: parsed.riskProfile ?? {},
-        synergyFlags: parsed.synergyFlags ?? { triggered: [], levelUpgrades: [] },
-        deltaRisks,
-        precedents,
-      };
-    }
-
     // Apply synergy level upgrades
     if (synergyResult.levelUpgrades.length > 0) {
       for (const upgrade of synergyResult.levelUpgrades) {
-        const dim = preAuditReport.dimensions.find((d: any) => d.id === upgrade.dimension);
+        const dim = mergedDimensions.find((d: any) => d.id === upgrade.dimension);
         if (dim && dim.level === upgrade.from) {
           dim.level = upgrade.to;
         }
       }
     }
 
+    // Construct final preAuditReport conforming to kevlar.audit/v1
+    const preAuditReport: PreAuditReport = {
+      dimensions: mergedDimensions,
+      summary: aggregation.summary || (mergedDimensions.some((d) => d.findings.length > 0)
+        ? `${mergedDimensions.filter((d) => d.findings.length > 0).length}/${mergedDimensions.length} 个维度存在风险发现`
+        : "全部维度通过"),
+      attackChainAnalysis: attackChainAnalysis || aggregation.attackChainAnalysis || "",
+      worstCaseNarrative: worstCaseNarrative || aggregation.worstCaseNarrative || "",
+      riskProfile: riskProfile || aggregation.riskProfile || {},
+      synergyFlags: synergyResult,
+      deltaRisks,
+      precedents,
+    };
+
     state.preAuditReport = preAuditReport;
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
     state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
 
-    logger.info("Subagent audit result processed (with Step 4/6/8)", {
+    logger.info("Subagent audit receipt processed", {
       event: "subagent_audit_processed",
       dimensionCount: preAuditReport.dimensions.length,
-      hasDeltaRisks: !!deltaRisks && deltaRisks.bareOnly?.length > 0,
-      hasAttackChain: !!preAuditReport.attackChainAnalysis,
-      hasWorstCase: !!preAuditReport.worstCaseNarrative,
       synergyTriggered: synergyResult.triggered.length > 0,
     });
 
@@ -1096,125 +1005,14 @@ async function handleSubagentAuditResult(
     }
     return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
   } catch (err) {
-    // ── v3: Structured result classification + auto-degradation ──────────
-    // Instead of immediately showing an error, classify the Host's response.
-    // If it's a structured execution failure, automatically degrade to
-    // standard orchestration and continue the audit.
-    const rawResponse = userMessage?.trim() ?? "";
-    const classification = classifyHostStructuredResult(rawResponse || undefined);
-
-    if (!state.structuredDowngraded) {
-      // Only attempt auto-degradation once per session.
-      // Skip if already format_verified (shouldn't happen in catch block but defensive).
-
-      // Narrow reason to DispatchFailureReason for resumeFromStructuredFailure
-      const failureReason: DispatchFailureReason =
-        classification.reason === "kevlar_result_schema_matched"
-          ? "schema_mismatch" // Defensive: if somehow format_verified but parse failed
-          : classification.reason;
-
-      // Record negative observation for future cache lookup
-      recordCapabilityObservation(
-        getClientFingerprint(),
-        inferTaskClass(state.content),
-        classification.status === "unsupported" ? "unsupported" : "failed",
-        failureReason,
-      );
-
-      // Structured execution failed → auto-degrade to standard orchestration
-      logger.warn("Structured collaboration failed, downgrading to standard orchestration", {
-        event: "host_structured_degraded",
-        reason: failureReason,
-        capabilityStatus: classification.status,
-        sessionId: state.sessionId,
-      });
-
-      // Apply degradation
-      const recovery: import("../execution/checkpoint.js").StructuredFailureResumeState & { executionPlan: import("../execution/plan.js").ExecutionPlan } = state as any;
-      const degraded = (await import("../execution/checkpoint.js")).resumeFromStructuredFailure(recovery, failureReason);
-
-      state.executionPlan = degraded.executionPlan;
-      state.checkpoint = degraded.checkpoint;
-      state.structuredDowngraded = degraded.structuredDowngraded;
-      state.capabilityStatus = degraded.capabilityStatus;
-      state.executionTransitions = degraded.executionTransitions;
-      state.mode = "orchestration";
-
-      // Try to continue with internal LLM audit from the saved Step 0 context
-      const caller = resolveSystemAuditCaller(samplingFn);
-      if (caller && state.orchestrationPreAuditContext) {
-        try {
-          const ctx = state.orchestrationPreAuditContext;
-          const prompts = await resolvePromptSegments();
-          const preAuditReport = await executeFullPipeline(
-            state.content,
-            systemAuditors,
-            ctx.localFindings ?? [],
-            caller,
-            ctx.step0Result,
-            ctx.webContextMap,
-            ctx.precedents,
-            ctx.localFindings?.find((f: any) => f.timingDescription)?.timingDescription,
-            undefined, // sendProgress not available in catch block
-            prompts,
-            strategyProvider?.getSynergyRules?.(),
-          );
-          state.preAuditReport = preAuditReport;
-          state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-          state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
-          await saveState(tmpDir, state);
-
-          if (state.step === "rstConfirmation") {
-            return toolResponse(
-              state,
-              [
-                "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式继续审计。\n",
-                buildPreAuditSummaryBlock(state, prompts),
-                "",
-                "六维风险检测已完成。是否继续进行舆论仿真推演？",
-                "",
-                "回复「继续」或「是」进入评审，回复「否」结束。",
-              ].join("\n"),
-            );
-          }
-          return handleInventoryCheck(tmpDir, state, userPersonas, samplingFn);
-        } catch (internalErr) {
-          logger.warn("Internal audit after structured degradation also failed", {
-            event: "structured_degraded_internal_failed",
-            error: getErrorInfo(internalErr).message,
-          });
-        }
-      }
-
-      // No LLM caller or internal audit failed → fall through to Host orchestration
-      state.mode = "orchestration";
-      state.step = "waitingForOrchestrationAudit";
-      setContinuation(state, "waitingForOrchestrationAudit", "preaudit_started");
-      await saveState(tmpDir, state);
-
-      return toolResponse(
-        state,
-        "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。\n" +
-        ORCHESTRATION_AUDIT_GUIDANCE +
-        buildOrchestrationAuditPrompt(
-          state.content,
-          systemAuditors,
-          state.orchestrationPreAuditContext!,
-        ),
-      );
-    }
-
-    // Already downgraded before, or format_verified but parse still failed (edge case)
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
-        "❌ 无法解析宿主 AI 返回的审计 JSON。",
+        "❌ 无法解析宿主 AI 返回的 ExecutionReceipt。",
         `错误：${info.message}`,
-        state.structuredDowngraded
-          ? "结构化协作已降级过一次，请检查 Host 输出格式后重试。"
-          : "请让宿主 AI 仅返回包含 dimensions 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
+        "请确保返回符合 protocol.ts 中 ExecutionReceipt 规格的 JSON 对象。",
       ].join("\n"),
     );
   }

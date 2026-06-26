@@ -26,7 +26,7 @@ export const configureToolDefinition: Tool = {
 		properties: {
 			mode: {
 				type: "string",
-				enum: ["auto", "orchestration", "mcp_sampling", "mcp_subagent", "direct_api"],
+				enum: ["auto", "orchestration", "mcp_subagent"],
 				description: "执行模式。不传则不修改当前值。",
 			},
 			maxConcurrency: {
@@ -34,14 +34,14 @@ export const configureToolDefinition: Tool = {
 				minimum: 1,
 				maximum: 10,
 				description:
-					"最大并发数（仅 mcp_sampling / mcp_subagent / direct_api 模式生效）。不传则不修改。",
+					"最大并发数（仅 mcp_subagent 模式生效）。不传则不修改。",
 			},
 		},
 	},
 };
 
 export interface ConfigureInput {
-	mode?: "auto" | "orchestration" | "mcp_sampling" | "mcp_subagent" | "direct_api";
+	mode?: "auto" | "orchestration" | "mcp_subagent";
 	maxConcurrency?: number;
 }
 
@@ -92,9 +92,7 @@ export async function handleConfigure(
 			const modeLabels: Record<string, string> = {
 				auto: "自动",
 				orchestration: "宿主辅助兜底模式",
-				mcp_sampling: "MCP 采样模式",
 				mcp_subagent: "MCP Subagent 并行调度模式",
-				direct_api: "直接 API 模式",
 			};
 			changes.push(`执行模式：${modeLabels[input.mode]}`);
 		}

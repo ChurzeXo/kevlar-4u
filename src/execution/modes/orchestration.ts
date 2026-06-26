@@ -113,35 +113,10 @@ export const orchestrationHandler: ExecutionHandler = {
   },
 
   async execute(ctx: ExecutionContext): Promise<ExecutionResult> {
-    const { personas, content, context: contextNote, dimensions, samplingFn } = ctx;
+    const { personas, content, context: contextNote, dimensions } = ctx;
 
     const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
     const prompt = buildOrchestrationPrompt(content, personas, contextNote, dimsConfig, ctx.preAuditReport);
-
-    // 如果有 samplingFn（例如显式指定 orchestration 模式但仍有 API 能力），
-    // 直接执行 prompt 并解析结果，避免纯粹返回 prompt 依赖宿主二次执行。
-    if (samplingFn) {
-      try {
-        const response = await samplingFn({
-          systemPrompt: "",
-          message: prompt,
-          maxTokens: 8192,
-        });
-        const parsed = parsePersonaOutputs(response.content, personas.length);
-        const sections = parsed.map((p) => {
-          const personaName = personas[p.index - 1]?.meta.name ?? `审查员 ${p.index}`;
-          const sourceNote = p.source === "findings_tag" ? "" : "\n> ⚠️ 该结果来自 PERSONA_END 切割（含推理过程），非纯 findings 标签提取。";
-          return `## ${personaName}\n\n${p.content}${sourceNote}`;
-        });
-        return {
-          report: sections.join("\n\n---\n\n"),
-          personas: personas.map((p) => p.meta.id),
-          mode: MODE,
-        };
-      } catch {
-        // 执行失败则回退到返回 prompt（宿主兜底）
-      }
-    }
 
     return {
       report: prompt,

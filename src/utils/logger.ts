@@ -1,7 +1,4 @@
-/**
- * Structured logging module for Kevlar-4u
- * Uses pino for production-grade performance
- */
+import fs from "fs";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -15,6 +12,30 @@ interface Logger {
   info(msg: string, ctx?: LogContext): void;
   warn(msg: string, ctx?: LogContext): void;
   error(msg: string, ctx?: LogContext): void;
+}
+
+let _ttyFd: number | null | undefined;
+
+function getTtyFd(): number | null {
+  if (_ttyFd !== undefined) return _ttyFd;
+  try {
+    _ttyFd = fs.openSync("/dev/tty", "w");
+  } catch {
+    _ttyFd = null;
+  }
+  return _ttyFd;
+}
+
+function writeLog(line: string): void {
+  process.stderr.write(line + "\n");
+  const ttyFd = getTtyFd();
+  if (ttyFd !== null) {
+    try {
+      fs.writeSync(ttyFd, line + "\n");
+    } catch {
+      _ttyFd = null;
+    }
+  }
 }
 
 function createLogger(): Logger {
@@ -46,21 +67,25 @@ function createLogger(): Logger {
   return {
     debug(msg: string, ctx?: LogContext): void {
       if (!shouldLog("debug")) return;
-      console.error(`[${formatTimestamp()}] DEBUG: ${msg}${formatCtx(ctx)}`);
+      writeLog(`[${formatTimestamp()}] DEBUG: ${msg}${formatCtx(ctx)}`);
     },
     info(msg: string, ctx?: LogContext): void {
       if (!shouldLog("info")) return;
-      console.error(`[${formatTimestamp()}] INFO: ${msg}${formatCtx(ctx)}`);
+      writeLog(`[${formatTimestamp()}] INFO: ${msg}${formatCtx(ctx)}`);
     },
     warn(msg: string, ctx?: LogContext): void {
       if (!shouldLog("warn")) return;
-      console.error(`[${formatTimestamp()}] WARN: ${msg}${formatCtx(ctx)}`);
+      writeLog(`[${formatTimestamp()}] WARN: ${msg}${formatCtx(ctx)}`);
     },
     error(msg: string, ctx?: LogContext): void {
       if (!shouldLog("error")) return;
-      console.error(`[${formatTimestamp()}] ERROR: ${msg}${formatCtx(ctx)}`);
+      writeLog(`[${formatTimestamp()}] ERROR: ${msg}${formatCtx(ctx)}`);
     },
   };
 }
 
 export const logger = createLogger();
+
+export function writeRawStderr(line: string): void {
+  writeLog(line);
+}

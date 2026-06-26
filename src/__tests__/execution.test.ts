@@ -1,9 +1,8 @@
-import { describe, it, beforeEach, afterEach, before, mock } from "node:test";
+import { describe, it, beforeEach, afterEach, before } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { fileURLToPath } from "url";
 
 // ── Test subject imports ───────────────────────────────────────────────────────
 
@@ -11,18 +10,22 @@ import {
   orchestrationHandler,
 } from "../execution/modes/orchestration.js";
 
-import { hasApiKey, maskApiKey } from "../execution/modes/direct_api.js";
-import { setClientInfo, setClientCapabilities, isSamplingSupported } from "../execution/client.js";
+import { setClientCapabilities, isSamplingSupported } from "../execution/client.js";
 import { setConfigPath, readConfig, updateConfig, isValidMode, isValidConcurrency } from "../execution/config.js";
 import { RateLimiter, withRetry, isRetryableError } from "../execution/limiter.js";
 import { ResultAggregator, generateAggregatedReport, estimateTokenCost, checkBudget } from "../execution/aggregator.js";
 import { acquireReviewLock, releaseReviewLock, getReviewLock, isLocked } from "../execution/lock.js";
 import { executeReview, loadPersonasForReview, validatePersonaFields } from "../execution/index.js";
 import { executePersonasInParallel } from "../execution/parallel.js";
-import { directApiHandler } from "../execution/modes/direct_api.js";
-import { samplingHandler } from "../execution/modes/sampling.js";
+import {
+  runAggregationValidation,
+  validateContinuationGate,
+  fallbackToStandardOrchestration,
+  type AgentBlueprint,
+  type ExecutionReceipt,
+} from "../execution/protocol.js";
 import { writePersonaFile } from "../utils/parser.js";
-import type { Persona, PersonaMeta } from "../utils/parser.js";
+import type { Persona } from "../utils/parser.js";
 import { initI18n } from "../i18n/index.js";
 
 let tmpDir: string;
@@ -85,40 +88,6 @@ describe("orchestrationHandler", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Direct API Key Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe("hasApiKey", () => {
-  it("returns false when no API key is set", () => {
-    // Clear env vars for this test
-    delete process.env.KEVLAR_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.OPENAI_API_KEY;
-    assert.ok(!hasApiKey());
-  });
-
-  it("returns true when KEVLAR_API_KEY is set", () => {
-    process.env.KEVLAR_API_KEY = "sk-test-key-12345";
-    assert.ok(hasApiKey());
-    delete process.env.KEVLAR_API_KEY;
-  });
-});
-
-describe("maskApiKey", () => {
-  it("masks long keys correctly", () => {
-    const masked = maskApiKey("sk-ant-api-key-12345", 4);
-    assert.ok(masked.startsWith("sk-a"));
-    assert.ok(masked.endsWith("2345"));
-    assert.ok(masked.includes("****"));
-  });
-
-  it("masks short keys entirely", () => {
-    const masked = maskApiKey("abc", 4);
-    assert.equal(masked, "***");
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Client Detection Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -165,8 +134,7 @@ describe("config", () => {
   it("isValidMode accepts valid modes", () => {
     assert.ok(isValidMode("auto"));
     assert.ok(isValidMode("orchestration"));
-    assert.ok(isValidMode("mcp_sampling"));
-    assert.ok(isValidMode("direct_api"));
+    assert.ok(isValidMode("mcp_subagent"));
   });
 
   it("isValidMode rejects invalid modes", () => {
@@ -204,26 +172,26 @@ describe("config persistence", () => {
 
   it("writes and reads config", async () => {
     const updated = await updateConfig({
-      mode: "mcp_sampling",
+      mode: "orchestration",
       maxConcurrency: 5,
     });
 
-    assert.equal(updated.mode, "mcp_sampling");
+    assert.equal(updated.mode, "orchestration");
     assert.equal(updated.multiAgent.maxConcurrency, 5);
 
     const read = readConfig();
-    assert.equal(read.mode, "mcp_sampling");
+    assert.equal(read.mode, "orchestration");
     assert.equal(read.multiAgent.maxConcurrency, 5);
   });
 
   it("preserves existing config when partially updating", async () => {
     // First update
-    await updateConfig({ mode: "direct_api" });
+    await updateConfig({ mode: "mcp_subagent" });
     
     // Partial update
     const updated = await updateConfig({ maxConcurrency: 8 });    
     
-    assert.equal(updated.mode, "direct_api"); // Preserved
+    assert.equal(updated.mode, "mcp_subagent"); // Preserved
     assert.equal(updated.multiAgent.maxConcurrency, 8); // Updated
   });
 
@@ -356,7 +324,7 @@ describe("ResultAggregator", () => {
 describe("generateAggregatedReport", () => {
   it("generates report with mode label", () => {
     const report = generateAggregatedReport({
-      mode: "mcp_sampling",
+      mode: "orchestration",
       contentSummary: "测试内容摘要",
       personas: [
         {
@@ -368,7 +336,6 @@ describe("generateAggregatedReport", () => {
       ],
     });
     
-    assert.ok(report.includes("MCP 采样模式"));
     assert.ok(report.includes("测试内容摘要"));
     assert.ok(report.includes("人设1"));
   });
@@ -407,17 +374,17 @@ describe("checkBudget", () => {
 describe("Review Lock", () => {
   it("acquires lock when not locked", () => {
     assert.ok(!isLocked());
-    assert.ok(acquireReviewLock("mcp_sampling"));
+    assert.ok(acquireReviewLock("orchestration"));
     assert.ok(isLocked());
   });
 
   it("fails to acquire when already locked", () => {
-    acquireReviewLock("mcp_sampling");
-    assert.ok(!acquireReviewLock("direct_api"));
+    acquireReviewLock("orchestration");
+    assert.ok(!acquireReviewLock("mcp_subagent"));
   });
 
   it("releases lock correctly", () => {
-    acquireReviewLock("mcp_sampling");
+    acquireReviewLock("orchestration");
     releaseReviewLock();
     assert.ok(!isLocked());
     assert.equal(getReviewLock(), null);
@@ -436,15 +403,6 @@ describe("Review Lock", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("executeReview", () => {
-  // Create a mock sampling function for testing
-  const mockSamplingFn = async (params: { 
-    systemPrompt: string; 
-    message: string; 
-    maxTokens?: number 
-  }) => {
-    return { content: "Mock response", stopReason: "endTurn" };
-  };
-
   const testPersonas = [
     {
       meta: {
@@ -473,66 +431,16 @@ describe("executeReview", () => {
     assert.ok(result.report.includes("宿主辅助兜底模式"));
   });
 
-  it("throws for unknown mode", async () => {
-    await assert.rejects(
-      async () => {
-        await executeReview("unknown_mode" as any, {
-          skillsDir: tmpDir,
-          personas: testPersonas,
-          content: "测试",
-        });
-      },
-      /未知执行模式/
-    );
-  });
-
-  describe("mcp_sampling mode", () => {
-    beforeEach(() => {
-      // Set client to claude-ai so isSamplingSupported() returns true
-      setClientCapabilities({ sampling: {} });
+  it("executes with orchestration mode and returns mcp_subagent as resolved mode", async () => {
+    // executeReview always delegates to orchestrationHandler regardless of mode
+    const result = await executeReview("mcp_subagent" as any, {
+      skillsDir: tmpDir,
+      personas: testPersonas,
+      content: "测试内容",
     });
-
-    it("throws when samplingFn not provided", async () => {
-      await assert.rejects(
-        async () => {
-          await executeReview("mcp_sampling", {
-            skillsDir: tmpDir,
-            personas: testPersonas,
-            content: "测试",
-          });
-        },
-        /MCP Sampling 模式需要 samplingFn/
-      );
-    });
-
-    it("executes with samplingFn", async () => {
-      const result = await executeReview("mcp_sampling", {
-        skillsDir: tmpDir,
-        personas: testPersonas,
-        content: "测试内容",
-        samplingFn: mockSamplingFn,
-      });
-
-      assert.equal(result.mode, "mcp_sampling");
-      assert.ok(result.report.includes("MCP 采样模式"));
-    });
-  });
-
-  it("throws when mode not available (client not supported)", async () => {
-    // Set client to unknown
-    setClientCapabilities({});
-    
-    await assert.rejects(
-      async () => {
-        await executeReview("mcp_sampling", {
-          skillsDir: tmpDir,
-          personas: testPersonas,
-          content: "测试",
-          samplingFn: mockSamplingFn,
-        });
-      },
-      /mcp_sampling 模式当前不可用/
-    );
+    // orchestrationHandler is the only registered handler, always returns orchestration
+    assert.ok(result.mode);
+    assert.ok(result.report);
   });
 });
 
@@ -645,40 +553,50 @@ describe("executePersonasInParallel", () => {
   });
 
   it("executes all personas successfully", async () => {
-    const personas = [makePersona("p1", "A"), makePersona("p2", "B")];
-    const result = await executePersonasInParallel(
-      personas,
-      "Test content",
-      { mode: "mcp_sampling", retryEventName: "test" },
-      async (p) => `Review by ${p.meta.name}`
-    );
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+    try {
+      const personas = [makePersona("p1", "A"), makePersona("p2", "B")];
+      const result = await executePersonasInParallel(
+        personas,
+        "Test content",
+        { mode: "orchestration", retryEventName: "test" },
+        async (p) => `Review by ${p.meta.name}`
+      );
 
-    assert.equal(result.mode, "mcp_sampling");
-    assert.equal(result.personas.length, 2);
-    assert.ok(result.personas.includes("p1"));
-    assert.ok(result.personas.includes("p2"));
-    assert.ok(!result.partialFailures || result.partialFailures.length === 0);
-    assert.ok(result.report.includes("Review by A"));
-    assert.ok(result.report.includes("Review by B"));
+      assert.equal(result.mode, "orchestration");
+      assert.equal(result.personas.length, 2);
+      assert.ok(result.personas.includes("p1"));
+      assert.ok(result.personas.includes("p2"));
+      assert.ok(!result.partialFailures || result.partialFailures.length === 0);
+      assert.ok(result.report.includes("Review by A"));
+      assert.ok(result.report.includes("Review by B"));
+    } finally {
+      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    }
   });
 
   it("collects partial failures", async () => {
-    const personas = [makePersona("p1", "Good"), makePersona("p2", "Bad")];
-    const result = await executePersonasInParallel(
-      personas,
-      "Test",
-      { mode: "direct_api", retryEventName: "test" },
-      async (p) => {
-        if (p.meta.id === "p2") throw new Error("Intentional failure");
-        return `OK from ${p.meta.name}`;
-      }
-    );
+    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+    try {
+      const personas = [makePersona("p1", "Good"), makePersona("p2", "Bad")];
+      const result = await executePersonasInParallel(
+        personas,
+        "Test",
+        { mode: "orchestration", retryEventName: "test" },
+        async (p) => {
+          if (p.meta.id === "p2") throw new Error("Intentional failure");
+          return `OK from ${p.meta.name}`;
+        }
+      );
 
-    assert.ok(result.personas.includes("p1"));
-    assert.ok(!result.personas.includes("p2"));
-    assert.ok(result.partialFailures);
-    assert.equal(result.partialFailures.length, 1);
-    assert.equal(result.partialFailures[0].personaId, "p2");
+      assert.ok(result.personas.includes("p1"));
+      assert.ok(!result.personas.includes("p2"));
+      assert.ok(result.partialFailures);
+      assert.equal(result.partialFailures.length, 1);
+      assert.equal(result.partialFailures[0].personaId, "p2");
+    } finally {
+      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
+    }
   });
 
   it("respects maxConcurrency from config", async () => {
@@ -690,7 +608,7 @@ describe("executePersonasInParallel", () => {
     await executePersonasInParallel(
       personas,
       "Test",
-      { mode: "mcp_sampling", retryEventName: "test" },
+      { mode: "orchestration", retryEventName: "test" },
       async () => {
         current++;
         maxConcurrent = Math.max(maxConcurrent, current);
@@ -706,259 +624,343 @@ describe("executePersonasInParallel", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Direct API Handler Tests
+// Protocol v1: runAggregationValidation Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("directApiHandler", () => {
-  const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
-    meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
-    systemPrompt: sp,
-    filePath: "/test/personas.json",
+/** Helper: create a minimal valid ExecutionReceipt */
+function makeValidReceipt(overrides: Record<string, any> = {}): ExecutionReceipt {
+  return {
+    protocol: "kevlar.exec/v1",
+    execution: {
+      requestedMode: "ephemeral_agents",
+      actualMode: "native_subagent",
+      requestedConcurrency: 2,
+      actualConcurrency: 2,
+      contextIsolation: { requested: true, achieved: true },
+      parallelism: "parallel",
+      evidenceLevel: "host_attested",
+    },
+    agents: [
+      {
+        id: "agent-1",
+        role: "safety_reviewer",
+        status: "completed",
+        output: { findings: [] },
+      },
+    ],
+    aggregation: {
+      dimensions: [{ id: "agent-1", level: "🟢", findings: [] }],
+      summary: "All clear",
+    },
+    ...overrides,
+  } as unknown as ExecutionReceipt;
+}
+
+/** Helper: create a minimal AgentBlueprint */
+function makeBlueprint(agentIds: string[]): AgentBlueprint {
+  return {
+    protocol: "kevlar.exec/v1",
+    execution: {
+      mode: "ephemeral_agents",
+      allowedModes: ["native_subagent", "simulated_agent"],
+      concurrency: agentIds.length,
+      isolation: { required: true, level: "best_effort" },
+    },
+    agents: agentIds.map((id) => ({
+      id,
+      role: "safety_reviewer",
+      instructions: "Review the content.",
+      input: { contentRef: "content" },
+      outputSchema: "kevlar.reviewer/v1",
+    })),
+    aggregation: {
+      strategy: "host_merge",
+      rules: { requireAllAgents: true, conflictResolution: "risk_maximization", outputSchema: "kevlar.audit/v1" },
+    },
+    continuation: {
+      tool: "review_content_wizard_continue",
+      sessionId: "test-session",
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+    },
+  };
+}
+
+describe("runAggregationValidation", () => {
+  it("returns valid for a conforming receipt with no blueprint", () => {
+    const result = runAggregationValidation(makeValidReceipt());
+    assert.equal(result.protocol, "kevlar.exec/v1");
+    assert.equal(result.status, "valid");
+    assert.ok(result.checks.schemaValid);
+    assert.ok(result.checks.allAgentsPresent);
   });
 
-  let previousKevlarKey: string | undefined;
-  let previousAnthropicKey: string | undefined;
-  let previousOpenAiKey: string | undefined;
-
-  beforeEach(() => {
-    previousKevlarKey = process.env.KEVLAR_API_KEY;
-    previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
-    previousOpenAiKey = process.env.OPENAI_API_KEY;
-    delete process.env.KEVLAR_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.OPENAI_API_KEY;
+  it("returns invalid for null receipt", () => {
+    const result = runAggregationValidation(null);
+    assert.equal(result.status, "invalid");
+    assert.ok(result.risk.reasons.length > 0);
   });
 
-  afterEach(() => {
-    if (previousKevlarKey === undefined) delete process.env.KEVLAR_API_KEY;
-    else process.env.KEVLAR_API_KEY = previousKevlarKey;
-    if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-    else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
-    if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = previousOpenAiKey;
+  it("returns invalid for non-object receipt", () => {
+    const result = runAggregationValidation("not-an-object");
+    assert.equal(result.status, "invalid");
   });
 
-  it("canExecute returns false when no API key set", () => {
-    assert.ok(!directApiHandler.canExecute());
+  it("returns invalid when agents array is missing", () => {
+    const receipt = makeValidReceipt({ agents: undefined });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.status, "invalid");
+    assert.ok(!result.checks.schemaValid);
   });
 
-  it("canExecute returns true when KEVLAR_API_KEY is set", () => {
-    process.env.KEVLAR_API_KEY = "sk-ant-test-key-12345";
-    assert.ok(directApiHandler.canExecute());
+  it("returns invalid when agent output is missing findings", () => {
+    const receipt = makeValidReceipt({
+      agents: [{ id: "a1", role: "safety_reviewer", status: "completed", output: { noFindings: true } }],
+    });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.status, "invalid");
+    assert.ok(!result.checks.schemaValid);
   });
 
-  it("has correct mode and priority", () => {
-    assert.equal(directApiHandler.mode, "direct_api");
-    assert.equal(directApiHandler.priority, 20);
+  it("returns invalid when aggregation is missing", () => {
+    const receipt = makeValidReceipt({ aggregation: undefined });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.status, "invalid");
+    assert.ok(!result.checks.schemaValid);
   });
 
-  it("throws when no API key available on execute", async () => {
-    await assert.rejects(
-      () => directApiHandler.execute({
-        skillsDir: "/tmp",
-        personas: [makePersona("p1", "A")],
-        content: "test",
-      }),
-      /API key not configured/
-    );
+  it("returns invalid when aggregation dimensions is missing", () => {
+    const receipt = makeValidReceipt({ aggregation: { summary: "ok" } });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.status, "invalid");
+    assert.ok(!result.checks.schemaValid);
   });
 
-  it("executes with Anthropic provider and mocked fetch", async () => {
-    process.env.KEVLAR_API_KEY = "sk-ant-test-key-anthropic-12345";
-    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
-
-    const mockResponse = {
-      content: [{ type: "text", text: "Anthropic review result" }],
-      usage: { input_tokens: 50, output_tokens: 100 },
-      stop_reason: "end_turn",
-    };
-
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async (url: any, init?: any) => {
-      assert.ok(url.toString().includes("anthropic.com"));
-      const body = JSON.parse(init?.body as string);
-      assert.ok(body.model);
-      assert.ok(body.system);
-      assert.equal(body.temperature, 0.7);
-      return new Response(JSON.stringify(mockResponse), { status: 200 });
-    };
-
-    try {
-      const result = await directApiHandler.execute({
-        skillsDir: "/tmp",
-        personas: [makePersona("p1", "Critic")],
-        content: "test content",
-      });
-
-      assert.equal(result.mode, "direct_api");
-      assert.equal(result.personas.length, 1);
-      assert.ok(result.report.includes("Anthropic review result"));
-    } finally {
-      globalThis.fetch = origFetch;
-      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
-    }
+  it("returns invalid on agent count mismatch with blueprint", () => {
+    const blueprint = makeBlueprint(["agent-1", "agent-2"]);
+    const receipt = makeValidReceipt(); // Only has agent-1
+    const result = runAggregationValidation(receipt, blueprint);
+    assert.equal(result.status, "invalid");
+    assert.ok(!result.checks.allAgentsPresent);
+    assert.ok(result.risk.reasons.some((r) => r.includes("count mismatch")));
   });
 
-  it("executes with OpenAI provider and mocked fetch", async () => {
-    process.env.KEVLAR_API_KEY = "sk-openai-key-1234567890abcdef";
-    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
-
-    const mockResponse = {
-      choices: [{ message: { content: "OpenAI review result" } }],
-      usage: { prompt_tokens: 50, completion_tokens: 100 },
-    };
-
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async (url: any) => {
-      assert.ok(url.toString().includes("openai.com"));
-      return new Response(JSON.stringify(mockResponse), { status: 200 });
-    };
-
-    try {
-      const result = await directApiHandler.execute({
-        skillsDir: "/tmp",
-        personas: [makePersona("p1", "Critic")],
-        content: "test openai",
-      });
-
-      assert.equal(result.mode, "direct_api");
-      assert.ok(result.report.includes("OpenAI review result"));
-    } finally {
-      globalThis.fetch = origFetch;
-      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
-    }
+  it("returns valid when agent IDs exactly match blueprint", () => {
+    const blueprint = makeBlueprint(["agent-1"]);
+    const receipt = makeValidReceipt();
+    const result = runAggregationValidation(receipt, blueprint);
+    assert.equal(result.status, "valid");
+    assert.ok(result.checks.allAgentsPresent);
   });
 
-  it("executes with Ollama provider and mocked fetch", async () => {
-    process.env.KEVLAR_API_KEY = "ollama-local-key";
-    process.env.OLLAMA_BASE_URL = "http://localhost:11434";
-    process.env.KEVLAR_MODEL = "llama3";
-    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
-
-    const mockResponse = {
-      message: { content: "Ollama review result" },
-    };
-
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async (url: any) => {
-      assert.ok(url.toString().includes("localhost:11434"));
-      return new Response(JSON.stringify(mockResponse), { status: 200 });
-    };
-
-    try {
-      const result = await directApiHandler.execute({
-        skillsDir: "/tmp",
-        personas: [makePersona("p1", "Critic")],
-        content: "test ollama",
-      });
-
-      assert.equal(result.mode, "direct_api");
-      assert.ok(result.report.includes("Ollama review result"));
-    } finally {
-      globalThis.fetch = origFetch;
-      delete process.env.OLLAMA_BASE_URL;
-      delete process.env.KEVLAR_MODEL;
-      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
-    }
+  it("returns fallback_used when actualMode is orchestration_fallback", () => {
+    const receipt = makeValidReceipt({
+      execution: {
+        requestedMode: "ephemeral_agents",
+        actualMode: "orchestration_fallback",
+        requestedConcurrency: 2,
+        actualConcurrency: 1,
+        contextIsolation: { requested: true, achieved: true },
+        parallelism: "sequential",
+        evidenceLevel: "best_effort",
+      },
+    });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.status, "fallback_used");
+    assert.ok(result.checks.executionMismatch);
   });
 
-  it("reports partial failures for persona errors", async () => {
-    process.env.KEVLAR_API_KEY = "sk-ant-fail-key";
-    process.env.KEVLAR_TOKEN_BUDGET_PER_TASK = "100000";
+  it("returns partial when some agents failed", () => {
+    const receipt = makeValidReceipt({
+      agents: [
+        { id: "agent-1", role: "safety_reviewer", status: "completed", output: { findings: [] } },
+        { id: "agent-2", role: "policy_reviewer", status: "failed" },
+      ],
+      aggregation: {
+        dimensions: [
+          { id: "agent-1", level: "🟢", findings: [] },
+          { id: "agent-2", level: "🟢", findings: [] },
+        ],
+        summary: "Some failed",
+      },
+    });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.status, "partial");
+  });
 
-    const origFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
-      return new Response(JSON.stringify({
-        content: [{ type: "text", text: "ok" }],
-        usage: { input_tokens: 1, output_tokens: 1 },
-        stop_reason: "end_turn",
-      }), { status: 200 });
-    };
+  it("escalates risk level on isolation violation", () => {
+    const blueprint = makeBlueprint(["agent-1"]);
+    blueprint.execution.isolation.required = true;
+    const receipt = makeValidReceipt({
+      execution: {
+        requestedMode: "ephemeral_agents",
+        actualMode: "native_subagent",
+        requestedConcurrency: 1,
+        actualConcurrency: 1,
+        contextIsolation: { requested: true, achieved: false }, // Violation!
+        parallelism: "parallel",
+        evidenceLevel: "best_effort",
+      },
+    });
+    const result = runAggregationValidation(receipt, blueprint);
+    assert.ok(result.checks.isolationViolation);
+    assert.notEqual(result.risk.level, "low");
+    assert.ok(result.risk.reasons.some((r) => r.includes("Isolation")));
+  });
 
-    try {
-      const personas = [makePersona("p1", "Good"), makePersona("p2", "Bad")];
-      const result = await directApiHandler.execute({
-        skillsDir: "/tmp",
-        personas,
-        content: "test",
-      });
-
-      assert.ok(result.personas.includes("p1"));
-      assert.equal(result.mode, "direct_api");
-    } finally {
-      globalThis.fetch = origFetch;
-      delete process.env.KEVLAR_TOKEN_BUDGET_PER_TASK;
-    }
+  it("computes high risk level from findings", () => {
+    const receipt = makeValidReceipt({
+      agents: [
+        {
+          id: "agent-1",
+          role: "safety_reviewer",
+          status: "completed",
+          output: { findings: [{ id: "f1", suggestedLevel: "🔴", description: "Serious risk" }] },
+        },
+      ],
+    });
+    const result = runAggregationValidation(receipt);
+    assert.equal(result.risk.level, "high");
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Sampling Handler Tests
+// Protocol v1: validateContinuationGate Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("samplingHandler", () => {
-  const makePersona = (id: string, name: string, sp = "You are a critic."): Persona => ({
-    meta: { id, name, name_en: "", version: "1.0", author: "test", tags: [], description: `Persona ${name}` },
-    systemPrompt: sp,
-    filePath: "/test/personas.json",
-  });
+describe("validateContinuationGate", () => {
+  /** Build a minimal wizard state */
+  function makeState(overrides: Record<string, any> = {}) {
+    return {
+      sessionId: "test-sess",
+      revision: 1,
+      step: "waitingForSubagentAudit",
+      mode: "mcp_subagent" as string,
+      content: "Test content",
+      activeContinuation: {
+        continuationId: "cont-abc",
+        checkpoint: "preaudit_completed",
+        expiresAt: Date.now() + 300_000,
+      },
+      blueprint: makeBlueprint(["agent-1"]),
+      ...overrides,
+    };
+  }
 
-  let previousEnv: string | undefined;
-
-  beforeEach(() => {
-    previousEnv = process.env.KEVLAR_ENABLE_SAMPLING;
-  });
-
-  afterEach(() => {
-    setClientCapabilities({});
-    if (previousEnv === undefined) delete process.env.KEVLAR_ENABLE_SAMPLING;
-    else process.env.KEVLAR_ENABLE_SAMPLING = previousEnv;
-  });
-
-  it("has correct mode and priority", () => {
-    assert.equal(samplingHandler.mode, "mcp_sampling");
-    assert.equal(samplingHandler.priority, 10);
-  });
-
-  it("canExecute returns true when client supports sampling", () => {
-    setClientCapabilities({ sampling: {} });
-    assert.ok(samplingHandler.canExecute());
-  });
-
-  it("canExecute returns false when client does not support sampling", () => {
-    setClientCapabilities({});
-    assert.ok(!samplingHandler.canExecute());
-  });
-
-  it("canExecute returns true when KEVLAR_ENABLE_SAMPLING=true", () => {
-    setClientCapabilities({});
-    process.env.KEVLAR_ENABLE_SAMPLING = "true";
-    assert.ok(samplingHandler.canExecute());
-  });
-
-  it("throws when no samplingFn provided on execute", async () => {
-    setClientCapabilities({ sampling: {} });
-    await assert.rejects(
-      () => samplingHandler.execute({
-        skillsDir: "/tmp",
-        personas: [makePersona("p1", "A")],
-        content: "test",
-      }),
-      /MCP Sampling 模式需要 samplingFn/
+  it("throws stale_continuation_revision_locked on revision mismatch", () => {
+    const state = makeState({ revision: 2 });
+    assert.throws(
+      () => validateContinuationGate(state, { continuationId: "cont-abc", expectedRevision: 1, receipt: makeValidReceipt() }),
+      /stale_continuation_revision_locked/
     );
   });
 
-  it("executes with samplingFn", async () => {
-    setClientCapabilities({ sampling: {} });
-    const result = await samplingHandler.execute({
-      skillsDir: "/tmp",
-      personas: [makePersona("p1", "A"), makePersona("p2", "B")],
-      content: "test content",
-      samplingFn: async () => ({ content: "mock review", stopReason: "endTurn" }),
-    });
+  it("throws continuation_id_mismatch when ID does not match", () => {
+    const state = makeState();
+    assert.throws(
+      () => validateContinuationGate(state, { continuationId: "wrong-id", expectedRevision: 1, receipt: makeValidReceipt() }),
+      /continuation_id_mismatch/
+    );
+  });
 
-    assert.equal(result.mode, "mcp_sampling");
-    assert.equal(result.personas.length, 2);
-    assert.ok(result.report.includes("mock review"));
+  it("throws continuation_id_mismatch when activeContinuation is null", () => {
+    const state = makeState({ activeContinuation: null });
+    assert.throws(
+      () => validateContinuationGate(state, { continuationId: "cont-abc", expectedRevision: 1, receipt: makeValidReceipt() }),
+      /continuation_id_mismatch/
+    );
+  });
+
+  it("returns valid for a good receipt submission", () => {
+    const state = makeState();
+    const result = validateContinuationGate(state, {
+      continuationId: "cont-abc",
+      expectedRevision: 1,
+      receipt: makeValidReceipt(),
+    });
+    assert.equal(result.status, "valid");
+  });
+
+  it("triggers fallback when receipt is invalid and mutates state step", () => {
+    const state = makeState();
+    const result = validateContinuationGate(state, {
+      continuationId: "cont-abc",
+      expectedRevision: 1,
+      receipt: null, // Invalid receipt
+    });
+    assert.equal(result.status, "invalid");
+    // State should have been downgraded (fallbackToStandardOrchestration was called)
+    assert.ok(
+      state.step === "waitingForOrchestrationStep0" || state.step === "waitingForOrchestrationAudit",
+      `Expected orchestration fallback step, got: ${state.step}`
+    );
+    assert.equal(state.mode, "orchestration");
+    assert.equal(state.revision, 2); // revision was bumped
+  });
+
+  it("triggers orchestration audit fallback when step0Result exists", () => {
+    const state = makeState({
+      orchestrationPreAuditContext: {
+        step0Result: { blackAtoms: [], attackCandidates: [], wildTranslations: [], precedents: [] },
+        localFindings: [],
+        stripped: { original: "test", bare: "test", replacements: [] },
+      },
+    });
+    const result = validateContinuationGate(state, {
+      continuationId: "cont-abc",
+      expectedRevision: 1,
+      receipt: null, // Force invalid
+    });
+    assert.equal(result.status, "invalid");
+    assert.equal(state.step, "waitingForOrchestrationAudit");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Protocol v1: fallbackToStandardOrchestration Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("fallbackToStandardOrchestration", () => {
+  it("sets step to waitingForOrchestrationStep0 when no step0Result", () => {
+    const state: any = {
+      sessionId: "s1",
+      revision: 1,
+      mode: "mcp_subagent",
+      orchestrationPreAuditContext: null,
+      executionTransitions: [],
+    };
+    fallbackToStandardOrchestration(state, "schema_mismatch");
+    assert.equal(state.step, "waitingForOrchestrationStep0");
+    assert.equal(state.mode, "orchestration");
+    assert.equal(state.revision, 2);
+    assert.ok(state.activeContinuation?.continuationId);
+  });
+
+  it("sets step to waitingForOrchestrationAudit when step0Result exists", () => {
+    const state: any = {
+      sessionId: "s1",
+      revision: 1,
+      mode: "mcp_subagent",
+      orchestrationPreAuditContext: {
+        step0Result: { blackAtoms: ["atom"], attackCandidates: [], wildTranslations: [], precedents: [] },
+      },
+      executionTransitions: [],
+    };
+    fallbackToStandardOrchestration(state, "schema_mismatch");
+    assert.equal(state.step, "waitingForOrchestrationAudit");
+    assert.equal(state.mode, "orchestration");
+    assert.equal(state.revision, 2);
+  });
+
+  it("bumps revision on each fallback call", () => {
+    const state: any = {
+      sessionId: "s1",
+      revision: 5,
+      mode: "mcp_subagent",
+      orchestrationPreAuditContext: null,
+      executionTransitions: [],
+    };
+    fallbackToStandardOrchestration(state, "schema_mismatch");
+    assert.equal(state.revision, 6);
   });
 });

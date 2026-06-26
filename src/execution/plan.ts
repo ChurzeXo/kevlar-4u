@@ -13,7 +13,7 @@ import type { Step0Result, Precedent } from "../prompts/reviewWizard.js";
 // ── Execution Backend ──────────────────────────────────────────────────────────
 
 /** Who actually performs the model calls during a review run. */
-export type ExecutionBackend = "direct_api" | "mcp_sampling" | "host_orchestration";
+export type ExecutionBackend = "host_orchestration";
 
 /**
  * When backend is "host_orchestration", what collaboration protocol
@@ -29,36 +29,7 @@ export type HostOrchestrationStrategy = "structured" | "standard";
  * (strategy, only relevant for host_orchestration).
  */
 export type ExecutionPlan =
-  | { backend: "direct_api" }
-  | { backend: "mcp_sampling"; policy?: SamplingExecutionPolicy }
   | { backend: "host_orchestration"; strategy: HostOrchestrationStrategy; lighterTaskMatch?: boolean };
-
-// ── Sampling Execution Policy ─────────────────────────────────────────────────
-
-/**
- * Controls how Kevlar fans out Sampling calls.
- *
- * Sampling ≠ Subagent Dispatch. Sampling is an MCP protocol capability
- * (createMessage), not a task-scheduling primitive. Some hosts serialize
- * concurrent sampling requests or limit in-flight count.
- */
-export interface SamplingExecutionPolicy {
-  /** Maximum concurrent reviewer calls. */
-  maxConcurrency: number;
-  /** Timeout for a single createMessage call. */
-  timeoutMs: number;
-  /** Number of allowed retries per reviewer on failure. */
-  retryBudget: number;
-  /** If concurrent execution fails, retry reviewers one-by-one. */
-  fallbackToSequential: boolean;
-}
-
-export const DEFAULT_SAMPLING_POLICY: SamplingExecutionPolicy = {
-  maxConcurrency: 2,
-  timeoutMs: 30_000,
-  retryBudget: 1,
-  fallbackToSequential: true,
-};
 
 // ── Host Structured Capability Status ─────────────────────────────────────────
 

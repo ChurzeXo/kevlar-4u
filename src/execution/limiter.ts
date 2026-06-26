@@ -1,7 +1,7 @@
 /**
  * Rate Limiter with Semaphore and Exponential Backoff
  * 
- * Shared between mcp_sampling and direct_api modes.
+ * Shared by multi-agent parallel execution pipelines.
  */
 
 import { logger, getErrorInfo } from "../utils/observability.js";

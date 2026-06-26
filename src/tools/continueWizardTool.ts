@@ -2,18 +2,6 @@
  * Continuation Tool (v3)
  *
  * Provides a safe, versioned submission channel for host orchestration results.
- * Unlike raw review_content_wizard calls, this tool enforces:
- *
- * - sessionId + checkpoint + expectedRevision + continuationId matching
- * - stale submission rejection (prevents old rounds from overwriting new state)
- * - structured result validation via classifyHostStructuredResult
- *
- * ## Protocol
- *
- * After Kevlar returns a next-action contract containing {continuationId, expectedRevision},
- * the Host MUST call this tool (not review_content_wizard with raw userMessage) to
- * submit the result. Kevlar validates the continuation parameters, processes the result,
- * and returns the next action or final result.
  */
 
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -22,8 +10,9 @@ import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule, ToolDependencies } from "./types.js";
 import { isValidSessionId } from "../utils/sessionId.js";
-import { classifyHostStructuredResult, isKevlarHostGuidedResult } from "../execution/client.js";
+import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
+import { validateContinuationGate } from "../execution/index.js";
 import { handleReviewContentWizard, type ReviewWizardInput } from "./reviewContentWizardTool.js";
 
 // ── Tool Definition ───────────────────────────────────────────────────────────
@@ -65,8 +54,12 @@ export const reviewContentWizardContinueDefinition: Tool = {
         type: "string",
         description: "执行结果。可以是 JSON 结构或自然语言文本。",
       },
+      receipt: {
+        type: "object",
+        description: "符合 kevlar.exec/v1 协议的 ExecutionReceipt 结构体",
+      },
     },
-    required: ["sessionId", "checkpoint", "expectedRevision", "continuationId", "result"],
+    required: ["sessionId", "checkpoint", "expectedRevision", "continuationId"],
   },
 };
 
@@ -81,7 +74,8 @@ export const reviewContentWizardContinueModule: ToolModule = {
     const checkpoint = args.checkpoint as AuditCheckpoint;
     const expectedRevision = args.expectedRevision as number;
     const continuationId = args.continuationId as string;
-    const result = args.result as string;
+    const result = args.result as string | undefined;
+    const receiptInput = args.receipt as any;
 
     if (!sessionId || typeof sessionId !== "string") {
       return {
@@ -110,93 +104,144 @@ export const reviewContentWizardContinueModule: ToolModule = {
       };
     }
 
-    // ── Revision gate ────────────────────────────────────────────────────
-    // Prevent stale continuations (old round results) from overwriting
-    // state that has already advanced to a later revision.
-    if (typeof state.revision !== "number") {
-      // Backward compat: old state files without revision field
-      state.revision = 1;
+    // Parse receipt if in subagent audit phase
+    let receipt = receiptInput;
+    if (!receipt && result) {
+      try {
+        receipt = JSON.parse(result.trim());
+      } catch {
+        receipt = null;
+      }
     }
 
-    if (state.revision !== expectedRevision) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              "⛔ **Stale Continuation** — 此延续已过期。",
-              "",
-              `- 预期版本：${expectedRevision}`,
-              `- 当前版本：${state.revision}`,
-              `- 延续 ID：${continuationId}`,
-              "",
-              "会话状态已被更近的操作更新。请使用最新的 continuation contract 重试。",
-            ].join("\n"),
-          },
-        ],
-        isError: true,
-      };
-    }
+    // ── validateContinuationGate Integration ───────────────────────────────
+    if (state.step === "waitingForSubagentAudit") {
+      try {
+        const validationResult = validateContinuationGate(state, {
+          continuationId,
+          expectedRevision,
+          receipt,
+        });
 
-    // ── ContinuationId gate ───────────────────────────────────────────────
-    const activeContinuation = state.activeContinuation;
-    if (!activeContinuation) {
-      return {
-        content: [{ type: "text", text: "❌ 此会话没有活动的延续请求。" }],
-        isError: true,
-      };
-    }
+        if (validationResult.status === "invalid") {
+          await fs.promises.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
 
-    if (activeContinuation.continuationId !== continuationId) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              "⛔ **Continuation ID 不匹配**",
-              `期望：${activeContinuation.continuationId}`,
-              `收到：${continuationId}`,
-            ].join("\n"),
-          },
-        ],
-        isError: true,
-      };
-    }
+          const allPersonas = await loadAllPersonas(deps.skillsDir);
+          const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+          let promptText = "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。\n";
+          
+          if (state.step === "waitingForOrchestrationAudit") {
+            const { ORCHESTRATION_AUDIT_GUIDANCE } = await import("./reviewContentWizardTool.js");
+            const { buildOrchestrationAuditPrompt } = await import("../prompts/reviewWizard.js");
+            promptText += ORCHESTRATION_AUDIT_GUIDANCE + buildOrchestrationAuditPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext);
+          } else {
+            const { ORCHESTRATION_STEP0_GUIDANCE } = await import("./reviewContentWizardTool.js");
+            const { buildOrchestrationStep0Prompt } = await import("../prompts/reviewWizard.js");
+            promptText += ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, state.orchestrationPreAuditContext?.localFindings ?? [], state.orchestrationPreAuditContext?.stripped);
+          }
 
-    if (activeContinuation.checkpoint !== checkpoint) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              "⛔ **Checkpoint 不匹配**",
-              `期望：${activeContinuation.checkpoint}`,
-              `收到：${checkpoint}`,
-            ].join("\n"),
-          },
-        ],
-        isError: true,
-      };
-    }
+          const responseText = [
+            promptText,
+            "",
+            "---",
+            `会话 ID：${state.sessionId}`,
+            `预期版本：${state.revision}`,
+            `延续 ID：${state.activeContinuation?.continuationId}`,
+          ].join("\n");
 
-    if (activeContinuation.expiresAt < Date.now()) {
-      return {
-        content: [{ type: "text", text: "❌ 延续请求已过期，请重新发起审计。" }],
-        isError: true,
-      };
+          return {
+            content: [{ type: "text", text: responseText }],
+          };
+        }
+      } catch (err: any) {
+        return {
+          content: [{ type: "text", text: `❌ 门禁验证失败：${err.message}` }],
+          isError: true,
+        };
+      }
+    } else {
+      // Standard/Legacy Continuation Checks (fallback steps)
+      if (typeof state.revision !== "number") {
+        state.revision = 1;
+      }
+
+      if (state.revision !== expectedRevision) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                "⛔ **Stale Continuation** — 此延续已过期。",
+                "",
+                `- 预期版本：${expectedRevision}`,
+                `- 当前版本：${state.revision}`,
+                `- 延续 ID：${continuationId}`,
+                "",
+                "会话状态已被更近的操作更新。请使用最新的 continuation contract 重试。",
+              ].join("\n"),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const activeContinuation = state.activeContinuation;
+      if (!activeContinuation) {
+        return {
+          content: [{ type: "text", text: "❌ 此会话没有活动的延续请求。" }],
+          isError: true,
+        };
+      }
+
+      if (activeContinuation.continuationId !== continuationId) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                "⛔ **Continuation ID 不匹配**",
+                `期望：${activeContinuation.continuationId}`,
+                `收到：${continuationId}`,
+              ].join("\n"),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (activeContinuation.checkpoint !== checkpoint) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                "⛔ **Checkpoint 不匹配**",
+                `期望：${activeContinuation.checkpoint}`,
+                `收到：${checkpoint}`,
+              ].join("\n"),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      if (activeContinuation.expiresAt < Date.now()) {
+        return {
+          content: [{ type: "text", text: "❌ 延续请求已过期，请重新发起审计。" }],
+          isError: true,
+        };
+      }
     }
 
     // ── Accept continuation ──────────────────────────────────────────────
-    // Bump revision so this continuation can't be reused
     state.revision += 1;
     state.activeContinuation = undefined;
     await fs.promises.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
 
     // Route the result through the wizard using userMessage flow.
-    // The wizard's existing state machine will handle the rest.
     const wizardInput: ReviewWizardInput = {
       sessionId,
-      userMessage: result,
+      userMessage: typeof receipt === "object" ? JSON.stringify(receipt) : result || "",
       samplingFn: deps.resolveSamplingFn(),
       sendProgress: deps.sendProgress,
       strategyProvider: deps.strategyProvider,

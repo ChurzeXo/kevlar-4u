@@ -51,8 +51,6 @@ const MODE_RULES: ReadonlyArray<{
 	pattern: RegExp;
 	mode: NonNullable<ConfigureInput["mode"]>;
 }> = [
-	{ pattern: /direct[\s_-]*api|直接\s*api|直连/i, mode: "direct_api" },
-	{ pattern: /mcp[\s_-]*sampling|sampling|采样/i, mode: "mcp_sampling" },
 	{ pattern: /mcp[\s_-]*subagent|subagent|子代理|并行调度/i, mode: "mcp_subagent" },
 	{ pattern: /orchestration|编排|兜底|宿主辅助/i, mode: "orchestration" },
 	{ pattern: /auto|自动/i, mode: "auto" },
@@ -269,9 +267,7 @@ function modeLabel(mode: NonNullable<ConfigureInput["mode"]>): string {
 	const labels: Record<NonNullable<ConfigureInput["mode"]>, string> = {
 		auto: "自动",
 		orchestration: "宿主辅助兜底模式",
-		mcp_sampling: "MCP 采样模式",
 		mcp_subagent: "MCP Subagent 并行调度模式",
-		direct_api: "直接 API 模式",
 	};
 	return labels[mode];
 }

@@ -32,43 +32,43 @@ function extractSessionId(text: string): string {
 }
 
 describe("handleConfigureWizard", () => {
-  it("previews config changes without writing until confirmation", async () => {
-    const result = await handleConfigureWizard(tmpDir, {
-      userMessage: "切换到 direct api，并发 4",
-    });
+	it("previews config changes without writing until confirmation", async () => {
+		const result = await handleConfigureWizard(tmpDir, {
+			userMessage: "切换到 mcp subagent，并发 4",
+		});
 
-    const text = textOf(result);
-    assert.ok(text.includes("准备修改配置"));
-    assert.ok(text.includes("执行模式：直接 API 模式"));
-    assert.ok(text.includes("并发数：4"));
-    assert.ok(text.includes("currentStep: confirmConfigure"));
+		const text = textOf(result);
+		assert.ok(text.includes("准备修改配置"));
+		assert.ok(text.includes("执行模式：MCP Subagent 并行调度模式"));
+		assert.ok(text.includes("并发数：4"));
+		assert.ok(text.includes("currentStep: confirmConfigure"));
 
-    const config = readConfig();
-    assert.equal(config.mode, "auto");
-    assert.equal(config.multiAgent.maxConcurrency, 3);
-  });
+		const config = readConfig();
+		assert.equal(config.mode, "auto");
+		assert.equal(config.multiAgent.maxConcurrency, 3);
+	});
 
-  it("writes config only after exact confirmation phrase", async () => {
-    const started = await handleConfigureWizard(tmpDir, {
-      userMessage: "切换到 mcp sampling，并发 5",
-    });
-    const sessionId = extractSessionId(textOf(started));
+	it("writes config only after exact confirmation phrase", async () => {
+		const started = await handleConfigureWizard(tmpDir, {
+			userMessage: "切换到 orchestration，并发 5",
+		});
+		const sessionId = extractSessionId(textOf(started));
 
-    const wrong = await handleConfigureWizard(tmpDir, {
-      sessionId,
-      userMessage: "确认",
-    });
-    assert.ok(textOf(wrong).includes("请回复完整确认语"));
-    assert.equal(readConfig().mode, "auto");
+		const wrong = await handleConfigureWizard(tmpDir, {
+			sessionId,
+			userMessage: "确认",
+		});
+		assert.ok(textOf(wrong).includes("请回复完整确认语"));
+		assert.equal(readConfig().mode, "auto");
 
-    const applied = await handleConfigureWizard(tmpDir, {
-      sessionId,
-      userMessage: "确认修改配置",
-    });
-    assert.ok(textOf(applied).includes("配置已更新"));
-    assert.equal(readConfig().mode, "mcp_sampling");
-    assert.equal(readConfig().multiAgent.maxConcurrency, 5);
-  });
+		const applied = await handleConfigureWizard(tmpDir, {
+			sessionId,
+			userMessage: "确认修改配置",
+		});
+		assert.ok(textOf(applied).includes("配置已更新"));
+		assert.equal(readConfig().mode, "orchestration");
+		assert.equal(readConfig().multiAgent.maxConcurrency, 5);
+	});
 });
 
 describe("handleConfigure (direct tool)", () => {
@@ -98,9 +98,9 @@ describe("handleConfigure (direct tool)", () => {
     assert.equal(readConfig().multiAgent.maxConcurrency, 7);
   });
 
-  it("returns success message for valid config", async () => {
-    const result = await handleConfigure({ mode: "mcp_sampling", maxConcurrency: 5 });
-    assert.ok(!result.isError);
-    assert.ok(result.content[0]?.text.includes("配置已更新"));
-  });
+	it("returns success message for valid config", async () => {
+		const result = await handleConfigure({ mode: "mcp_subagent", maxConcurrency: 5 });
+		assert.ok(!result.isError);
+		assert.ok(result.content[0]?.text.includes("配置已更新"));
+	});
 });

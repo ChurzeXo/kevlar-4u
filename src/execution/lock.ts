@@ -1,7 +1,7 @@
 /**
  * Review Execution Lock
  * 
- * Prevents concurrent execution of sampling/direct_api modes.
+ * Prevents concurrent execution of non-orchestration modes.
  * Orchestration mode is exempt (no external calls).
  * Includes TTL to prevent deadlocks on crash.
  */
