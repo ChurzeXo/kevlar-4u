@@ -1,6 +1,6 @@
 {
   "name": "kevlar-4u",
-  "version": "1.6.10",
+  "version": "1.6.11",
   "description": "Local-first MCP content review server — simulates reader reactions before publishing. 100% offline, no telemetry, AGPL-3.0 open source.",
   "main": "dist/index.js",
   "exports": {
