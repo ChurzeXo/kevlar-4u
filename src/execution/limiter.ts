@@ -56,6 +56,7 @@ export class RateLimiter {
   private minDelayMs: number;
   private lastExecution = 0;
   private maxConcurrent: number;
+  private activeCount = 0;
 
   constructor(config: RateLimitConfig = DEFAULT_CONFIG) {
     this.semaphore = new Semaphore(config.maxConcurrent);
@@ -65,14 +66,18 @@ export class RateLimiter {
 
   async acquire(): Promise<void> {
     await this.semaphore.acquire();
+    this.activeCount++;
   }
 
   release(): void {
+    this.activeCount--;
     this.semaphore.release();
     this.lastExecution = Date.now();
   }
 
   async waitForDelay(): Promise<void> {
+    if (this.activeCount < this.maxConcurrent) return;
+
     const now = Date.now();
     const elapsed = now - this.lastExecution;
     if (elapsed < this.minDelayMs) {

@@ -71,6 +71,25 @@ export async function executePersonasInParallel(
         review: result,
       });
     } catch (err) {
+      const mcpCode = (err as any)?.code;
+
+      if (mcpCode === -1) {
+        logger.warn("Sampling request rejected by user", {
+          event: "sampling_rejected",
+          personaId: persona.meta.id,
+        });
+        aggregator.addSkipped(persona.meta.id, persona.meta.name, "User rejected sampling request");
+        return;
+      }
+
+      if (mcpCode === -32602) {
+        logger.debug("Sampling tasks/cancel on already-terminal task (ignored)", {
+          event: "sampling_cancel_terminal",
+          personaId: persona.meta.id,
+        });
+        return;
+      }
+
       const info = getErrorInfo(err);
       logger.error("Persona review failed", {
         event: "persona_failed",
@@ -86,7 +105,15 @@ export async function executePersonasInParallel(
     }
   });
 
-  await Promise.all(promises);
+  const timeoutMs = config.multiAgent.timeoutMs * personas.length;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Persona execution timed out after ${timeoutMs}ms (${personas.length} personas)`));
+    }, timeoutMs);
+  });
+
+  await Promise.race([Promise.all(promises), timeoutPromise]);
 
   const results = aggregator.getResults();
   const failed = aggregator.getFailed();
@@ -98,6 +125,7 @@ export async function executePersonasInParallel(
     personas: results,
     dimensions: options.dimensions ?? DEFAULT_DIMENSIONS_CONFIG,
     preAuditReport: options.preAuditReport,
+    skipped: aggregator.getSkipped(),
   });
 
   return {

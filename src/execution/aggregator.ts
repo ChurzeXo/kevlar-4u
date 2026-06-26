@@ -12,6 +12,7 @@ import { getModeLabel } from "../i18n/tools-i18n.js";
 import { isPro } from "../subscription/tier.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
+import { normalizeRiskLevel } from "./riskLevel.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ interface PartialResult<T> {
   successful: T[];
   failed: Array<{ index: number; error: string }>;
   successRate: number;
+  skipped: Array<{ personaId: string; personaName: string; reason: string }>;
 }
 
 // ── Aggregator ────────────────────────────────────────────────────────────────
@@ -41,6 +43,7 @@ interface PartialResult<T> {
 export class ResultAggregator {
   private results: PersonaResultWithMeta[] = [];
   private failedCount = 0;
+  private skipped: Array<{ personaId: string; personaName: string; reason: string }> = [];
 
   addSuccess(result: PersonaResult): void {
     const confidence = estimateConfidence(result.review);
@@ -62,6 +65,10 @@ export class ResultAggregator {
     });
   }
 
+  addSkipped(personaId: string, personaName: string, reason: string): void {
+    this.skipped.push({ personaId, personaName, reason });
+  }
+
   getResults(): PersonaResultWithMeta[] {
     return [...this.results];
   }
@@ -72,6 +79,10 @@ export class ResultAggregator {
 
   getFailed(): PersonaResultWithMeta[] {
     return this.results.filter((r) => r.error);
+  }
+
+  getSkipped(): Array<{ personaId: string; personaName: string; reason: string }> {
+    return [...this.skipped];
   }
 
   getPartialResult(): PartialResult<PersonaResultWithMeta> {
@@ -85,6 +96,7 @@ export class ResultAggregator {
         error: r.error || "Unknown error",
       })),
       successRate,
+      skipped: this.getSkipped(),
     };
   }
 }
@@ -98,6 +110,7 @@ interface AggregatedReportOptions {
   dimensions?: DimensionsConfig;
   preAuditReport?: any;
   prompts?: PromptSegments;
+  skipped?: Array<{ personaId: string; personaName: string; reason: string }>;
 }
 
 export function generateAggregatedReport(options: AggregatedReportOptions): string {
@@ -120,6 +133,10 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
     report += `\n**${t("report.partialFailure", { ns: "common", defaultValue: "Partial Failure" })}**：${failed.map((p) => `${p.personaName}（${p.error}）`).join(joinChar)}`;
   }
 
+  if (options.skipped && options.skipped.length > 0) {
+    report += `\n**${t("report.skipped", { ns: "common", defaultValue: "Skipped" })}**：${options.skipped.map((s) => `${s.personaName}（${s.reason}）`).join(joinChar)}`;
+  }
+
   const dateLocale = locale === "zh-CN" ? "zh-CN" : "en-US";
   report += `\n**${t("report.completedAt", { ns: "common", defaultValue: "Completed At" })}**：${new Date().toLocaleString(dateLocale)}`;
 
@@ -132,7 +149,8 @@ export function generateAggregatedReport(options: AggregatedReportOptions): stri
         if (audit.findings && audit.findings.length > 0) {
           report += `\n### 【${audit.name}】${t("report.foundRisks", { ns: "common", defaultValue: "Found {{count}} risk items", count: audit.findings.length })}\n`;
           for (const f of audit.findings) {
-            report += `- **${f.suggestedLevel || t("report.unknown", { ns: "common", defaultValue: "Unknown" })} ${f.keyword}**\n`;
+            const level = normalizeRiskLevel(f.suggestedLevel || f.level);
+            report += `- **${level} ${f.keyword}**\n`;
             report += `  - ${t("report.triggerReason", { ns: "common", defaultValue: "Trigger Reason" })}：${f.trigger}\n`;
             report += `  - ${t("report.riskDescription", { ns: "common", defaultValue: "Risk Description" })}：${f.riskDescription}\n`;
           }

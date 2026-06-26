@@ -117,7 +117,7 @@ describe("End-to-End integration test", () => {
       assert.ok(step3Text.includes("当前共有 1 位评审员"), "Should show persona count");
       assert.ok(step3Text.includes("currentStep: waitingForReviewerConfirmation"), "Should be in reviewer confirmation step");
 
-      // Step 4: "开始舆论仿真推演" → executes review
+      // Step 4: "开始舆论仿真推演" → AgentBlueprint dispatch
       const step4 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
@@ -128,11 +128,480 @@ describe("End-to-End integration test", () => {
 
       assert.ok(step4, "Step 4 response should exist");
       const step4Text = (step4.content as any)[0].text;
-      assert.ok(step4Text.includes("E2E Tester"), "Should include persona name in report");
-      assert.ok(step4Text.includes("这是一个用于 E2E 测试的文本"), "Should include the provided content");
+
+      // Verify AgentBlueprint structure in the response
+      assert.ok(step4Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol marker");
+      assert.ok(step4Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
+      assert.ok(step4Text.includes("currentStep: waitingForPersonaAudit"), "Should be in persona audit step");
+
+      // Extract the JSON blueprint (before the kevlar-state block)
+      const jsonEnd = step4Text.indexOf("```kevlar-state");
+      const jsonText = jsonEnd > 0 ? step4Text.substring(0, jsonEnd).trim() : step4Text;
+      const blueprint = JSON.parse(jsonText);
+
+      assert.equal(blueprint.protocol, "kevlar.exec/v1");
+      assert.equal(blueprint.execution.isolation.level, "strict");
+      assert.equal(blueprint.agents.length, 1);
+      assert.equal(blueprint.agents[0].id, "e2e_persona");
+      assert.equal(blueprint.continuation.tool, "review_content_wizard_continue");
+      assert.equal(blueprint.continuation.checkpoint, "persona_audit_started");
+
+      // Read continuation context from state file
+      const stateFileDir = path.join(tmpDir, "tmp");
+      const statePath = path.join(stateFileDir, `${sessionId}_review_wizard.json`);
+      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath} after AgentBlueprint dispatch`);
+      const stateContent = fs.readFileSync(statePath, "utf-8");
+      const state = JSON.parse(stateContent);
+      assert.ok(state.activeContinuation, "Should have active continuation in state");
+      const { continuationId } = state.activeContinuation;
+      const { revision } = state;
+      assert.ok(continuationId, "Should have continuationId");
+      assert.ok(typeof revision === "number", "Should have revision number");
+
+      // Step 5: Submit persona audit ExecutionReceipt via continue tool
+      const mockReceipt = {
+        protocol: "kevlar.exec/v1",
+        agents: [
+          {
+            id: "e2e_persona",
+            status: "completed",
+            output: {
+              findings: [
+                {
+                  dimension: "content_quality",
+                  level: "🟢",
+                  reasoning: "内容质量合格，这是用于 E2E 测试的文本",
+                },
+              ],
+            },
+          },
+        ],
+        aggregation: {
+          dimensions: [
+            {
+              dimension: "overall",
+              level: "🟢",
+              reasoning: "总体评审通过",
+            },
+          ],
+          summary: "这是用于 E2E 测试的文本的整体评审：内容合格，无敏感风险。",
+        },
+      };
+
+      const step5 = await client.callTool({
+        name: "review_content_wizard_continue",
+        arguments: {
+          sessionId,
+          checkpoint: "persona_audit_started",
+          expectedRevision: revision,
+          continuationId,
+          receipt: mockReceipt,
+        },
+      });
+
+      assert.ok(step5, "Step 5 response should exist");
+      const step5Text = (step5.content as any)[0].text;
+      assert.ok(step5Text.includes("E2E Tester"), "Final report should include persona name");
+      assert.ok(step5Text.includes("舆论仿真推演报告"), "Final report should include report header");
+      assert.ok(step5Text.includes("currentStep: completed"), "Wizard should be marked as completed");
     } finally {
       await client.close();
       await server.close();
+    }
+  });
+
+  it("Pro tier: systemAudit → rstConfirmation → personaAudit AgentBlueprint (multi-turn)", async () => {
+    // Enable Pro tier path
+    process.env.KEVLAR_TIER = "pro";
+    // Use local fallback to avoid needing strategyProvider for AgentBlueprint dispatch
+    process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK = "1";
+
+    const server = await createKevlarServer();
+
+    // Seed a system auditor persona (required for systemAudit flow)
+    const auditorMeta: PersonaMeta = {
+      id: "e2e_auditor",
+      name: "合规审查员",
+      name_en: "Compliance Auditor",
+      version: "1.0.0",
+      author: "kevlar-core",
+      tags: ["system_auditor"],
+      description: "E2E system auditor",
+      blindSpot: "none",
+    };
+    await writePersonaFile(tmpDir, auditorMeta, "审查维度：内容合规\n性格特质：严谨\n盲区：无");
+    const personaMeta: PersonaMeta = {
+      id: "e2e_persona_pro",
+      name: "E2E Pro Tester",
+      name_en: "E2E Pro Tester",
+      version: "1.0.0",
+      author: "kevlar-core",
+      tags: ["e2e"],
+      description: "E2E Pro test persona",
+      blindSpot: "none",
+    };
+    await writePersonaFile(tmpDir, personaMeta, "常用平台：通用\n性格特质：温和\n盲区：无");
+    invalidatePersonasCache();
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client(
+      { name: "kevlar-e2e-test", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      client.connect(clientTransport),
+      server.connect(serverTransport),
+    ]);
+
+    try {
+      // Step 1: Start wizard → waitingForRegionSelection
+      const step1 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { userMessage: "请评测这篇Pro tier内容：测试合规审核" },
+      });
+      const step1Text = (step1.content as any)[0].text;
+      assert.ok(step1Text.includes("waitingForRegionSelection"));
+      const sessionIdMatch = step1Text.match(/sessionId:\s*([a-z0-9-]+)/);
+      assert.ok(sessionIdMatch, "Should include sessionId");
+      const sessionId = sessionIdMatch[1];
+
+      // Step 2: Select regions → systemAudit (Pro tier)
+      // With local fallback → rstConfirmation
+      const step2 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "中国" },
+      });
+      const step2Text = (step2.content as any)[0].text;
+      assert.ok(step2Text.includes("六维风险检测已完成"), "Should show system audit results");
+      assert.ok(step2Text.includes("是否继续进行舆论仿真推演"), "Should ask for rst confirmation");
+      assert.ok(step2Text.includes("currentStep: rstConfirmation"), "Should be in rstConfirmation step");
+
+      // Step 3: "继续" → checkPersonaInventory → waitingForReviewDecision
+      const step3 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "继续" },
+      });
+      const step3Text = (step3.content as any)[0].text;
+      assert.ok(step3Text.includes("请选择"), "Should ask for review action");
+      assert.ok(step3Text.includes("舆论仿真推演"), "Should offer review option");
+      assert.ok(step3Text.includes("waitingForReviewDecision"), "Should be in review decision step");
+
+      // Step 4: "开始舆论仿真推演" → waitingForReviewerConfirmation (1 persona → auto-select)
+      const step4 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "开始舆论仿真推演" },
+      });
+      const step4Text = (step4.content as any)[0].text;
+      assert.ok(step4Text.includes("当前共有 1 位评审员"), "Should show persona count");
+      assert.ok(step4Text.includes("waitingForReviewerConfirmation"), "Should be in reviewer confirmation");
+
+      // Step 5: "开始舆论仿真推演" → AgentBlueprint dispatch (waitingForPersonaAudit)
+      const step5 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "开始舆论仿真推演" },
+      });
+      const step5Text = (step5.content as any)[0].text;
+
+      // Verify AgentBlueprint dispatch
+      assert.ok(step5Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol");
+      assert.ok(step5Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
+      assert.ok(step5Text.includes("waitingForPersonaAudit"), "Should be in persona audit step");
+
+      // Parse blueprint
+      const jsonEnd = step5Text.indexOf("```kevlar-state");
+      const jsonText = jsonEnd > 0 ? step5Text.substring(0, jsonEnd).trim() : step5Text;
+      const blueprint = JSON.parse(jsonText);
+      assert.equal(blueprint.protocol, "kevlar.exec/v1");
+      assert.equal(blueprint.execution.isolation.level, "strict");
+      assert.equal(blueprint.agents.length, 1);
+      assert.ok(blueprint.agents[0].id === "e2e_persona_pro" || blueprint.agents[0].id === "e2e_persona");
+
+      // Read continuation context
+      const stateFileDir = path.join(tmpDir, "tmp");
+      const statePath = path.join(stateFileDir, `${sessionId}_review_wizard.json`);
+      assert.ok(fs.existsSync(statePath), "State file should exist");
+      const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      const { continuationId } = state.activeContinuation;
+      const { revision } = state;
+
+      // Step 6: Submit persona audit receipt → completed
+      const mockReceipt = {
+        protocol: "kevlar.exec/v1",
+        agents: [{
+          id: blueprint.agents[0].id,
+          status: "completed",
+          output: {
+            findings: [{
+              dimension: "content_quality",
+              level: "🟢",
+              reasoning: "Pro tier内容：测试合规审核 — 内容质量合格",
+            }],
+          },
+        }],
+        aggregation: {
+          dimensions: [{
+            dimension: "overall",
+            level: "🟢",
+            reasoning: "总体评审通过",
+          }],
+          summary: "Pro tier E2E 测试内容的整体评审：合规，无风险。",
+        },
+      };
+
+      const step6 = await client.callTool({
+        name: "review_content_wizard_continue",
+        arguments: {
+          sessionId,
+          checkpoint: "persona_audit_started",
+          expectedRevision: revision,
+          continuationId,
+          receipt: mockReceipt,
+        },
+      });
+      const step6Text = (step6.content as any)[0].text;
+      assert.ok(step6Text.includes("舆论仿真推演报告"), "Final report should include header");
+      assert.ok(step6Text.includes("currentStep: completed"), "Wizard should be marked as completed");
+    } finally {
+      await client.close();
+      await server.close();
+      delete process.env.KEVLAR_TIER;
+      delete process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK;
+    }
+  });
+
+  it("Pro tier: subagentAudit AgentBlueprint dispatch → receipt → rstConfirmation (multi-turn)", async () => {
+    // Enable Pro tier — no local fallback so it enters host_orchestration + structured path
+    process.env.KEVLAR_TIER = "pro";
+    // Explicitly NOT setting KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK so it goes through
+    // the AgentBlueprint dispatch → waitingForSubagentAudit path
+
+    const server = await createKevlarServer();
+
+    // Seed a system_auditor persona (required to trigger AgentBlueprint dispatch)
+    const auditorMeta: PersonaMeta = {
+      id: "e2e_subagent_auditor",
+      name: "合规审查员",
+      name_en: "Compliance Auditor",
+      version: "1.0.0",
+      author: "kevlar-core",
+      tags: ["system_auditor"],
+      description: "E2E subagent auditor",
+      blindSpot: "none",
+    };
+    await writePersonaFile(tmpDir, auditorMeta, "审查维度：内容合规\n性格特质：严谨\n盲区：无");
+    const personaMeta: PersonaMeta = {
+      id: "e2e_persona_subagent",
+      name: "E2E Subagent Tester",
+      name_en: "E2E Subagent Tester",
+      version: "1.0.0",
+      author: "kevlar-core",
+      tags: ["e2e"],
+      description: "E2E subagent test persona",
+      blindSpot: "none",
+    };
+    await writePersonaFile(tmpDir, personaMeta, "常用平台：通用\n性格特质：温和\n盲区：无");
+    invalidatePersonasCache();
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client(
+      { name: "kevlar-e2e-test", version: "1.0.0" },
+      { capabilities: {} }
+    );
+
+    await Promise.all([
+      client.connect(clientTransport),
+      server.connect(serverTransport),
+    ]);
+
+    try {
+      // Step 1: Start wizard → waitingForRegionSelection
+      const step1 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { userMessage: "请评测这篇内容：测试 Subagent 并行审计流程" },
+      });
+      const step1Text = (step1.content as any)[0].text;
+      assert.ok(step1Text.includes("waitingForRegionSelection"), "Step 1 should be waitingForRegionSelection");
+      const sessionIdMatch = step1Text.match(/sessionId:\s*([a-z0-9-]+)/);
+      assert.ok(sessionIdMatch, "Should include sessionId");
+      const sessionId = sessionIdMatch[1];
+
+      // Step 2: Select region → systemAudit → AgentBlueprint dispatch (waitingForSubagentAudit)
+      const step2 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "中国" },
+      });
+      const step2Text = (step2.content as any)[0].text;
+
+      // Verify AgentBlueprint dispatch for subagent audit
+      assert.ok(step2Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol");
+      assert.ok(step2Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
+      assert.ok(step2Text.includes("host_merge"), "Should use host_merge aggregation strategy");
+
+      // Parse blueprint to verify structure
+      const blueprint = JSON.parse(step2Text);
+      assert.equal(blueprint.protocol, "kevlar.exec/v1");
+      assert.equal(blueprint.execution.mode, "ephemeral_agents");
+      assert.equal(blueprint.execution.isolation.level, "strict");
+      assert.ok(blueprint.agents.length >= 1, "Should have at least one auditor agent");
+      assert.equal(blueprint.agents[0].id, "e2e_subagent_auditor");
+      assert.equal(blueprint.continuation.tool, "review_content_wizard_continue");
+      assert.equal(blueprint.continuation.checkpoint, "preaudit_completed");
+
+      // Read continuation context from state file - the wizard should have set
+      // state.step = "waitingForSubagentAudit" and saved
+      const stateFileDir = path.join(tmpDir, "tmp");
+      const statePath = path.join(stateFileDir, `${sessionId}_review_wizard.json`);
+      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath} after AgentBlueprint dispatch`);
+      const stateContent = fs.readFileSync(statePath, "utf-8");
+      const state = JSON.parse(stateContent);
+      assert.equal(state.step, "waitingForSubagentAudit", "State should be waitingForSubagentAudit");
+      assert.ok(state.activeContinuation, "Should have active continuation in state");
+      assert.equal(state.activeContinuation.checkpoint, "preaudit_completed");
+      const { continuationId } = state.activeContinuation;
+      const { revision } = state;
+      assert.ok(continuationId, "Should have continuationId");
+      assert.ok(typeof revision === "number", "Should have revision number");
+
+      // Step 3: Submit subagent audit ExecutionReceipt via continue tool
+      // This should trigger handleSubagentAuditResult → rstConfirmation
+      const auditorId = blueprint.agents[0].id;
+      const mockReceipt = {
+        protocol: "kevlar.exec/v1",
+        agents: [
+          {
+            id: auditorId,
+            status: "completed",
+            output: {
+              findings: [],
+            },
+          },
+        ],
+        aggregation: {
+          dimensions: [
+            {
+              id: "legal_compliance",
+              name: "合规审查",
+              findings: [],
+              level: "🟢",
+              reasoning: "内容合规，未发现违规风险",
+            },
+          ],
+          summary: "Subagent 并行审计完成：内容合规，无风险发现。",
+        },
+      };
+
+      const step3 = await client.callTool({
+        name: "review_content_wizard_continue",
+        arguments: {
+          sessionId,
+          checkpoint: "preaudit_completed",
+          expectedRevision: revision,
+          continuationId,
+          receipt: mockReceipt,
+        },
+      });
+
+      assert.ok(step3, "Step 3 response should exist");
+      const step3Text = (step3.content as any)[0].text;
+      assert.ok(step3Text.includes("六维风险检测已完成"), "Should show pre-audit completion");
+      assert.ok(step3Text.includes("Subagent 并行模式"), "Should indicate subagent parallel mode");
+      assert.ok(step3Text.includes("是否继续进行舆论仿真推演"), "Should ask for rst continuation");
+      assert.ok(step3Text.includes("currentStep: rstConfirmation"), "Should be in rstConfirmation step");
+
+      // Verify state was updated correctly
+      const updatedState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      assert.equal(updatedState.step, "rstConfirmation");
+      assert.ok(updatedState.preAuditReport, "Should have preAuditReport");
+      assert.ok(Array.isArray(updatedState.preAuditReport.dimensions), "Should have dimensions array");
+      assert.ok(typeof updatedState.preAuditReport.summary === "string", "Should have summary string");
+
+      // Step 4: Continue past rstConfirmation → checkPersonaInventory → waitingForReviewDecision
+      const step4 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "继续" },
+      });
+      const step4Text = (step4.content as any)[0].text;
+      assert.ok(step4Text.includes("舆论仿真推演"), "Should offer review option");
+      assert.ok(step4Text.includes("waitingForReviewDecision"), "Should be in review decision step");
+
+      // Step 5: "开始舆论仿真推演" → waitingForReviewerConfirmation
+      const step5 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "开始舆论仿真推演" },
+      });
+      const step5Text = (step5.content as any)[0].text;
+      assert.ok(step5Text.includes("当前共有 1 位评审员"), "Should show persona count");
+      assert.ok(step5Text.includes("waitingForReviewerConfirmation"), "Should be in reviewer confirmation");
+
+      // Step 6: "开始舆论仿真推演" → AgentBlueprint dispatch (waitingForPersonaAudit)
+      const step6 = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: "开始舆论仿真推演" },
+      });
+      const step6Text = (step6.content as any)[0].text;
+      assert.ok(step6Text.includes("kevlar.exec/v1"), "Should have AgentBlueprint for persona audit");
+      assert.ok(step6Text.includes("waitingForPersonaAudit"), "Should be in persona audit step");
+
+      // Extract JSON from mixed content
+      const jsonEnd = step6Text.indexOf("```kevlar-state");
+      const jsonText = jsonEnd > 0 ? step6Text.substring(0, jsonEnd).trim() : step6Text;
+      const personaBlueprint = JSON.parse(jsonText);
+      assert.equal(personaBlueprint.continuation.checkpoint, "persona_audit_started");
+
+      // Read updated state
+      const state2 = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+      const { continuationId: continuationId2 } = state2.activeContinuation;
+      const { revision: revision2 } = state2;
+
+      // Step 7: Submit persona audit receipt → completed
+      const personaReceipt = {
+        protocol: "kevlar.exec/v1",
+        agents: [
+          {
+            id: personaBlueprint.agents[0].id,
+            status: "completed",
+            output: {
+              findings: [
+                {
+                  dimension: "content_quality",
+                  level: "🟢",
+                  reasoning: "内容质量合格，测试通过",
+                },
+              ],
+            },
+          },
+        ],
+        aggregation: {
+          dimensions: [
+            {
+              dimension: "overall",
+              level: "🟢",
+              reasoning: "总体评审通过",
+            },
+          ],
+          summary: "Subagent E2E 测试内容的整体评审：合规，无风险。",
+        },
+      };
+
+      const step7 = await client.callTool({
+        name: "review_content_wizard_continue",
+        arguments: {
+          sessionId,
+          checkpoint: "persona_audit_started",
+          expectedRevision: revision2,
+          continuationId: continuationId2,
+          receipt: personaReceipt,
+        },
+      });
+      const step7Text = (step7.content as any)[0].text;
+      assert.ok(step7Text.includes("舆论仿真推演报告"), "Final report should include header");
+      assert.ok(step7Text.includes("currentStep: completed"), "Wizard should be marked as completed");
+      assert.ok(state2.preAuditReport, "Should retain preAuditReport through completion");
+    } finally {
+      await client.close();
+      await server.close();
+      delete process.env.KEVLAR_TIER;
     }
   });
 

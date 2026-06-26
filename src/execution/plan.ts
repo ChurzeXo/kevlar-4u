@@ -13,7 +13,13 @@ import type { Step0Result, Precedent } from "../prompts/reviewWizard.js";
 // ── Execution Backend ──────────────────────────────────────────────────────────
 
 /** Who actually performs the model calls during a review run. */
-export type ExecutionBackend = "host_orchestration";
+export type ExecutionBackend =
+  | "sampling_task_augmented"   // MCP task-augmented sampling (true parallel, Level 1)
+  | "sampling_serial"           // MCP serial sampling (Level 2)
+  | "host_orchestration";       // Host AI orchestration (Level 3/4, fallback)
+
+/** Sampling strategy when backend is sampling_serial or sampling_task_augmented. */
+export type SamplingStrategy = "parallel" | "serial";
 
 /**
  * When backend is "host_orchestration", what collaboration protocol
@@ -29,6 +35,8 @@ export type HostOrchestrationStrategy = "structured" | "standard";
  * (strategy, only relevant for host_orchestration).
  */
 export type ExecutionPlan =
+  | { backend: "sampling_task_augmented"; concurrency?: number }
+  | { backend: "sampling_serial" }
   | { backend: "host_orchestration"; strategy: HostOrchestrationStrategy; lighterTaskMatch?: boolean };
 
 // ── Host Structured Capability Status ─────────────────────────────────────────

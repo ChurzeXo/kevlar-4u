@@ -6,6 +6,8 @@
  */
 
 import { resumeFromStructuredFailure } from "./checkpoint.js";
+import { logger } from "../utils/logger.js";
+import { normalizeRiskLevel } from "./riskLevel.js";
 
 // ── 3.1 Agent Blueprint ──────────────────────────────────────────────────────
 
@@ -121,7 +123,22 @@ export interface AggregationValidation {
 // ── 4. Validation Gates ──────────────────────────────────────────────────────
 
 /**
- * Runs strong-typed post-execution cross-validation on an ExecutionReceipt.
+ * Authoritative post-execution semantic validator for an ExecutionReceipt.
+ *
+ * This is the **primary validation function** to use after the host AI
+ * completes its task-agent execution.  It runs 4 full validation gates:
+ *
+ *   Gate 1 — Schema consistency (agents have valid output.findings)
+ *   Gate 2 — Agent count alignment with blueprint
+ *   Gate 3 — Aggregation consistency (dimensions match agents)
+ *   Gate 4 — Execution mismatch + isolation safety violation detection
+ *
+ * Additionally, it determines overall status (`valid` / `partial` / `invalid` /
+ * `fallback_used`) and escalates risk level for isolation violations.
+ *
+ * Use this function **post-execution**.  If you only need a lightweight
+ * format/shape check (e.g. before the receipt is even dispatched), see
+ * {@link validateReceipt} instead.
  */
 export function runAggregationValidation(
   receipt: any,
@@ -260,10 +277,10 @@ export function runAggregationValidation(
     for (const agent of receipt.agents) {
       if (agent.status === "completed" && agent.output && Array.isArray(agent.output.findings)) {
         for (const finding of agent.output.findings) {
-          const lvl = finding.suggestedLevel || finding.level;
-          if (lvl === "🔴" || lvl === "high") {
+          const normalized = normalizeRiskLevel(finding.suggestedLevel || finding.level);
+          if (normalized === "🔴") {
             highestLevel = "high";
-          } else if ((lvl === "🟡" || lvl === "medium") && highestLevel !== "high") {
+          } else if (normalized === "🟡" && highestLevel !== "high") {
             highestLevel = "medium";
           }
         }
@@ -271,10 +288,10 @@ export function runAggregationValidation(
     }
     if (aggregation && Array.isArray(aggregation.dimensions)) {
       for (const dim of aggregation.dimensions) {
-        const lvl = dim.level;
-        if (lvl === "🔴" || lvl === "high") {
+        const normalized = normalizeRiskLevel(dim.level);
+        if (normalized === "🔴") {
           highestLevel = "high";
-        } else if ((lvl === "🟡" || lvl === "medium") && highestLevel !== "high") {
+        } else if (normalized === "🟡" && highestLevel !== "high") {
           highestLevel = "medium";
         }
       }
@@ -298,6 +315,9 @@ export function runAggregationValidation(
 }
 
 // ── 5. Continuation Guard ───────────────────────────────────────────────────
+
+/** Maximum retries before auto-degrading the wizard. */
+export const MAX_CONTINUATION_RETRIES = 3;
 
 export function validateContinuationGate(
   currentState: any,
@@ -342,6 +362,7 @@ export function fallbackToStandardOrchestration(state: any, reason: string) {
       continuationId: `${state.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       checkpoint: "preaudit_started",
       expiresAt: Date.now() + 30 * 60 * 1000,
+      retryCount: 0,
     };
   } else {
     state.step = "waitingForOrchestrationStep0";
@@ -349,7 +370,100 @@ export function fallbackToStandardOrchestration(state: any, reason: string) {
       continuationId: `${state.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       checkpoint: "step0_completed",
       expiresAt: Date.now() + 30 * 60 * 1000,
+      retryCount: 0,
     };
   }
   state.revision = (state.revision ?? 0) + 1;
+
+  logger.warn("Execution fallback to standard orchestration", {
+    event: "execution_downgraded",
+    reason,
+    newCheckpoint: state.checkpoint,
+    newRevision: state.revision,
+  });
+}
+
+// ── 6. Receipt Schema Validation ─────────────────────────────────────────────
+
+export interface ReceiptValidation {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Lightweight pre-flight format check for an ExecutionReceipt.
+ *
+ * Only validates **structural integrity** — the receipt is a well-formed object,
+ * agents array is present and non-empty, each agent has `id`/`status`/`output`,
+ * and the aggregation block exists.
+ *
+ * This function does **NOT** perform semantic validation (blueprint alignment,
+ * execution mismatch, isolation safety, risk-level escalation, etc.).  For the
+ * authoritative post-execution validator that includes all those gates,
+ * use {@link runAggregationValidation} instead.
+ *
+ * Returns structured {@link ReceiptValidation} (errors + warnings) so the
+ * Host AI can surface fixable issues rather than hitting a hard throw.
+ */
+export function validateReceipt(receipt: any): ReceiptValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!receipt || typeof receipt !== "object") {
+    errors.push("Receipt 不是有效的 JSON 对象");
+    return { valid: false, errors, warnings };
+  }
+
+  if (receipt.protocol !== "kevlar.exec/v1") {
+    warnings.push(`协议版本不匹配: 期望 "kevlar.exec/v1", 收到 "${receipt.protocol || "缺失"}"`);
+  }
+
+  // Agents must be present
+  if (!receipt.agents || !Array.isArray(receipt.agents)) {
+    errors.push('缺少必填字段 "agents"，必须为数组');
+  } else if (receipt.agents.length === 0) {
+    errors.push('"agents" 数组为空，至少需要一个 agent 结果');
+  } else {
+    for (let i = 0; i < receipt.agents.length; i++) {
+      const agent = receipt.agents[i];
+      const prefix = `agents[${i}]`;
+      if (!agent.id) {
+        errors.push(`${prefix}: 缺少必填字段 "id"`);
+      }
+      if (!agent.status) {
+        errors.push(`${prefix}: 缺少必填字段 "status" (应为 "completed" 或 "failed")`);
+      } else if (!["completed", "failed", "partial"].includes(agent.status)) {
+        warnings.push(`${prefix}: 未知的 status 值 "${agent.status}"`);
+      }
+      if (!agent.output) {
+        errors.push(`${prefix}: 缺少必填字段 "output"`);
+      } else if (typeof agent.output === "string") {
+        warnings.push(`${prefix}: output 是字符串而非对象，解析可能失败`);
+      }
+    }
+  }
+
+  // Aggregation check
+  if (!receipt.aggregation || typeof receipt.aggregation !== "object") {
+    warnings.push('缺少聚合报告 "aggregation"，评审结果可能不完整');
+  } else {
+    if (!Array.isArray(receipt.aggregation.dimensions)) {
+      warnings.push('aggregation.dimensions 不是数组，将使用默认值');
+    }
+    if (typeof receipt.aggregation.summary !== "string") {
+      warnings.push('aggregation.summary 不是字符串，总评可能缺失');
+    }
+  }
+
+  // 提醒调用方：轻量校验只做格式检查，语义校验请调用 runAggregationValidation()
+  warnings.push(
+    "validateReceipt 仅执行格式校验；后续请调用 runAggregationValidation(receipt, blueprint) 进行完整的语义验证（智能体对齐、执行模式匹配、隔离安全检测等）"
+  );
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
 }

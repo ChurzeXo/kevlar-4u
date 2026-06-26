@@ -7,13 +7,14 @@
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { logger } from "../utils/logger.js";
 import { readConfig, isValidMode } from "./config.js";
-import { getClientFingerprint, getHostExecutionCapability } from "./client.js";
+import { getClientFingerprint, getHostExecutionCapability, isTaskAugmentedSamplingSupported, isSamplingSupported } from "./client.js";
 import {
   getHostStructuredObservation,
   inferTaskClass,
 } from "./observations.js";
 import type { ClientFingerprint, HostOrchestrationStrategy } from "./plan.js";
 import { orchestrationHandler } from "./modes/orchestration.js";
+import { executeSamplingReview } from "./samplingExecution.js";
 import { generateTraceId, generateSpanId, withTraceContext } from "../utils/observability.js";
 import { toFrame } from "./base.js";
 import type {
@@ -68,9 +69,46 @@ export async function executeReview(
   const startTime = Date.now();
   let result: ExecutionResult;
 
-  // Kevlar does not call LLMs or sampling function.
-  // It always delegates to orchestrationHandler.
-  result = await orchestrationHandler.execute(tracedCtx);
+  // ── Resolve execution plan for sampling backends ──────────────────────
+  const planResult = resolveExecutionPlan({
+    fingerprint: getClientFingerprint(),
+    content: ctx.content,
+  });
+  const backend = planResult.plan.backend;
+
+  if (backend === "sampling_task_augmented" || backend === "sampling_serial") {
+    try {
+      const samplingResults = await executeSamplingReview(
+        ctx.server,
+        ctx.personas,
+        ctx.content,
+        {
+          localFindings: [],
+          samplingFn: ctx.samplingFn as any,
+        },
+      );
+
+      result = {
+        report: JSON.stringify(samplingResults, null, 2),
+        personas: ctx.personas.map((p) => p.meta.id),
+        mode: "mcp_sampling",
+        partialFailures: samplingResults
+          .filter((r) => r.findings.length === 0)
+          .map((r) => ({ personaId: r.id, error: "No findings" })),
+      };
+    } catch (err: any) {
+      logger.warn("Sampling execution failed, falling back to orchestration", {
+        event: "sampling_fallback_to_orchestration",
+        backend,
+        error: (err as Error).message,
+      });
+      result = await orchestrationHandler.execute(tracedCtx);
+    }
+  } else {
+    // Kevlar does not call LLMs or sampling function.
+    // It always delegates to orchestrationHandler.
+    result = await orchestrationHandler.execute(tracedCtx);
+  }
 
   const durationMs = Date.now() - startTime;
   const failedCount = result.partialFailures?.length ?? 0;
@@ -163,40 +201,68 @@ export function resolveExecutionPlan(
     resolutionSource = "env_var";
   }
 
-  // 3. Auto-resolve: Host Orchestration
+  // 3. Auto-resolve: Capability-based degradation chain
   else {
     resolutionSource = "auto";
 
-    // Read handshake-declared host execution capability (logged to stderr on first call)
-    const hostExecCap = getHostExecutionCapability();
+    const taskAugEnabled = process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0";
 
-    const cachedObs = getHostStructuredObservation({
-      fingerprint,
-      protocolVersion: "kevlar-host-guided/v1",
-      taskClass,
-    });
+    // L1: Task-augmented sampling (true parallel) — requires explicit opt-in
+    if (taskAugEnabled && isTaskAugmentedSamplingSupported()) {
+      result = {
+        plan: { backend: "sampling_task_augmented" },
+        legacyMode: "mcp_sampling",
+      };
+      logger.info("Auto-resolved to task-augmented sampling", {
+        event: "execution_plan_resolved",
+        backend: "sampling_task_augmented",
+      });
+    }
 
-    const strategy: HostOrchestrationStrategy =
-      cachedObs && (cachedObs.status === "unsupported" || cachedObs.status === "failed")
-        ? "standard"
-        : "structured";
+    // L2: Serial MCP sampling
+    else if (isSamplingSupported()) {
+      result = {
+        plan: { backend: "sampling_serial" },
+        legacyMode: "mcp_sampling",
+      };
+      logger.info("Auto-resolved to serial MCP sampling", {
+        event: "execution_plan_resolved",
+        backend: "sampling_serial",
+      });
+    }
 
-    const lighterTaskMatch = cachedObs?.isLighter === true;
+    // L3/L4: Host orchestration (always available)
+    else {
+      const hostExecCap = getHostExecutionCapability();
 
-    logger.debug("Host orchestration strategy resolved", {
-      event: "host_orchestration_strategy",
-      strategy,
-      cachedStatus: cachedObs?.status ?? "none",
-      taskClass,
-      lighterTaskMatch,
-    });
+      const cachedObs = getHostStructuredObservation({
+        fingerprint,
+        protocolVersion: "kevlar-host-guided/v1",
+        taskClass,
+      });
 
-    result = {
-      plan: { backend: "host_orchestration", strategy, lighterTaskMatch: lighterTaskMatch || undefined },
-      legacyMode: strategy === "structured"
-        ? ("mcp_subagent" as ExecutionMode)
-        : "orchestration",
-    };
+      const strategy: HostOrchestrationStrategy =
+        cachedObs && (cachedObs.status === "unsupported" || cachedObs.status === "failed")
+          ? "standard"
+          : "structured";
+
+      const lighterTaskMatch = cachedObs?.isLighter === true;
+
+      logger.debug("Host orchestration strategy resolved", {
+        event: "host_orchestration_strategy",
+        strategy,
+        cachedStatus: cachedObs?.status ?? "none",
+        taskClass,
+        lighterTaskMatch,
+      });
+
+      result = {
+        plan: { backend: "host_orchestration", strategy, lighterTaskMatch: lighterTaskMatch || undefined },
+        legacyMode: strategy === "structured"
+          ? ("mcp_subagent" as ExecutionMode)
+          : "orchestration",
+      };
+    }
   }
 
   logger.info("Execution plan resolved", {
@@ -220,6 +286,8 @@ function legacyModeToPlan(mode: ExecutionMode): ExecutionPlan {
       return { backend: "host_orchestration", strategy: "standard" };
     case "mcp_subagent":
       return { backend: "host_orchestration", strategy: "structured" };
+    case "mcp_sampling":
+      return { backend: "sampling_serial" };
   }
 }
 
@@ -242,8 +310,26 @@ export function getModesInfo(): ModesInfo {
     reason: undefined,
   });
 
+  // Add MCP sampling modes based on capability detection
+  const taskAugEnabled = process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0";
+  const hasTaskAug = taskAugEnabled && isTaskAugmentedSamplingSupported();
+  const hasSampling = isSamplingSupported();
+
+  modes.push({
+    mode: "mcp_sampling",
+    available: hasTaskAug || hasSampling,
+    reason: hasTaskAug
+      ? "task-augmented 并行采样可用"
+      : hasSampling
+        ? "串行 MCP 采样可用"
+        : "客户端未声明 sampling 能力",
+  });
+
   // Determine recommended mode
-  let recommended: ExecutionMode = "mcp_subagent";
+  let recommended: ExecutionMode =
+    hasTaskAug ? "mcp_sampling" :
+    hasSampling ? "mcp_sampling" :
+    "mcp_subagent";
 
   // Check if resolved mode is available
   let resolved: ExecutionMode;
@@ -324,7 +410,9 @@ export type {
 export {
   runAggregationValidation,
   validateContinuationGate,
+  validateReceipt,
   fallbackToStandardOrchestration,
+  MAX_CONTINUATION_RETRIES,
   type AgentBlueprint,
   type AgentDefinition,
   type AggregationSpec,
@@ -332,4 +420,5 @@ export {
   type ExecutionReceipt,
   type AgentExecutionResult,
   type AggregationValidation,
+  type ReceiptValidation,
 } from "./protocol.js";

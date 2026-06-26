@@ -12,7 +12,7 @@ import type { ToolModule, ToolDependencies } from "./types.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
-import { validateContinuationGate } from "../execution/index.js";
+import { MAX_CONTINUATION_RETRIES, validateContinuationGate } from "../execution/index.js";
 import { handleReviewContentWizard, type ReviewWizardInput } from "./reviewContentWizardTool.js";
 
 // ── Tool Definition ───────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ export const reviewContentWizardContinueDefinition: Tool = {
           "preaudit_started",
           "preaudit_completed",
           "persona_inventory_completed",
+          "persona_audit_started",
         ],
       },
       expectedRevision: {
@@ -92,7 +93,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
     }
 
     // Load wizard state
-    const statePath = path.join(deps.tmpDir, `wizard-${sessionId}.json`);
+    const statePath = path.join(deps.tmpDir, `${sessionId}_review_wizard.json`);
     let state: any;
     try {
       const raw = await fs.promises.readFile(statePath, "utf-8");
@@ -115,7 +116,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
     }
 
     // ── validateContinuationGate Integration ───────────────────────────────
-    if (state.step === "waitingForSubagentAudit") {
+    if (state.step === "waitingForSubagentAudit" || state.step === "waitingForPersonaAudit") {
       try {
         const validationResult = validateContinuationGate(state, {
           continuationId,
@@ -124,7 +125,28 @@ export const reviewContentWizardContinueModule: ToolModule = {
         });
 
         if (validationResult.status === "invalid") {
-          await fs.promises.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
+          const tmpPath = statePath + ".tmp";
+          await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+          await fs.promises.rename(tmpPath, statePath);
+
+          // Persona audit has no orchestration fallback — abort cleanly
+          if (state.step === "waitingForPersonaAudit") {
+            return {
+              content: [{
+                type: "text",
+                text: [
+                  "⛔ **并行评审执行失败** — 宿主 AI 未返回有效的 ExecutionReceipt。",
+                  "",
+                  "可能的原因：",
+                  "- 宿主 AI 不支持 Subagent 并行调度",
+                  "- 返回的 JSON 格式不符合 kevlar.persona-review/v1 协议",
+                  "",
+                  "建议：请使用其他 MCP 客户端（如支持 Task/Subagent 工具的客户端）重试。",
+                ].join("\n"),
+              }],
+              isError: true,
+            };
+          }
 
           const allPersonas = await loadAllPersonas(deps.skillsDir);
           const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
@@ -231,12 +253,37 @@ export const reviewContentWizardContinueModule: ToolModule = {
           isError: true,
         };
       }
+
+      // Retry limit: after 3 failed attempts, auto-degrade to avoid infinite loops
+      const retryCount = (activeContinuation.retryCount ?? 0) + 1;
+      activeContinuation.retryCount = retryCount;
+      if (retryCount > MAX_CONTINUATION_RETRIES) {
+        // Clean up state so user can restart
+        try { await fs.promises.unlink(statePath); } catch { /* ok */ }
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `🛑 **已达最大重试次数（${MAX_CONTINUATION_RETRIES} 次）** — 会话已自动终止。`,
+              "",
+              "可能的原因：",
+              "- 宿主 AI 连续返回格式不正确的 ExecutionReceipt",
+              "- Subagent 调度能力不足",
+              "",
+              "建议：重新发起评测流程。",
+            ].join("\n"),
+          }],
+          isError: true,
+        };
+      }
     }
 
     // ── Accept continuation ──────────────────────────────────────────────
     state.revision += 1;
     state.activeContinuation = undefined;
-    await fs.promises.writeFile(statePath, JSON.stringify(state, null, 2), "utf-8");
+    const tmpPath = statePath + ".tmp";
+    await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+    await fs.promises.rename(tmpPath, statePath);
 
     // Route the result through the wizard using userMessage flow.
     const wizardInput: ReviewWizardInput = {

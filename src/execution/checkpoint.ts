@@ -8,6 +8,7 @@
 
 import type { ExecutionPlan, DispatchFailureReason, ClientFingerprint, HostStructuredCapabilityStatus } from "./plan.js";
 import { getClientFingerprint } from "./client.js";
+import { logger } from "../utils/logger.js";
 
 // ── Audit Checkpoints ─────────────────────────────────────────────────────────
 
@@ -23,7 +24,8 @@ export type AuditCheckpoint =
   | "step0_completed"
   | "preaudit_started"
   | "preaudit_completed"
-  | "persona_inventory_completed";
+  | "persona_inventory_completed"
+  | "persona_audit_started";
 
 // ── Execution Transition ──────────────────────────────────────────────────────
 
@@ -108,6 +110,14 @@ export function resumeFromStructuredFailure(
     checkpoint: "step0_completed",
     clientFingerprint: getClientFingerprint(),
   };
+
+  logger.warn("Execution downgraded", {
+    event: "execution_downgraded",
+    from: `${from.backend}/${from.strategy}`,
+    to: `${to.backend}/${to.strategy}`,
+    reason,
+    checkpoint: "step0_completed",
+  });
 
   return {
     executionPlan: to,

@@ -13,6 +13,7 @@ import { calculateSynergy } from "./synergyCalculator.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import type { PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
+import { readConfig } from "./config.js";
 
 // ── Step type system ─────────────────────────────────────────────────────────
 
@@ -288,53 +289,69 @@ export async function runSystemAuditors(
   step0Result?: Step0Result,
   webContextMap?: Record<string, string>,
 ): Promise<PreAuditDimensionResult[]> {
-  return Promise.all(
-    systemAuditors.map(async (auditor) => {
-      try {
-        const auditContent =
-          timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
+  const config = readConfig();
+  const timeoutMs = config.multiAgent.timeoutMs * systemAuditors.length;
 
-        let webContext = "";
-        if (webContextMap && Object.keys(webContextMap).length > 0) {
-          const relevantEntries = Object.entries(webContextMap)
-            .filter(([, ctx]) => ctx.length > 0)
-            .map(([kw, ctx]) => `### 关键词「${kw}」\n${ctx}`);
-          if (relevantEntries.length > 0) {
-            webContext = `以下是针对本文案黑料原子的联网验证结果（Turn 1 已完成检索）：\n\n${relevantEntries.join("\n\n")}`;
-          }
+  const emptyResults = systemAuditors.map((a) => ({ id: a.meta.id, name: a.meta.name, findings: [] }));
+
+  const tasks = systemAuditors.map(async (auditor) => {
+    try {
+      const auditContent =
+        timingContext && auditor.meta.id === "social_risk" ? [content, "", timingContext].join("\n") : content;
+
+      let webContext = "";
+      if (webContextMap && Object.keys(webContextMap).length > 0) {
+        const relevantEntries = Object.entries(webContextMap)
+          .filter(([, ctx]) => ctx.length > 0)
+          .map(([kw, ctx]) => `### 关键词「${kw}」\n${ctx}`);
+        if (relevantEntries.length > 0) {
+          webContext = `以下是针对本文案黑料原子的联网验证结果（Turn 1 已完成检索）：\n\n${relevantEntries.join("\n\n")}`;
         }
-
-        const response = await caller({
-          systemPrompt: buildIsolatedSystemAuditorPrompt(auditor),
-          messages: [
-            {
-              role: "user",
-              content: buildIsolatedSystemAuditorMessage(auditContent, auditor, {
-                localFindings,
-                step0Result,
-                timingContext: timingContext && auditor.meta.id === "social_risk" ? timingContext : undefined,
-                webContext: webContext || undefined,
-              }),
-            },
-          ],
-          maxTokens: 2048,
-        });
-        const parsed = JSON.parse(stripCodeFence(response.content.trim()));
-        return {
-          id: auditor.meta.id,
-          name: auditor.meta.name,
-          findings: Array.isArray(parsed.findings) ? parsed.findings : [],
-        };
-      } catch (err) {
-        logger.warn("System auditor failed", {
-          event: "system_auditor_failed",
-          auditorId: auditor.meta.id,
-          error: getErrorInfo(err).message,
-        });
-        return { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
       }
-    }),
-  );
+
+      const response = await caller({
+        systemPrompt: buildIsolatedSystemAuditorPrompt(auditor),
+        messages: [
+          {
+            role: "user",
+            content: buildIsolatedSystemAuditorMessage(auditContent, auditor, {
+              localFindings,
+              step0Result,
+              timingContext: timingContext && auditor.meta.id === "social_risk" ? timingContext : undefined,
+              webContext: webContext || undefined,
+            }),
+          },
+        ],
+        maxTokens: 2048,
+      });
+      const parsed = JSON.parse(stripCodeFence(response.content.trim()));
+      return {
+        id: auditor.meta.id,
+        name: auditor.meta.name,
+        findings: Array.isArray(parsed.findings) ? parsed.findings : [],
+      };
+    } catch (err) {
+      logger.warn("System auditor failed", {
+        event: "system_auditor_failed",
+        auditorId: auditor.meta.id,
+        error: getErrorInfo(err).message,
+      });
+      return { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
+    }
+  });
+
+  const timeoutPromise = new Promise<PreAuditDimensionResult[]>((resolve) => {
+    setTimeout(() => {
+      logger.warn("System auditors timed out", {
+        event: "system_auditors_timeout",
+        timeoutMs,
+        auditorCount: systemAuditors.length,
+      });
+      resolve(emptyResults);
+    }, timeoutMs);
+  });
+
+  return Promise.race([Promise.all(tasks), timeoutPromise]);
 }
 
 // ── Inline step: Step 2 — Bare-text audit ────────────────────────────────────
@@ -465,106 +482,119 @@ export async function crossValidateRiskyDimensions(
   const validatorMap = new Map(auditors.map((a) => [a.meta.id, a]));
   const results = [...phase1Results.map((r) => ({ ...r, findings: [...r.findings] }))];
 
-  for (const pair of CROSS_VALIDATION_PAIRS) {
+  // Phase 1: fire all LLM calls in parallel (the bottleneck)
+  const pairResults = await Promise.all(
+    CROSS_VALIDATION_PAIRS.map(async (pair) => {
+      const sourceDim = results.find((r) => r.id === pair.source);
+      if (!sourceDim || sourceDim.findings.length === 0) return null;
+
+      const validatorAuditor = validatorMap.get(pair.validator);
+      if (!validatorAuditor) return null;
+
+      const findingsSummary = sourceDim.findings
+        .map(
+          (f, i: number) =>
+            `${i + 1}. [${f.suggestedLevel || "🟡"}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`,
+        )
+        .join("\n");
+
+      try {
+        const response = await samplingFn({
+          systemPrompt: [
+            `# [SYSTEM PROTOCOL] 防御性风险矩阵交叉验证沙盒`,
+            ``,
+            `## 【元规则】`,
+            `1. 运行环境：真实隔离 LLM 沙盒；当前调用代表一名交叉验证审查员`,
+            `2. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
+            ``,
+            buildCommonRiskRules(),
+            ``,
+            buildCoreReasoningFramework(),
+            ``,
+            `## 【你的审查员角色与原始规则】`,
+            `- 审查员：${validatorAuditor.meta.name}（${validatorAuditor.meta.id}）`,
+            `- 角色描述：${validatorAuditor.meta.description}`,
+            ``,
+            validatorAuditor.systemPrompt,
+          ].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: [
+                pair.question,
+                "",
+                `原始内容：${content}`,
+                "",
+                `「${sourceDim.name}」的发现：`,
+                findingsSummary,
+              ].join("\n"),
+            },
+          ],
+          maxTokens: 1024,
+        });
+
+        const parsed = JSON.parse(stripCodeFence(response.content.trim()));
+        const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
+
+        return { pair, validatedFindings, validatorAuditor };
+      } catch (err) {
+        logger.warn("Cross-validation failed", {
+          event: "cross_validation_failed",
+          source: pair.source,
+          validator: pair.validator,
+          error: getErrorInfo(err).message,
+        });
+        return null;
+      }
+    }),
+  );
+
+  // Phase 2: apply mutations sequentially (safe, cheap)
+  for (const entry of pairResults) {
+    if (!entry || entry.validatedFindings.length === 0) continue;
+
+    const { pair, validatedFindings, validatorAuditor } = entry;
     const sourceDim = results.find((r) => r.id === pair.source);
-    if (!sourceDim || sourceDim.findings.length === 0) continue;
+    if (!sourceDim) continue;
+    const validatorDim = results.find((r) => r.id === pair.validator);
 
-    const validatorAuditor = validatorMap.get(pair.validator);
-    if (!validatorAuditor) continue;
+    for (const vf of validatedFindings) {
+      const status = String(vf.status || "")
+        .toLowerCase()
+        .trim();
+      const targetKeyword = String(vf.keyword || "").trim();
 
-    const findingsSummary = sourceDim.findings
-      .map(
-        (f, i: number) =>
-          `${i + 1}. [${f.suggestedLevel || "🟡"}] ${f.keyword || ""} - ${f.trigger || f.riskDescription || ""}`,
-      )
-      .join("\n");
-
-    try {
-      const response = await samplingFn({
-        systemPrompt: [
-          `# [SYSTEM PROTOCOL] 防御性风险矩阵交叉验证沙盒`,
-          ``,
-          `## 【元规则】`,
-          `1. 运行环境：真实隔离 LLM 沙盒；当前调用代表一名交叉验证审查员`,
-          `2. 核心禁令：禁止使用第一人称发言；禁止输出任何修改建议、优化方向、文案润色或重写意见`,
-          ``,
-          buildCommonRiskRules(),
-          ``,
-          buildCoreReasoningFramework(),
-          ``,
-          `## 【你的审查员角色与原始规则】`,
-          `- 审查员：${validatorAuditor.meta.name}（${validatorAuditor.meta.id}）`,
-          `- 角色描述：${validatorAuditor.meta.description}`,
-          ``,
-          validatorAuditor.systemPrompt,
-        ].join("\n"),
-        messages: [
-          {
-            role: "user",
-            content: [
-              pair.question,
-              "",
-              `原始内容：${content}`,
-              "",
-              `「${sourceDim.name}」的发现：`,
-              findingsSummary,
-            ].join("\n"),
-          },
-        ],
-        maxTokens: 1024,
-      });
-
-      const parsed = JSON.parse(stripCodeFence(response.content.trim()));
-      const validatedFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
-
-      const validatorDim = results.find((r) => r.id === pair.validator);
-      if (validatedFindings.length > 0) {
-        for (const vf of validatedFindings) {
-          const status = String(vf.status || "")
-            .toLowerCase()
-            .trim();
-          const targetKeyword = String(vf.keyword || "").trim();
-
-          if (status === "debunked") {
-            sourceDim.findings = sourceDim.findings.filter((f) => String(f.keyword || "").trim() !== targetKeyword);
-          } else if (status === "downgraded") {
-            for (const f of sourceDim.findings) {
-              if (String(f.keyword || "").trim() === targetKeyword) {
-                f.suggestedLevel = "🟡";
-                f.trigger = `[交叉验证降级 (验证方: ${validatorAuditor.meta.name})] ${f.trigger}`;
-                f.riskDescription = `${f.riskDescription} (降级缘由: ${vf.reason || "未指明理由"})`;
-              }
-            }
-          } else if (status === "confirmed") {
-            if (validatorDim) {
-              const exists = validatorDim.findings.some(
-                (existing: any) => String(existing.keyword || "").trim() === targetKeyword,
-              );
-              if (!exists) {
-                validatorDim.findings.push({
-                  keyword: targetKeyword,
-                  trigger: `[交叉验证确认 (源自: ${sourceDim.name})] ${vf.reason || "确认存在关联风险"}`,
-                  riskDescription: vf.reason || "双向交叉验证增强确认",
-                  suggestedLevel: vf.suggestedLevel || "🟡",
-                  source: "cross_validation",
-                });
-              }
-            }
+      if (status === "debunked") {
+        sourceDim.findings = sourceDim.findings.filter((f) => String(f.keyword || "").trim() !== targetKeyword);
+      } else if (status === "downgraded") {
+        for (const f of sourceDim.findings) {
+          if (String(f.keyword || "").trim() === targetKeyword) {
+            f.suggestedLevel = "🟡";
+            f.trigger = `[交叉验证降级 (验证方: ${validatorAuditor.meta.name})] ${f.trigger}`;
+            f.riskDescription = `${f.riskDescription} (降级缘由: ${vf.reason || "未指明理由"})`;
           }
         }
-
-        sourceDim.level = getFindingsLevel(sourceDim.findings);
+      } else if (status === "confirmed") {
         if (validatorDim) {
-          validatorDim.level = getFindingsLevel(validatorDim.findings);
+          const exists = validatorDim.findings.some(
+            (existing: any) => String(existing.keyword || "").trim() === targetKeyword,
+          );
+          if (!exists) {
+            validatorDim.findings.push({
+              keyword: targetKeyword,
+              trigger: `[交叉验证确认 (源自: ${sourceDim.name})] ${vf.reason || "确认存在关联风险"}`,
+              riskDescription: vf.reason || "双向交叉验证增强确认",
+              suggestedLevel: vf.suggestedLevel || "🟡",
+              source: "cross_validation",
+            });
+          }
         }
       }
-    } catch (err) {
-      logger.warn("Cross-validation failed", {
-        event: "cross_validation_failed",
-        source: pair.source,
-        validator: pair.validator,
-        error: getErrorInfo(err).message,
-      });
+    }
+
+    sourceDim.level = getFindingsLevel(sourceDim.findings);
+    if (validatorDim) {
+      validatorDim.level = getFindingsLevel(validatorDim.findings);
     }
   }
 

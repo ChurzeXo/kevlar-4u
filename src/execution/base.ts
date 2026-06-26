@@ -15,6 +15,7 @@ export type {
   ExecutionBackend,
   ExecutionPlan,
   HostOrchestrationStrategy,
+  SamplingStrategy,
   HostStructuredCapabilityStatus,
   DispatchFailureReason,
   PreAuditContext,
@@ -24,7 +25,7 @@ export type {
   HostStructuredObservation,
 } from "./plan.js";
 
-export type ExecutionMode = "orchestration" | "mcp_subagent";
+export type ExecutionMode = "orchestration" | "mcp_subagent" | "mcp_sampling";
 
 export type ResolveableMode = ExecutionMode | "auto";
 
@@ -93,6 +94,7 @@ export interface ExecutionContext {
   traceContext?: TraceContext;
   runContext?: ReviewRunContext;
   tier?: "free" | "pro";
+  server?: any;
 }
 
 // ── MECP Frame (MECP §9.2) ────────────────────────────────────────────────────

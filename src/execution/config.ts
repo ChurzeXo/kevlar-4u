@@ -163,7 +163,7 @@ export async function updateConfig(options: UpdateConfigOptions): Promise<Kevlar
 // ── Config Validation ─────────────────────────────────────────────────────────
 
 export function isValidMode(mode: string): mode is ExecutionMode | "auto" {
-  return ["auto", "orchestration", "mcp_subagent"].includes(mode);
+  return ["auto", "orchestration", "mcp_subagent", "mcp_sampling"].includes(mode);
 }
 
 export function isValidConcurrency(concurrency: number): boolean {

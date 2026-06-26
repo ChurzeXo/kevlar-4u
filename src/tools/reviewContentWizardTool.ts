@@ -4,8 +4,17 @@ import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction, ExecutionMode } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
-import { handleReviewContent } from "./reviewTool.js";
-import { DEFAULT_DIMENSIONS_CONFIG, DEFENSIVE_DIMENSION_IDS, type DimensionsConfig } from "../execution/dimensions.js";
+import {
+  DEFAULT_DIMENSIONS_CONFIG,
+  DEFENSIVE_DIMENSION_IDS,
+  type DimensionsConfig,
+  buildDefensiveSystemDirective,
+  buildOffensiveSystemDirective,
+  buildPersonaContextDirective,
+  buildToneDirective,
+  buildReviewUserMessage,
+  DIMENSIONS,
+} from "../execution/dimensions.js";
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { isValidSessionId } from "../utils/sessionId.js";
@@ -184,6 +193,7 @@ type ReviewWizardStep =
   | "waitingForOrchestrationAudit" // 宿主编排 Turn 2: 等待维度审计 JSON
   | "waitingForOrchestrationFinal" // 宿主编排 Turn 3: 等待交叉验证 + 最终仲裁 JSON
   | "waitingForSubagentAudit" // Subagent 并行调度：等待 subagent 审计结果
+  | "waitingForPersonaAudit" // Stage 2 Subagent 并行：等待 persona 评审结果
   | "checkPersonaInventory"
   | "waitingForPersonaCreation"
   | "waitingForReviewDecision"
@@ -208,6 +218,7 @@ interface ReviewWizardState {
     continuationId: string;
     checkpoint: import("../execution/checkpoint.js").AuditCheckpoint;
     expiresAt: number;
+    retryCount: number;  // 0-based, incremented each time Host AI resubmits
   };
   content: string;
   context?: string;
@@ -273,6 +284,7 @@ function setContinuation(
     continuationId,
     checkpoint,
     expiresAt: Date.now() + 30 * 60 * 1000, // 30 min timeout
+    retryCount: 0,
   };
 }
 
@@ -301,7 +313,7 @@ export async function handleReviewContentWizard(
     let plan: ReviewPlan | undefined;
     if (strategyProvider && !state.strategySessionId) {
       plan = await strategyProvider.getReviewPlan();
-      state.tier = plan.tier;
+      state.tier = (process.env.KEVLAR_TIER as "free" | "pro") ?? plan.tier;
       state.strategySessionId = plan.strategySessionId;
       state.strategyHash = plan.strategyHash;
 
@@ -446,6 +458,9 @@ async function advanceWizard(
     case "rstConfirmation":
       return handleRstConfirmation(tmpDir, state, personas, userMessage, samplingFn);
 
+    case "waitingForPersonaAudit":
+      return handlePersonaAuditResult(tmpDir, state, personas, userMessage, samplingFn);
+
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
 
@@ -588,7 +603,8 @@ async function handleSystemAudit(
     state.step = "waitingForSubagentAudit";
     setContinuation(state, "waitingForSubagentAudit", "preaudit_completed");
 
-    const blueprint = buildAgentBlueprint(state, systemAuditors);
+    const prompts = await resolvePromptSegments();
+    const blueprint = buildAgentBlueprint(state, systemAuditors, prompts);
     (state as any).blueprint = blueprint;
 
     await saveState(tmpDir, state);
@@ -610,7 +626,29 @@ async function handleSystemAudit(
   );
 }
 
-function buildAgentBlueprint(state: ReviewWizardState, systemAuditors: Persona[]): AgentBlueprint {
+/**
+ * Build a fully self-contained AgentBlueprint for parallel subagent dispatch.
+ *
+ * Each subagent receives its complete audit context (content, bare text,
+ * local findings, core reasoning framework, execution protocol) directly
+ * in its `instructions` field. No shared dispatch prompt is needed — the
+ * Host AI maps each AgentDefinition to an independent subagent session.
+ *
+ * Phase 1 hardening:
+ * - isolation.level changed from "best_effort" to "strict"
+ * - PromptSegments (coreReasoningFramework, coreFrameworkSteps) inlined
+ *   into each agent's instructions for true contextual isolation
+ */
+function buildAgentBlueprint(
+  state: ReviewWizardState,
+  systemAuditors: Persona[],
+  prompts?: PromptSegments,
+): AgentBlueprint {
+  const content = state.content;
+  const bareText = stripContext(content).bare;
+  const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+  const segs = prompts ?? loadPromptSegments("free");
+
   const agents: AgentDefinition[] = systemAuditors.map((auditor) => {
     let role = "safety_reviewer";
     if (auditor.meta.id === "legal_compliance") role = "policy_reviewer";
@@ -619,7 +657,7 @@ function buildAgentBlueprint(state: ReviewWizardState, systemAuditors: Persona[]
     return {
       id: auditor.meta.id,
       role,
-      instructions: auditor.systemPrompt || "",
+      instructions: buildIsolatedAgentInstructions(auditor, content, bareText, localFindings, segs),
       input: {
         contentRef: "content",
       },
@@ -637,7 +675,7 @@ function buildAgentBlueprint(state: ReviewWizardState, systemAuditors: Persona[]
       concurrency: systemAuditors.length,
       isolation: {
         required: true,
-        level: "best_effort",
+        level: "strict",
       },
     },
     agents,
@@ -657,6 +695,103 @@ function buildAgentBlueprint(state: ReviewWizardState, systemAuditors: Persona[]
       idempotencyKey: activeCont?.continuationId,
     },
   };
+}
+
+/**
+ * Build fully self-contained instructions for a single system auditor subagent.
+ *
+ * The instructions include everything the subagent needs to independently
+ * audit the content: auditor identity, core reasoning framework, content
+ * (original + decontextualized), local rule findings, and the full audit
+ * execution protocol (Steps 1-3). No shared context required.
+ */
+function buildIsolatedAgentInstructions(
+  auditor: Persona,
+  content: string,
+  bareText: string,
+  localFindings: any[],
+  segs: PromptSegments,
+): string {
+  const parts: string[] = [];
+
+  // ── 1. Auditor identity ─────────────────────────────────────────────
+  parts.push(`你是 **${auditor.meta.name}**（${auditor.meta.id}）。`);
+  parts.push(auditor.meta.description);
+  parts.push("");
+
+  // ── 2. Core reasoning framework (Pro-enhanced via PromptSegments) ──
+  if (segs.coreReasoningFramework) {
+    parts.push(segs.coreReasoningFramework);
+    parts.push("");
+  }
+
+  // ── 3. Cold-read protocol steps ────────────────────────────────────
+  if (segs.coreFrameworkSteps) {
+    parts.push(segs.coreFrameworkSteps);
+    parts.push("");
+  }
+
+  // ── 4. Auditor's system prompt (persona-specific rules) ────────────
+  if (auditor.systemPrompt) {
+    parts.push("## 【审查员角色规则】");
+    parts.push(auditor.systemPrompt);
+    parts.push("");
+  }
+
+  // ── 5. Content to audit ───────────────────────────────────────────
+  parts.push("## 【待审核内容】");
+  parts.push("");
+  parts.push("### 原始文案");
+  parts.push('"""');
+  parts.push(content);
+  parts.push('"""');
+  parts.push("");
+  parts.push("### 脱嵌文本（去除语境提示后的裸文，用于测试断章取义风险）");
+  parts.push('"""');
+  parts.push(bareText);
+  parts.push('"""');
+  parts.push("");
+
+  // ── 6. Local rule engine findings ──────────────────────────────────
+  if (localFindings.length > 0) {
+    parts.push("## 【规则引擎预警（独立代码层检测结果，纳入审计参考）】");
+    parts.push(JSON.stringify(localFindings, null, 2));
+    parts.push("");
+  }
+
+  // ── 7. Audit execution protocol ────────────────────────────────────
+  parts.push("## 【审计执行协议】");
+  parts.push("");
+  parts.push("### Step 1：当前维度沙盒推理");
+  parts.push(`从 **${auditor.meta.name}** 的专业角度，对上述内容进行独立风险分析。`);
+  parts.push("你必须假设这段内容遭遇了最恶劣的网络环境、最恶意的断章取义和带节奏。");
+  parts.push("只要存在被恶意曲解的空间，即视为实质性风险。");
+  parts.push("");
+  parts.push("### Step 2：单沙盒仲裁与噪音过滤");
+  parts.push("1. 逐一审查 Step 1 的发现，标记哪些属于过度联想（Noise）。");
+  parts.push("   判断标准：能否推演出完整攻击链？不能则为 Noise。");
+  parts.push("2. 确认最终发现列表中不含任何修改建议或文案优化意见。");
+  parts.push("");
+  parts.push("### Step 3：最终 JSON 输出");
+  parts.push("请输出以下格式的纯 JSON，不包含 Markdown 标记或额外解释：");
+  parts.push("");
+  parts.push(JSON.stringify({
+    findings: [{
+      keyword: "风险词汇",
+      trigger: "触发原因",
+      riskDescription: "风险说明",
+      propagationRisk: "传播风险",
+      suggestedLevel: "🔴 或 🟡",
+      propagationPath: "可选：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
+    }],
+  }, null, 2));
+  parts.push("");
+  parts.push("规则：");
+  parts.push("- 无发现时 findings 必须为空数组");
+  parts.push("- suggestedLevel 只能使用 🔴 或 🟡");
+  parts.push("- 只要能推演出完整攻击链，必须进入 findings");
+
+  return parts.join("\n");
 }
 
 function buildOrchestrationPreAuditContext(
@@ -912,9 +1047,42 @@ async function handleSubagentAuditResult(
   samplingFn?: MultiTurnSamplingFunction,
   strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
+  // ── Early schema validation ─────────────────────────────────────────────
+  let parsed: any;
   try {
-    const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+    parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+  } catch {
+    await rollbackState(tmpDir, state.sessionId);
+    return toolResponse(
+      state,
+      [
+        "❌ **无法解析 Host AI 返回的 Subagent ExecutionReceipt**",
+        "",
+        "返回内容不是有效的 JSON。请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
+        `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
+      ].join("\n"),
+    );
+  }
 
+  // Import after validation to avoid circular deps
+  const { validateReceipt } = await import("../execution/protocol.js");
+  const validation = validateReceipt(parsed);
+  if (!validation.valid) {
+    await rollbackState(tmpDir, state.sessionId);
+    return toolResponse(
+      state,
+      [
+        "❌ **Subagent ExecutionReceipt 格式错误**",
+        "",
+        ...validation.errors.map((e: string) => `- ${e}`),
+        ...(validation.warnings.length > 0 ? ["", "⚠️ 警告:"] : []),
+        ...validation.warnings.map((w: string) => `- ${w}`),
+        `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
+      ].join("\n"),
+    );
+  }
+
+  try {
     // Record positive observation: Host successfully returned structured JSON
     recordCapabilityObservation(
       getClientFingerprint(),
@@ -1822,66 +1990,392 @@ async function handleRstConfirmation(
   );
 }
 
+// ── Persona Agent Blueprint (Stage 2 Subagent Dispatch) ──────────────────────
+
+/**
+ * Build fully isolated prompt instructions for a single persona agent.
+ *
+ * Each persona agent receives its complete review context inline,
+ * so it can run in a truly isolated subagent without external references.
+ */
+function buildIsolatedPersonaPrompt(
+  persona: Persona,
+  content: string,
+  contextNote: string | undefined,
+  dimensions: DimensionsConfig,
+  preAuditReport: any,
+): string {
+  const meta = persona.meta;
+
+  const parts: string[] = [];
+
+  // 1. Persona system prompt (user-defined)
+  if (persona.systemPrompt) {
+    parts.push(persona.systemPrompt);
+    parts.push("");
+  }
+
+  // 2. Persona context: identity, background, blind spots
+  parts.push(buildPersonaContextDirective(meta));
+
+  // 3. Tone constraints
+  if (meta.tone) {
+    parts.push(buildToneDirective(meta.tone));
+  }
+
+  // 4. Defensive system directive (mandatory for all reviewers)
+  parts.push(buildDefensiveSystemDirective());
+
+  // 5. Offensive system directive (based on config)
+  const offensive = buildOffensiveSystemDirective(dimensions);
+  if (offensive) {
+    parts.push(offensive);
+  }
+
+  // 6. Review task with content + pre-audit context
+  parts.push(buildReviewUserMessage(content, contextNote, dimensions, preAuditReport));
+
+  // 7. Structured JSON output requirement
+  parts.push([
+    "## 📤 输出格式（严格 JSON）",
+    "",
+    "请以以下 JSON 格式输出你的评审结果（不要包含 markdown 代码块标记）：",
+    "",
+    "```json",
+    "{",
+    '  "personaId": "' + meta.id + '",',
+    '  "personaName": "' + meta.name + '",',
+    '  "offensiveDimensions": [',
+    '    { "dimension": "维度名", "level": "🟢/🟡/🔴", "reasoning": "判定依据" }',
+    "  ],",
+    '  "defensiveDimensions": [',
+    '    { "dimension": "维度名", "level": "🟢/🟡/🔴", "reasoning": "判定依据" }',
+    "  ],",
+    '  "overallConclusion": "一句话总评",',
+    '  "mostDestructiveRisk": "最具破坏性的风险点",',
+    '  "coreControversy": "核心争议焦点",',
+    '  "simulatedReaction": "模拟该角色在评论区可能发表的真实反应（2-5句话，自然语气）"',
+    "}",
+    "```",
+    "",
+    "⚠️ 输出必须是纯 JSON，不要加 ```json 标记或任何解释文字。",
+  ].join("\n"));
+
+  return parts.join("\n\n");
+}
+
+/**
+ * Build the Persona AgentBlueprint for Stage 2: parallel isolated persona reviews.
+ */
+function buildPersonaAgentBlueprint(
+  state: ReviewWizardState,
+  personas: Persona[],
+): AgentBlueprint {
+  const dimensions = state.dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
+  const contextNote = state.context;
+  const content = state.content;
+  const preAuditReport = state.preAuditReport;
+
+  const agents: AgentDefinition[] = personas.map((p) => {
+    const instructions = buildIsolatedPersonaPrompt(
+      p,
+      content,
+      contextNote,
+      dimensions,
+      preAuditReport,
+    );
+
+    return {
+      id: p.meta.id,
+      role: "persona_reviewer",
+      instructions,
+      input: {
+        contentRef: "_inline_",
+      },
+      outputSchema: "kevlar.reviewer/v1",
+    };
+  });
+
+  return {
+    protocol: "kevlar.exec/v1",
+    execution: {
+      mode: "ephemeral_agents",
+      allowedModes: ["native_subagent", "simulated_agent"],
+      concurrency: personas.length,
+      isolation: {
+        required: true,
+        level: "strict",
+      },
+    },
+    agents,
+    aggregation: {
+      strategy: "host_merge",
+      rules: {
+        requireAllAgents: true,
+        conflictResolution: "host_decide",
+        outputSchema: "kevlar.audit/v1",
+      },
+    },
+    continuation: {
+      tool: "review_content_wizard_continue",
+      sessionId: state.sessionId,
+      checkpoint: "persona_audit_started",
+      expectedRevision: state.revision ?? 1,
+      idempotencyKey: `${state.sessionId}-persona-${Date.now()}`,
+    },
+  };
+}
+
+/**
+ * Handle the Host AI's ExecutionReceipt from parallel persona review dispatch.
+ *
+ * Parses each persona agent's structured output, aggregates into a final
+ * combined report, and marks the wizard as completed.
+ */
+async function handlePersonaAuditResult(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  // ── Early schema validation ─────────────────────────────────────────────
+  let parsed: any;
+  try {
+    parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+  } catch {
+    await rollbackState(tmpDir, state.sessionId);
+    return toolResponse(
+      state,
+      [
+        "❌ **无法解析 Host AI 返回的 Persona ExecutionReceipt**",
+        "",
+        "返回内容不是有效的 JSON。请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
+        `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
+      ].join("\n"),
+    );
+  }
+
+  const { validateReceipt } = await import("../execution/protocol.js");
+  const validation = validateReceipt(parsed);
+  if (!validation.valid) {
+    await rollbackState(tmpDir, state.sessionId);
+    return toolResponse(
+      state,
+      [
+        "❌ **Persona ExecutionReceipt 格式错误**",
+        "",
+        ...validation.errors.map((e: string) => `- ${e}`),
+        ...(validation.warnings.length > 0 ? ["", "⚠️ 警告:"] : []),
+        ...validation.warnings.map((w: string) => `- ${w}`),
+        `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
+      ].join("\n"),
+    );
+  }
+
+  try {
+    // ── Extract individual agent results from the aggregated receipt ──────
+    const agentResults: Record<string, any> = {};
+
+    if (parsed.agents && Array.isArray(parsed.agents)) {
+      for (const agent of parsed.agents) {
+        let output = agent.output;
+        // Try to parse string output as JSON
+        if (typeof output === "string") {
+          try {
+            output = JSON.parse(output.trim());
+          } catch {
+            // Keep as plain text if not JSON
+          }
+        }
+        agentResults[agent.id] = output;
+      }
+    } else if (parsed.results && typeof parsed.results === "object") {
+      // Alternative format: results keyed by agent id
+      for (const [id, output] of Object.entries(parsed.results)) {
+        agentResults[id] = output;
+      }
+    } else if (parsed.dimensions || parsed.personaId) {
+      // Fallback: single agent result (simulated_agent mode)
+      agentResults[parsed.personaId || "unknown"] = parsed;
+    }
+
+    // Build persona ID → display name map for the report
+    const personaMap = new Map(personas.map((p) => [p.meta.id, p.meta.name]));
+
+    // Build the combined report
+    const reportParts: string[] = [
+      "# 舆论仿真推演报告",
+      "",
+      `共 **${state.selectedPersonaIds.length}** 位评审员参与评测。`,
+      "",
+    ];
+
+    let totalGreen = 0;
+    let totalYellow = 0;
+    let totalRed = 0;
+
+    for (const persona of personas) {
+      const pid = persona.meta.id;
+      const result = agentResults[pid];
+
+      reportParts.push(`## 👤 ${persona.meta.name}`);
+      reportParts.push("");
+
+      if (!result) {
+        reportParts.push("⚠️ 该评审员未返回有效结果。");
+        reportParts.push("");
+        continue;
+      }
+
+      if (typeof result === "string") {
+        reportParts.push(result);
+        reportParts.push("");
+        continue;
+      }
+
+      // Structured result
+      const offDims = result.offensiveDimensions || [];
+      const defDims = result.defensiveDimensions || [];
+
+      // Count levels
+      for (const d of [...offDims, ...defDims]) {
+        if (d.level === "🟢") totalGreen++;
+        else if (d.level === "🟡") totalYellow++;
+        else if (d.level === "🔴") totalRed++;
+      }
+
+      // Offensive dimensions table
+      if (offDims.length > 0) {
+        reportParts.push("### 🚀 进攻性价值评估");
+        reportParts.push("");
+        reportParts.push("| 维度 | 等级 | 判定依据 |");
+        reportParts.push("|------|------|---------|");
+        for (const d of offDims) {
+          reportParts.push(`| ${d.dimension} | ${d.level} | ${d.reasoning || "-"} |`);
+        }
+        reportParts.push("");
+      }
+
+      // Defensive dimensions summary
+      if (defDims.length > 0) {
+        reportParts.push("### 🛡️ 防御性风险评估");
+        reportParts.push("");
+        reportParts.push("| 维度 | 等级 | 判定依据 |");
+        reportParts.push("|------|------|---------|");
+        for (const d of defDims) {
+          reportParts.push(`| ${d.dimension} | ${d.level} | ${d.reasoning || "-"} |`);
+        }
+        reportParts.push("");
+      }
+
+      if (result.overallConclusion) {
+        reportParts.push(`**一句话总评**：${result.overallConclusion}`);
+        reportParts.push("");
+      }
+
+      if (result.mostDestructiveRisk) {
+        reportParts.push(`**最具破坏性风险**：${result.mostDestructiveRisk}`);
+        reportParts.push("");
+      }
+
+      if (result.coreControversy) {
+        reportParts.push(`**核心争议焦点**：${result.coreControversy}`);
+        reportParts.push("");
+      }
+
+      if (result.simulatedReaction) {
+        reportParts.push("### 💬 模拟用户反应");
+        reportParts.push("");
+        reportParts.push(`> ${result.simulatedReaction.replace(/\n/g, "\n> ")}`);
+        reportParts.push("");
+      }
+
+      reportParts.push("---");
+      reportParts.push("");
+    }
+
+    // Summary statistics
+    if (totalGreen + totalYellow + totalRed > 0) {
+      reportParts.push("## 📊 综合统计");
+      reportParts.push("");
+      reportParts.push(`- 🟢 安全：${totalGreen} 项`);
+      reportParts.push(`- 🟡 注意：${totalYellow} 项`);
+      reportParts.push(`- 🔴 风险：${totalRed} 项`);
+      reportParts.push(`- 评审员参与：${Object.keys(agentResults).length}/${state.selectedPersonaIds.length} 位`);
+      reportParts.push("");
+    }
+
+    state.step = "completed";
+    const upgradePrompt =
+      state.tier === "free"
+        ? "\n\n---\n\n" + (await resolvePromptSegments()).freeTierUpgradePrompt
+        : "";
+
+    const updateNote = await checkForUpdate().catch(() => null);
+
+    const response = toolResponse(
+      state,
+      reportParts.join("\n") + "\n\n---\n\n评测完成。" + upgradePrompt + (updateNote ?? "")
+    );
+    await cleanupState(tmpDir, state.sessionId);
+    return response;
+  } catch (err) {
+    const info = getErrorInfo(err);
+    await rollbackState(tmpDir, state.sessionId);
+    return toolResponse(
+      state,
+      [
+        "❌ 无法解析宿主 AI 返回的 Persona ExecutionReceipt。",
+        `错误：${info.message}`,
+        "请确保返回符合 protocol.ts 中 ExecutionReceipt 规格的 JSON 对象。",
+      ].join("\n"),
+    );
+  }
+}
+
 async function executeReview(
   skillsDir: string,
   tmpDir: string,
   state: ReviewWizardState,
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
-  const reviewResult = await handleReviewContent(skillsDir, {
-    content: state.content,
-    persona_ids: state.selectedPersonaIds,
-    context: state.context,
-    mode: state.mode || "auto",
-    dimensions: state.dimensions,
-    preAuditReport: state.preAuditReport,
-    samplingFn: samplingFn
-      ? async (params) =>
-          samplingFn({
-            systemPrompt: params.systemPrompt,
-            messages: [{ role: "user", content: params.message }],
-            maxTokens: params.maxTokens,
-          })
-      : undefined,
-    tier: state.tier as "free" | "pro" | undefined,
-    runContext: state.strategySessionId
-      ? {
-          reviewRunId: `wizard-${state.sessionId}`,
-          strategySessionId: state.strategySessionId,
-          strategyVersion: "1.0.0",
-          strategyHash: state.strategyHash ?? "",
-          promptSetHash: state.strategyHash ?? "",
-          weightSetHash: state.strategyHash ?? "",
-          executionMode: "orchestration",
-          locale: "zh-CN",
-          startedAt: new Date().toISOString(),
-        }
-      : undefined,
-  });
+  // Load the selected personas
+  const allPersonas = await loadAllPersonas(skillsDir);
+  const selectedIds = new Set(state.selectedPersonaIds);
+  const selectedPersonas = allPersonas.filter((p) => selectedIds.has(p.meta.id));
 
-  if (reviewResult.isError) {
+  if (selectedPersonas.length === 0) {
     return {
-      content: [{ type: "text", text: reviewResult.content[0]?.text || "❌ 评测执行失败。" }],
+      content: [{ type: "text", text: "❌ 未找到选中的评审员。" }],
       isError: true,
     };
   }
 
-  state.step = "completed";
-  const resultText = reviewResult.content[0]?.text || "";
-  const upgradePrompt =
-    state.tier === "free"
-      ? "\n\n---\n\n" + (await resolvePromptSegments()).freeTierUpgradePrompt
-      : "";
+  // Build AgentBlueprint with isolated persona agents
+  const blueprint = buildPersonaAgentBlueprint(state, selectedPersonas);
 
-  // Check for kevlar-4u update (non-blocking)
-  const updateNote = await checkForUpdate().catch(() => null);
+  state.step = "waitingForPersonaAudit";
+  (state as any).blueprint = blueprint;
+  setContinuation(state, "waitingForPersonaAudit", "persona_audit_started");
 
-  const response = toolResponse(
-    state,
-    resultText + "\n\n---\n\n评测完成。" + upgradePrompt + (updateNote ?? "")
-  );
-  await cleanupState(tmpDir, state.sessionId);
-  return response;
+  await saveState(tmpDir, state);
+
+  return {
+    content: [{
+      type: "text",
+      text: [
+        JSON.stringify(blueprint, null, 2),
+        "",
+        "```kevlar-state",
+        `sessionId: ${state.sessionId}`,
+        "workflow: review_content",
+        `currentStep: ${state.step}`,
+        `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
+        "```",
+      ].join("\n"),
+    }],
+  };
 }
 
 async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
@@ -1912,6 +2406,13 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         systemAuditorIds: [],
         dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
       };
+    }
+
+    // Short TTL for waiting states: if the continuation has expired,
+    // clean up and let the user know the session timed out.
+    if (state.activeContinuation && state.activeContinuation.expiresAt < Date.now()) {
+      await cleanupState(tmpDir, sessionId);
+      throw new Error("评测会话已超时（等待 Host AI 返回结果超过 30 分钟），请重新发起评测。");
     }
     if (!state.systemAuditorIds) {
       state.systemAuditorIds = [];

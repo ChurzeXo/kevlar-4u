@@ -139,6 +139,47 @@ export function isSamplingSupported(): boolean {
   return false;
 }
 
+/**
+ * Check if the client supports task-augmented sampling (true parallel execution).
+ *
+ * Per MCP spec (2025-11-25 experimental): requires the client to declare
+ * `capabilities.tasks.requests.sampling.createMessage`.
+ *
+ * If not declared, Kevlar MUST NOT attach the `task` field to
+ * `sampling/createMessage` requests.
+ */
+export function isTaskAugmentedSamplingSupported(): boolean {
+  ensureClientCapabilities();
+
+  const tasksCap = clientCapabilities?.tasks as Record<string, unknown> | undefined;
+  if (!tasksCap) return false;
+
+  const requestsCap = tasksCap.requests as Record<string, unknown> | undefined;
+  if (!requestsCap) return false;
+
+  const samplingCap = requestsCap.sampling as Record<string, unknown> | undefined;
+  if (!samplingCap) return false;
+
+  return samplingCap.createMessage !== undefined;
+}
+
+/**
+ * Check if the client supports task cancellation.
+ *
+ * Per MCP spec: `tasks.cancel` is an INDEPENDENT capability declaration,
+ * NOT bundled with `tasks.requests.sampling.createMessage`.
+ *
+ * If not declared, Kevlar MUST NOT call `tasks/cancel`.
+ */
+export function isTaskCancelSupported(): boolean {
+  ensureClientCapabilities();
+
+  const tasksCap = clientCapabilities?.tasks as Record<string, unknown> | undefined;
+  if (!tasksCap) return false;
+
+  return tasksCap.cancel !== undefined;
+}
+
 export function isStructuredOutputSupported(): boolean {
   return clientCapabilities?.structuredOutput !== undefined;
 }
