@@ -10,6 +10,8 @@ import {
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { isValidSessionId } from "../utils/sessionId.js";
+import { t } from "../i18n/index.js";
+import { invalidInputError, internalError } from "../utils/errors.js";
 
 export const deletePersonaWizardToolDefinition: Tool = {
   name: "delete_persona_wizard",
@@ -49,7 +51,7 @@ interface DeletePersonaWizardState {
 export const deletePersonaWizardModule: ToolModule = {
   definition: deletePersonaWizardToolDefinition,
   handler: (deps) => async (args) => {
-    if (!args) throw new Error("删除向导需要提供参数");
+    if (!args) throw invalidInputError(t("wizard.inputRequired", { ns: "errors" }));
     return await handleDeletePersonaWizard(deps.skillsDir, deps.tmpDir, args as any);
   },
 };
@@ -148,7 +150,7 @@ async function confirmDelete(
   userMessage: string
 ): Promise<ToolResult> {
   if (!state.targetPersonaId || !state.targetPersonaName) {
-    throw new Error("当前会话缺少已绑定的删除目标。");
+    throw internalError(t("wizard.noDeleteTarget", { ns: "errors" }));
   }
 
   const required = `确认删除${state.targetPersonaName}`;
@@ -189,7 +191,7 @@ async function loadOrCreateState(
   input: DeletePersonaWizardInput
 ): Promise<DeletePersonaWizardState> {
   if (input.sessionId && !isValidSessionId(input.sessionId)) {
-    throw new Error("sessionId 格式不合法。");
+    throw invalidInputError(t("wizard.invalidSessionId", { ns: "errors" }));
   }
 
   const sessionId = input.sessionId || `wizard-delete-${Math.random().toString(36).substring(2, 10)}`;

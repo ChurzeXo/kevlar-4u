@@ -8,6 +8,7 @@
 import { resumeFromStructuredFailure } from "./checkpoint.js";
 import { logger } from "../utils/logger.js";
 import { normalizeRiskLevel } from "./riskLevel.js";
+import { validationError } from "../utils/errors.js";
 
 // ── 3.1 Agent Blueprint ──────────────────────────────────────────────────────
 
@@ -329,10 +330,10 @@ export function validateContinuationGate(
 ): AggregationValidation {
   // 1. 基础物理拦截：锁机制与生命周期对齐
   if (currentState.revision !== submission.expectedRevision) {
-    throw new Error("stale_continuation_revision_locked");
+    throw validationError("stale_continuation_revision_locked");
   }
   if (!currentState.activeContinuation || currentState.activeContinuation.continuationId !== submission.continuationId) {
-    throw new Error("continuation_id_mismatch");
+    throw validationError("continuation_id_mismatch");
   }
 
   // 2. 核心协议审判：执行协议闭环一致性检查

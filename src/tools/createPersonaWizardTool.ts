@@ -13,9 +13,11 @@ import {
 } from "./createPersonaTool.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { isValidSessionId } from "../utils/sessionId.js";
+import { invalidInputError, internalError } from "../utils/errors.js";
 import {
   PERSPECTIVE_PRESETS,
   buildDimensionBiasFromPresets,
+  buildDimensionBiasFromArchetypes,
   type DimensionBias,
   type OffensiveDimensionId,
   OFFENSIVE_DIMENSION_IDS,
@@ -256,7 +258,7 @@ interface ExtractionResult {
 export const createPersonaWizardModule: ToolModule = {
   definition: createPersonaWizardToolDefinition,
   handler: (deps) => async (args) => {
-    if (!args) throw new Error(t("wizard.inputRequired", { ns: "errors" }));
+    if (!args) throw invalidInputError(t("wizard.inputRequired", { ns: "errors" }));
     const input = args as any;
     input.samplingFn = deps.resolveSamplingFn();
     return await handleCreatePersonaWizard(deps.skillsDir, deps.tmpDir, input);
@@ -546,8 +548,6 @@ async function handlePerspectiveStep({
 
     state.fields.rst = buildDefaultRSTConfig(primaryArchetype, state);
     // Also build dimensionBias from the archetype's focus dimensions
-    state.fields.dimensionBias = buildDimensionBiasFromPresets([]);
-    const { buildDimensionBiasFromArchetypes } = await import("../execution/dimensions.js");
     state.fields.dimensionBias = buildDimensionBiasFromArchetypes(archetypeIds);
     state.fields.perspectivePresets = [];
 
@@ -627,7 +627,6 @@ async function handleNaturalLanguageRST(
   state.fields.rst = result.config;
 
   // Build dimensionBias from the parsed archetypes
-  const { buildDimensionBiasFromArchetypes } = await import("../execution/dimensions.js");
   state.fields.dimensionBias = buildDimensionBiasFromArchetypes(result.config.archetypes);
   state.fields.perspectivePresets = [];
 
@@ -953,7 +952,7 @@ async function advanceWizard(
 
   // ── Dispatch to step handler ────────────────────────────────────────────
   const handler = STEP_HANDLERS[state.step];
-  if (!handler) throw new Error(`Unknown step: ${state.step}`);
+  if (!handler) throw internalError(`Unknown step: ${state.step}`);
   return handler({ skillsDir, tmpDir, state, userMessage, samplingFn });
 }
 
@@ -1043,7 +1042,6 @@ async function applyFinalModification(
         if (rstSelections.length > 0) {
           const archetypeIds = rstSelections.map(s => s.replace("rst:", "") as ArchetypeId);
           state.fields.rst = buildDefaultRSTConfig(archetypeIds[0], state);
-          const { buildDimensionBiasFromArchetypes } = await import("../execution/dimensions.js");
           state.fields.dimensionBias = buildDimensionBiasFromArchetypes(archetypeIds);
           state.fields.perspectivePresets = [];
           // Enter RST sub-flow from finalConfirm modification
@@ -1800,7 +1798,7 @@ ${params.userMessage}
   try {
     return JSON.parse(cleaned) as Record<string, unknown>;
   } catch (err) {
-    throw new Error(
+    throw internalError(
       `JSON parse failed. Raw response: ${response.content}`
     );
   }
@@ -1821,7 +1819,7 @@ function extractPureJson(text: string): string {
   const lastBrace = cleaned.lastIndexOf("}");
 
   if (firstBrace === -1 || lastBrace === -1) {
-    throw new Error("No JSON object found in response");
+    throw invalidInputError("No JSON object found in response");
   }
 
   return cleaned.slice(firstBrace, lastBrace + 1);
@@ -1829,7 +1827,7 @@ function extractPureJson(text: string): string {
 
 async function loadOrCreateState(tmpDir: string, inputSessionId?: string): Promise<WizardState> {
   if (inputSessionId && !isValidSessionId(inputSessionId)) {
-    throw new Error(getInvalidSessionIdMessage());
+    throw invalidInputError(getInvalidSessionIdMessage());
   }
 
   const sessionId = inputSessionId || `wizard-create-${Math.random().toString(36).substring(2, 10)}`;

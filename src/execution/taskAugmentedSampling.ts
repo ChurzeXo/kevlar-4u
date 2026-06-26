@@ -3,6 +3,7 @@ import type { PreAuditDimensionResult } from "./reviewSteps.js";
 import { buildIsolatedSystemAuditorPrompt, buildIsolatedSystemAuditorMessage } from "../prompts/reviewWizard.js";
 import { logger } from "../utils/logger.js";
 import { getErrorInfo } from "../utils/observability.js";
+import { internalError } from "../utils/errors.js";
 
 type TaskState = "working" | "input_required" | "completed" | "failed" | "cancelled";
 
@@ -36,9 +37,9 @@ export async function executeTaskAugmentedSampling(
   timingContext?: string,
   maxConcurrency: number = 6,
 ): Promise<PreAuditDimensionResult[]> {
-  const DEFAULT_POLL_MS = 1000;
-  const TASK_TTL_MS = 300000;
-  const MAX_TOTAL_TIMEOUT_MS = 600000;
+  const DEFAULT_POLL_MS = Number(process.env.KEVLAR_TASK_POLL_MS) || 1000;
+  const TASK_TTL_MS = Number(process.env.KEVLAR_TASK_TTL_MS) || 300000;
+  const MAX_TOTAL_TIMEOUT_MS = Number(process.env.KEVLAR_TASK_TOTAL_TIMEOUT_MS) || 600000;
 
   logger.info("Starting task-augmented sampling", {
     event: "task_augmented_sampling_start",
@@ -119,7 +120,7 @@ export async function executeTaskAugmentedSampling(
           taskId: createResult.task.taskId,
         });
       } else {
-        throw new Error("Task creation did not return a taskId");
+        throw internalError("Task creation did not return a taskId");
       }
     } catch (err: any) {
       const info = getErrorInfo(err);

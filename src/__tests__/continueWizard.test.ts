@@ -122,8 +122,8 @@ describe("reviewContentWizardContinue — input validation", () => {
     assert.ok(textOf(result).includes("无效的 sessionId 格式"));
   });
 
-  it("accepts valid sessionId with alphanumeric, dash, underscore, dot", () => {
-    assert.equal(isValidSessionId("valid-session_123.id"), true);
+  it("accepts valid sessionId with lowercase alphanumeric and dash only", () => {
+    assert.equal(isValidSessionId("valid-session-123"), true);
   });
 
   it("accepts undefined args (throws)", async () => {

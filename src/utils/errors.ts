@@ -15,6 +15,9 @@ export enum ErrorCode {
   INVALID_ID_FORMAT = "INVALID_ID_FORMAT",
   PATH_TRAVERSAL = "PATH_TRAVERSAL",
 
+  // Configuration errors
+  CONFIG_ERROR = "CONFIG_ERROR",
+
   // Resource errors (5xx)
   FILE_NOT_FOUND = "FILE_NOT_FOUND",
   FILE_READ_ERROR = "FILE_READ_ERROR",
@@ -31,6 +34,38 @@ export interface KevlarError extends Error {
   code: ErrorCode;
   recoverable: boolean;
   details?: Record<string, unknown>;
+}
+
+export function invalidInputError(message: string, details?: Record<string, unknown>): KevlarError {
+  return Object.assign(new Error(message), {
+    code: ErrorCode.INVALID_INPUT,
+    recoverable: false,
+    details,
+  });
+}
+
+export function configError(message: string, details?: Record<string, unknown>): KevlarError {
+  return Object.assign(new Error(message), {
+    code: ErrorCode.CONFIG_ERROR,
+    recoverable: false,
+    details,
+  });
+}
+
+export function internalError(message: string, details?: Record<string, unknown>): KevlarError {
+  return Object.assign(new Error(message), {
+    code: ErrorCode.INTERNAL_ERROR,
+    recoverable: true,
+    details,
+  });
+}
+
+export function validationError(message: string, details?: Record<string, unknown>): KevlarError {
+  return Object.assign(new Error(message), {
+    code: ErrorCode.VALIDATION_ERROR,
+    recoverable: false,
+    details,
+  });
 }
 
 export function isKevlarError(err: unknown): err is KevlarError {
@@ -56,7 +91,7 @@ export function formatErrorResponse(err: unknown): ToolResult {
 
   const message = getErrorMessage(err);
   return {
-    content: [{ type: "text", text: `❌ ${formatLocalizedError("common", "operationFailed")}${message}` }],
+    content: [{ type: "text", text: `❌ ${formatLocalizedError("common", "operationFailed")}: ${message}` }],
     isError: true,
   };
 }

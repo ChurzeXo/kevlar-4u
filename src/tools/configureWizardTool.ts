@@ -7,6 +7,8 @@ import { isValidMode, isValidConcurrency } from "../execution/config.js";
 import type { ToolModule } from "./types.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { isValidSessionId } from "../utils/sessionId.js";
+import { invalidInputError } from "../utils/errors.js";
+import { t } from "../i18n/index.js";
 
 export const configureWizardToolDefinition: Tool = {
 	name: "configure_wizard",
@@ -62,7 +64,7 @@ const CONCURRENCY_RE = /(?:并发|concurrency|maxconcurrency)\D*(10|[1-9])/i;
 export const configureWizardModule: ToolModule = {
 	definition: configureWizardToolDefinition,
 	handler: (deps) => async (args) => {
-		if (!args) throw new Error("配置向导需要提供参数");
+		if (!args) throw invalidInputError(t("wizard.inputRequired", { ns: "errors" }));
 		return await handleConfigureWizard(deps.tmpDir, args as any);
 	},
 };
@@ -138,7 +140,7 @@ function parseConfigRequest(message: string): ConfigureInput {
 	if (m) pending.maxConcurrency = Number(m[1]);
 
 	if (!pending.mode && pending.maxConcurrency === undefined) {
-		throw new Error("没有识别到要修改的配置。请说明执行模式或并发数。");
+		throw invalidInputError(t("config.parseFailed", { ns: "errors" }));
 	}
 
 	return pending;
@@ -146,13 +148,13 @@ function parseConfigRequest(message: string): ConfigureInput {
 
 function validatePending(pending: ConfigureInput): void {
 	if (pending.mode !== undefined && !isValidMode(pending.mode)) {
-		throw new Error(`无效的执行模式：${pending.mode}`);
+		throw invalidInputError(t("config.invalidMode", { ns: "errors" }) + `：${pending.mode}`);
 	}
 	if (
 		pending.maxConcurrency !== undefined &&
 		!isValidConcurrency(pending.maxConcurrency)
 	) {
-		throw new Error("并发数必须在 1-10 之间");
+		throw invalidInputError(t("config.concurrencyOutOfRange", { ns: "errors" }));
 	}
 }
 
@@ -163,7 +165,7 @@ function buildPreviewMessage(pending: ConfigureInput): string {
 	if (pending.mode) {
 		lines.push(`- 执行模式：${modeLabel(pending.mode)}`);
 		if (pending.mode === "mcp_subagent" && !isSubagentDispatchSupported()) {
-			lines.push(`  ⚠️ 警告：系统检测到当前环境未显式启用并行调度。请确保您使用的是兼容客户端或已设置 KEVLAR_ENABLE_SUBAGENT=true，否则执行时将自动降级。`);
+			lines.push(`  ⚠️ 警告：系统检测到当前环境未显式启用并行调度。请确保您使用的是兼容客户端且未设置 KEVLAR_DISABLE_SUBAGENT=true，否则执行时将自动降级。`);
 		}
 	}
 	if (pending.maxConcurrency !== undefined) {
@@ -179,7 +181,7 @@ async function loadOrCreateState(
 	input: ConfigureWizardInput,
 ): Promise<ConfigureWizardState> {
 	if (input.sessionId && !isValidSessionId(input.sessionId)) {
-		throw new Error("sessionId 格式不合法。");
+		throw invalidInputError(t("wizard.invalidSessionId", { ns: "errors" }));
 	}
 
 	const sessionId =

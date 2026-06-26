@@ -120,6 +120,19 @@ New files are auto-discovered via content sniffing (presence of a `personas` key
 | `OPENAI_API_KEY` | OpenAI fallback API key |
 | `KEVLAR_SKILLS_DIR` | Override default `skills/` path |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
+| `KEVLAR_ENABLE_SAMPLING` | Force-enable MCP sampling (debug) |
+| `KEVLAR_ENABLE_TASK_AUGMENTED` | Enable task-augmented parallel sampling (default: enabled). Set "0" to disable |
+| `KEVLAR_MIN_DELAY_MS` | Min delay between persona executions (default: 1000) |
+| `KEVLAR_TOKEN_BUDGET_PER_TASK` | Token budget per review task |
+| `KEVLAR_FORCE_HOST_STRUCTURED` | Bypass observation cache, always try structured |
+| `KEVLAR_USE_LEGACY_PROMPT` | Use legacy prompt format |
+| `KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK` | Fallback for system audit |
+| `KEVLAR_RETRY_MAX` | Max retries for persona execution (default: 3) |
+| `KEVLAR_RETRY_BACKOFF_MS` | Backoff delay for retries (default: 1000) |
+| `KEVLAR_RETRY_BACKOFF_MULTIPLIER` | Backoff multiplier (default: 2) |
+| `KEVLAR_TASK_POLL_MS` | Task polling interval (default: 1000) |
+| `KEVLAR_TASK_TTL_MS` | Task TTL in ms (default: 300000) |
+| `KEVLAR_TASK_TOTAL_TIMEOUT_MS` | Total task timeout (default: 600000) |
 
 ---
 
@@ -169,6 +182,10 @@ src/pro/
 |---|---|
 | `KEVLAR_SIGNING_KEY` | Ed25519 private key PEM for server-side bundle signing |
 | `KEVLAR_BUNDLE_SIGNING_SECRET` | HMAC-SHA256 secret for dev bundle signing |
+| `KEVLAR_TIER` | Force tier: "pro" or "free" |
+| `KEVLAR_PRO_TOKEN` | Pro activation token |
+| `KEVLAR_SERVER_URL` | Backend server URL (default: https://kevlar4u.xyz) |
+| `KEVLAR_SKIP_PRO_IMPORT` | Skip Pro runtime import (testing) |
 
 ---
 

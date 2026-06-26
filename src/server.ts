@@ -11,7 +11,7 @@ import { fileURLToPath } from "url";
 import { createToolRegistry } from "./tools/index.js";
 import type { ToolDependencies } from "./tools/types.js";
 import { logger } from "./utils/logger.js";
-import { formatErrorResponse } from "./utils/errors.js";
+import { formatErrorResponse, internalError } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
 import { setClientInfo, setClientCapabilities, setHandshakeDumpDir } from "./execution/client.js";
@@ -119,7 +119,7 @@ function createMultiTurnSamplingFn(serverInstance: any): MultiTurnSamplingFuncti
         message: info.message,
         recoverable: info.recoverable,
       });
-      throw new Error(`多轮 Sampling 调用失败: ${info.message}`);
+      throw internalError(`多轮 Sampling 调用失败: ${info.message}`);
     }
   };
 }
@@ -194,7 +194,7 @@ function setupCallToolHandler(
       const handler = registry.get(name);
       if (!handler) {
         logger.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
-        throw new Error(`Unknown tool: ${name}`);
+        throw internalError(`Unknown tool: ${name}`);
       }
       const result = await handler(sanitizedArgs);
       logger.info("Tool completed", {

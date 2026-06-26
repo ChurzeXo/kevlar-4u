@@ -3,6 +3,8 @@ import { loadPersonaById, deletePersonaFromJson, invalidatePersonasCache } from 
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
 import { getErrorInfo } from "../utils/observability.js";
+import { invalidInputError } from "../utils/errors.js";
+import { t } from "../i18n/index.js";
 
 export const deletePersonaToolDefinition: Tool = {
   name: "delete_persona",
@@ -27,9 +29,9 @@ export const deletePersonaToolDefinition: Tool = {
 export const deletePersonaModule: ToolModule = {
   definition: deletePersonaToolDefinition,
   handler: (deps) => async (args) => {
-    if (!args) throw new Error("删除评审员需要提供参数");
+    if (!args) throw invalidInputError(t("persona.missingRequiredForDelete", { ns: "errors" }));
     const delInput = args as { id: string; confirm: boolean };
-    if (!delInput.id) throw new Error("请指定要删除的评审员");
+    if (!delInput.id) throw invalidInputError(t("persona.specifyToDelete", { ns: "errors" }));
     return await handleDeletePersona(deps.skillsDir, delInput);
   },
 };

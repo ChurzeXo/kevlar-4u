@@ -21,7 +21,9 @@
     "createFailed": "Failed to create reviewer",
     "deleteFailed": "Failed to delete reviewer",
     "invalidConfig": "Invalid reviewer configuration",
-    "parseError": "Reviewer file parse error"
+    "parseError": "Reviewer file parse error",
+    "specifyToDelete": "Please specify the reviewer to delete",
+    "missingRequiredForDelete": "Reviewer deletion requires parameters"
   },
   "review": {
     "contentRequired": "Please enter content to review",
@@ -33,6 +35,8 @@
   "config": {
     "invalidMode": "Invalid execution mode",
     "invalidConcurrency": "Invalid concurrency value",
+    "concurrencyOutOfRange": "Concurrency must be between 1-10",
+    "parseFailed": "No configuration changes detected. Please specify execution mode or concurrency.",
     "readFailed": "Failed to read configuration",
     "writeFailed": "Failed to write configuration"
   },
@@ -40,7 +44,9 @@
     "sessionExpired": "Wizard session expired",
     "invalidStep": "Invalid step",
     "stepNotFound": "Step not found",
-    "inputRequired": "Input required"
+    "inputRequired": "Input required",
+    "invalidSessionId": "Invalid sessionId format.",
+    "noDeleteTarget": "Current session is missing a bound deletion target."
   },
   "mcp": {
     "samplingFailed": "MCP sampling failed",

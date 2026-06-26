@@ -2,6 +2,7 @@ import i18next from "i18next";
 import Backend from "i18next-fs-backend";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { invalidInputError } from "../utils/errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,7 +12,7 @@ export type SupportedLanguage = "zh-CN" | "en-US";
 const SUPPORTED_LANGUAGES: SupportedLanguage[] = ["zh-CN", "en-US"];
 
 function detectLanguage(): SupportedLanguage {
-	const envLang = process.env.KUVLAR_LANG?.trim();
+	const envLang = process.env.KEVLAR_LANG?.trim();
 	if (envLang && SUPPORTED_LANGUAGES.includes(envLang as SupportedLanguage)) {
 		return envLang as SupportedLanguage;
 	}
@@ -55,7 +56,7 @@ export function getCurrentLanguage(): SupportedLanguage {
 
 export async function changeLanguage(lang: SupportedLanguage): Promise<void> {
 	if (!SUPPORTED_LANGUAGES.includes(lang)) {
-		throw new Error(`Unsupported language: ${lang}`);
+		throw invalidInputError(`Unsupported language: ${lang}`);
 	}
 	if (!initialized) {
 		await initI18n(lang);

@@ -13,6 +13,7 @@ import { isPro } from "../subscription/tier.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
 import { normalizeRiskLevel } from "./riskLevel.js";
+import { validationError } from "../utils/errors.js";
 
 // ── Persona Result ────────────────────────────────────────────────────────────
 
@@ -347,7 +348,7 @@ export function checkBudget(personas: number, contentLength: number, personaSyst
   const estimated = estimateTokenCost(personas, contentLength, undefined, personaSystemPrompts);
 
   if (estimated > budget) {
-    throw new Error(
+    throw validationError(
       `预估 Token 消耗 (${estimated}) 超出预算 (${budget})。` +
         `请减少评审员数量或缩短内容长度。`
     );

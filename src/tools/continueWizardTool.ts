@@ -10,10 +10,12 @@ import * as fs from "fs";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule, ToolDependencies } from "./types.js";
 import { isValidSessionId } from "../utils/sessionId.js";
+import { invalidInputError } from "../utils/errors.js";
 import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
 import { MAX_CONTINUATION_RETRIES, validateContinuationGate } from "../execution/index.js";
-import { handleReviewContentWizard, type ReviewWizardInput } from "./reviewContentWizardTool.js";
+import { handleReviewContentWizard, type ReviewWizardInput, ORCHESTRATION_AUDIT_GUIDANCE, ORCHESTRATION_STEP0_GUIDANCE } from "./reviewContentWizardTool.js";
+import { buildOrchestrationAuditPrompt, buildOrchestrationStep0Prompt } from "../prompts/reviewWizard.js";
 
 // ── Tool Definition ───────────────────────────────────────────────────────────
 
@@ -69,7 +71,7 @@ export const reviewContentWizardContinueDefinition: Tool = {
 export const reviewContentWizardContinueModule: ToolModule = {
   definition: reviewContentWizardContinueDefinition,
   handler: (deps: ToolDependencies) => async (args) => {
-    if (!args) throw new Error("需要提供参数");
+    if (!args) throw invalidInputError("需要提供参数");
 
     const sessionId = args.sessionId as string;
     const checkpoint = args.checkpoint as AuditCheckpoint;
@@ -153,12 +155,8 @@ export const reviewContentWizardContinueModule: ToolModule = {
           let promptText = "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。\n";
           
           if (state.step === "waitingForOrchestrationAudit") {
-            const { ORCHESTRATION_AUDIT_GUIDANCE } = await import("./reviewContentWizardTool.js");
-            const { buildOrchestrationAuditPrompt } = await import("../prompts/reviewWizard.js");
             promptText += ORCHESTRATION_AUDIT_GUIDANCE + buildOrchestrationAuditPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext);
           } else {
-            const { ORCHESTRATION_STEP0_GUIDANCE } = await import("./reviewContentWizardTool.js");
-            const { buildOrchestrationStep0Prompt } = await import("../prompts/reviewWizard.js");
             promptText += ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, state.orchestrationPreAuditContext?.localFindings ?? [], state.orchestrationPreAuditContext?.stripped);
           }
 

@@ -8,6 +8,7 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
+import { invalidInputError } from "../utils/errors.js";
 import {
 	updateConfig,
 	isValidMode,
@@ -48,7 +49,7 @@ export interface ConfigureInput {
 export const configureModule: ToolModule = {
 	definition: configureToolDefinition,
 	handler: () => async (args) => {
-		if (!args) throw new Error("配置需要提供参数");
+		if (!args) throw invalidInputError("配置需要提供参数");
 		return await handleConfigure(args as ConfigureInput);
 	},
 };

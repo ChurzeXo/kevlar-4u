@@ -104,9 +104,9 @@ interface RetryConfig {
 }
 
 const DEFAULT_RETRY: RetryConfig = {
-  maxRetries: 3,
-  backoffMs: 1000,
-  backoffMultiplier: 2,
+  maxRetries: Number(process.env.KEVLAR_RETRY_MAX) || 3,
+  backoffMs: Number(process.env.KEVLAR_RETRY_BACKOFF_MS) || 1000,
+  backoffMultiplier: Number(process.env.KEVLAR_RETRY_BACKOFF_MULTIPLIER) || 2,
 };
 
 export type RetryableErrorType =

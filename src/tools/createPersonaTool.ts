@@ -8,6 +8,7 @@ import {
 	PersonaBehaviorHints,
 } from "../utils/parser.js";
 import { ToolResult } from "../utils/types.js";
+import { internalError } from "../utils/errors.js";
 import {
 	extractShortTrait,
 	mapTraitToKey,
@@ -357,7 +358,7 @@ export async function handleSaveDraft(
 	const fileName = `${input.sessionId}_draft.json`;
 	const filePath = path.join(tmpDir, fileName);
 	if (!fs.existsSync(filePath)) {
-		throw new Error("临时记忆文件不存在");
+		throw internalError("临时记忆文件不存在");
 	}
 	const data = await fs.promises.readFile(filePath, "utf-8");
 	return JSON.parse(data);

@@ -8,6 +8,7 @@
 import { readFileSync, writeFileSync } from "fs";
 import * as path from "path";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { configError } from "../utils/errors.js";
 import type { ExecutionMode, ResolveableMode } from "./base.js";
 
 // ── Config Schema ─────────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ export function writeConfig(config: KevlarConfig): void {
     if (skillsDir) {
       configPath = path.join(skillsDir, "kevlar-config.json");
     } else {
-      throw new Error("Config path not initialized — set KEVLAR_SKILLS_DIR or call setConfigPath()");
+      throw configError("Config path not initialized — set KEVLAR_SKILLS_DIR or call setConfigPath()");
     }
   }
   config.updatedAt = new Date().toISOString();
@@ -126,7 +127,7 @@ interface UpdateConfigOptions {
 
 export async function updateConfig(options: UpdateConfigOptions): Promise<KevlarConfig> {
   if (!configPath) {
-    throw new Error("Config path not initialized");
+    throw configError("Config path not initialized");
   }
 
   // Use synchronous atomic read-merge-write to prevent async race conditions

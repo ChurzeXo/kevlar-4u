@@ -37,9 +37,10 @@ export class DynamicImportProRuntimeLoader implements ProRuntimeLoader {
         event: "pro_runtime_invalid",
       });
       return null;
-    } catch {
+    } catch (err) {
       logger.info("Pro runtime not available, using Free", {
         event: "pro_runtime_unavailable",
+        reason: (err as Error)?.message ?? String(err),
       });
       return null;
     }

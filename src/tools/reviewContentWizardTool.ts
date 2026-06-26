@@ -18,6 +18,7 @@ import {
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { isValidSessionId } from "../utils/sessionId.js";
+import { invalidInputError, validationError, internalError } from "../utils/errors.js";
 import type { ToolModule } from "./types.js";
 import { RuleRepository } from "../dao/RuleRepository.js";
 import { isPro } from "../subscription/tier.js";
@@ -40,6 +41,7 @@ import {
   type Step0Result,
 } from "../prompts/reviewWizard.js";
 import { isSamplingSupported } from "../execution/client.js";
+import { validateReceipt } from "../execution/protocol.js";
 import {
   resolveExecutionPlan,
   type ExecutionPlan,
@@ -253,7 +255,7 @@ interface Recommendation {
 export const reviewContentWizardModule: ToolModule = {
   definition: reviewContentWizardToolDefinition,
   handler: (deps) => async (args) => {
-    if (!args) throw new Error("向导需要提供参数");
+    if (!args) throw invalidInputError("向导需要提供参数");
     const input = args as any;
     input.samplingFn = deps.resolveSamplingFn();
     input.sendProgress = deps.sendProgress;
@@ -416,7 +418,7 @@ async function advanceWizard(
 
     case "systemAudit":
       // Free tier: skip pre-audit. Env var override for tests.
-      if (state.tier !== "pro" && process.env.KEVLAR_TIER !== "pro") {
+      if (!isPro() && process.env.KEVLAR_TIER !== "pro") {
         return handleInventoryCheck(tmpDir, state, personas, samplingFn);
       }
       return handleSystemAudit(skillsDir, tmpDir, state, personas, systemAuditors, samplingFn, sendProgress);
@@ -873,10 +875,10 @@ async function handleOrchestrationStep0Result(
       precedents,
     };
     if (!Array.isArray(step0Result.blackAtoms) || !Array.isArray(step0Result.attackCandidates)) {
-      throw new Error("Invalid Step 0 JSON: missing blackAtoms or attackCandidates");
+      throw validationError("Invalid Step 0 JSON: missing blackAtoms or attackCandidates");
     }
     if (Object.keys(webContextMap).length > 0 && precedents.length === 0) {
-      throw new Error(
+      throw validationError(
         "Invalid Step 0 JSON: webContextMap 非空（宿主 AI 已执行联网搜索）但 precedents 为空。" +
         "类似先例检索是 Step 0 的强制步骤（④），请在 JSON 中补充 precedents 字段后重新提交。"
       );
@@ -1064,8 +1066,6 @@ async function handleSubagentAuditResult(
     );
   }
 
-  // Import after validation to avoid circular deps
-  const { validateReceipt } = await import("../execution/protocol.js");
   const validation = validateReceipt(parsed);
   if (!validation.valid) {
     await rollbackState(tmpDir, state.sessionId);
@@ -1097,7 +1097,7 @@ async function handleSubagentAuditResult(
 
     const aggregation = parsed.aggregation || parsed.output || (parsed.dimensions ? parsed : null);
     if (!aggregation) {
-      throw new Error("Missing aggregation report in ExecutionReceipt");
+      throw internalError("Missing aggregation report in ExecutionReceipt");
     }
 
     const crossValidatedDimensions = aggregation.dimensions || [];
@@ -1149,7 +1149,7 @@ async function handleSubagentAuditResult(
 
     state.preAuditReport = preAuditReport;
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-    state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
+    state.step = (isPro() || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
 
     logger.info("Subagent audit receipt processed", {
@@ -1232,7 +1232,7 @@ async function handleOrchestrationFinalResult(
     const turn2 = state.orchestrationTurn2Results;
 
     if (!turn2) {
-      throw new Error("Missing Turn 2 intermediate results (orchestrationTurn2Results)");
+      throw internalError("Missing Turn 2 intermediate results (orchestrationTurn2Results)");
     }
 
     // Build final report from Turn 3 output + code-layer deterministic results
@@ -2156,7 +2156,6 @@ async function handlePersonaAuditResult(
     );
   }
 
-  const { validateReceipt } = await import("../execution/protocol.js");
   const validation = validateReceipt(parsed);
   if (!validation.valid) {
     await rollbackState(tmpDir, state.sessionId);
@@ -2380,7 +2379,7 @@ async function executeReview(
 
 async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Promise<ReviewWizardState> {
   if (input.sessionId && !isValidSessionId(input.sessionId)) {
-    throw new Error("sessionId 格式不合法。");
+    throw invalidInputError("sessionId 格式不合法。");
   }
 
   const sessionId = input.sessionId || `wizard-review-${Math.random().toString(36).substring(2, 10)}`;
@@ -2412,7 +2411,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     // clean up and let the user know the session timed out.
     if (state.activeContinuation && state.activeContinuation.expiresAt < Date.now()) {
       await cleanupState(tmpDir, sessionId);
-      throw new Error("评测会话已超时（等待 Host AI 返回结果超过 30 分钟），请重新发起评测。");
+      throw internalError("评测会话已超时（等待 Host AI 返回结果超过 30 分钟），请重新发起评测。");
     }
     if (!state.systemAuditorIds) {
       state.systemAuditorIds = [];

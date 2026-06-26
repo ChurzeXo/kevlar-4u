@@ -6,6 +6,7 @@
 
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { logger } from "../utils/logger.js";
+import { invalidInputError, validationError } from "../utils/errors.js";
 import { readConfig, isValidMode } from "./config.js";
 import { getClientFingerprint, getHostExecutionCapability, isTaskAugmentedSamplingSupported, isSamplingSupported } from "./client.js";
 import {
@@ -50,7 +51,7 @@ export async function executeReview(
   const personaCount = ctx.personas.length;
 
   if (personaCount > MAX_PERSONAS) {
-    throw new Error(`评审员数量超出限制（最多${MAX_PERSONAS}个，当前${personaCount}个）。`);
+    throw invalidInputError(`评审员数量超出限制（最多${MAX_PERSONAS}个，当前${personaCount}个）。`);
   }
 
   // Initialize trace context
@@ -366,7 +367,7 @@ export function validatePersonaFields(persona: Persona): void {
   const hasBlindSpot = !!persona.meta.blindSpot || prompt.includes("盲区");
 
   if (!hasPlatform || !hasTraits || !hasBlindSpot) {
-    throw new Error(`[${persona.meta.name}] 角色 ${!hasPlatform ? "缺少平台标签/描述, " : ""}${!hasTraits ? "缺少性格描述, " : ""}${!hasBlindSpot ? "缺少盲区" : ""}`);
+    throw validationError(`[${persona.meta.name}] 角色 ${!hasPlatform ? "缺少平台标签/描述, " : ""}${!hasTraits ? "缺少性格描述, " : ""}${!hasBlindSpot ? "缺少盲区" : ""}`);
   }
 }
 

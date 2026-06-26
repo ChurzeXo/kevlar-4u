@@ -4,6 +4,7 @@ import type { MultiTurnSamplingFunction } from "./base.js";
 import { executeTaskAugmentedSampling } from "./taskAugmentedSampling.js";
 import { runSystemAuditors } from "./reviewSteps.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { internalError } from "../utils/errors.js";
 import { readConfig } from "./config.js";
 
 export interface SamplingReviewOptions {
@@ -98,5 +99,5 @@ export async function executeSamplingReview(
     }
   }
 
-  throw new Error("No sampling function available and task-augmented is disabled");
+  throw internalError("No sampling function available and task-augmented is disabled");
 }

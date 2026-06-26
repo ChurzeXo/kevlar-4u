@@ -21,7 +21,9 @@
     "createFailed": "创建评审员失败",
     "deleteFailed": "删除评审员失败",
     "invalidConfig": "评审员配置无效",
-    "parseError": "评审员文件解析错误"
+    "parseError": "评审员文件解析错误",
+    "specifyToDelete": "请指定要删除的评审员",
+    "missingRequiredForDelete": "删除评审员需要提供参数"
   },
   "review": {
     "contentRequired": "请输入要评测的内容",
@@ -33,6 +35,8 @@
   "config": {
     "invalidMode": "无效的执行模式",
     "invalidConcurrency": "无效的并发数",
+    "concurrencyOutOfRange": "并发数必须在 1-10 之间",
+    "parseFailed": "没有识别到要修改的配置。请说明执行模式或并发数。",
     "readFailed": "配置读取失败",
     "writeFailed": "配置写入失败"
   },
@@ -40,7 +44,9 @@
     "sessionExpired": "向导会话已过期",
     "invalidStep": "无效的步骤",
     "stepNotFound": "步骤未找到",
-    "inputRequired": "需要输入内容"
+    "inputRequired": "需要输入内容",
+    "invalidSessionId": "sessionId 格式不合法。",
+    "noDeleteTarget": "当前会话缺少已绑定的删除目标。"
   },
   "mcp": {
     "samplingFailed": "MCP 采样失败",
