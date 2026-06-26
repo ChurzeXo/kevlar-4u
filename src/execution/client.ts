@@ -199,7 +199,6 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
       const filePath = path.join(handshakeDumpDir, "host-exec-handshake.json");
       fs.mkdirSync(handshakeDumpDir, { recursive: true });
       fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf-8");
-      // Write a README so the user knows this is safe to delete
       const readmePath = path.join(handshakeDumpDir, "host-exec-handshake.README.txt");
       fs.writeFileSync(
         readmePath,
@@ -208,63 +207,37 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
         "utf-8",
       );
     } catch {
-      // Best-effort: ignore filesystem errors (permissions, etc.)
+      // Best-effort: ignore filesystem errors
     }
   }
 
-  if (!experimental) {
-    if (!hostExecCapLogged) {
-      ensureClientInfo();
-      const payload = {
-        declared: false,
-        capability: null,
-        clientName: clientInfo?.name ?? "unknown",
-        clientVersion: clientInfo?.version ?? "unknown",
-      };
-      logger.info("Host execution capability from handshake", {
-        event: "host_exec_handshake",
-        ...payload,
-      });
-      dumpHandshake(payload);
-      hostExecCapLogged = true;
-    }
-    return null;
+  if (hostExecCapLogged) {
+    const cap = experimental?.["kevlar.host.execution/v1"];
+    return (cap && typeof cap === "object") ? (cap as HostExecutionCapability) : null;
   }
-  const cap = experimental["kevlar.host.execution/v1"];
-  if (!cap || typeof cap !== "object") {
-    if (!hostExecCapLogged) {
-      ensureClientInfo();
-      const payload = {
-        declared: false,
-        capability: null,
-        clientName: clientInfo?.name ?? "unknown",
-        clientVersion: clientInfo?.version ?? "unknown",
-      };
-      logger.info("Host execution capability from handshake", {
-        event: "host_exec_handshake",
-        ...payload,
-      });
-      dumpHandshake(payload);
-      hostExecCapLogged = true;
-    }
-    return null;
-  }
-  if (!hostExecCapLogged) {
-    ensureClientInfo();
-    const payload = {
-      declared: true,
-      capability: cap,
-      clientName: clientInfo?.name ?? "unknown",
-      clientVersion: clientInfo?.version ?? "unknown",
-    };
-    logger.info("Host execution capability from handshake", {
-      event: "host_exec_handshake",
-      ...payload,
-    });
-    dumpHandshake(payload);
-    hostExecCapLogged = true;
-  }
-  return cap as HostExecutionCapability;
+
+  hostExecCapLogged = true;
+  ensureClientInfo();
+
+  const cap = experimental?.["kevlar.host.execution/v1"];
+  const declared = cap !== undefined && cap !== null && typeof cap === "object";
+  const payload = {
+    clientName: clientInfo?.name ?? "unknown",
+    clientVersion: clientInfo?.version ?? "unknown",
+    rawClientCapabilities: clientCapabilities ?? null,
+    kevlarHostExec: {
+      declared,
+      capability: declared ? cap : null,
+    },
+  };
+
+  logger.info("Host execution capability from handshake", {
+    event: "host_exec_handshake",
+    ...payload,
+  });
+  dumpHandshake(payload);
+
+  return declared ? (cap as HostExecutionCapability) : null;
 }
 
 /**
