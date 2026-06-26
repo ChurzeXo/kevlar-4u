@@ -14,6 +14,8 @@ import type {
   DispatchFailureReason,
 } from "./plan.js";
 import { logger } from "../utils/logger.js";
+import * as fs from "fs";
+import * as path from "path";
 
 // ── Capability Interfaces (MECP §1) ────────────────────────────────────────────
 
@@ -172,23 +174,58 @@ export interface HostExecutionCapability {
 let hostExecCapLogged = false;
 
 /**
+ * Directory for writing host-exec-handshake.json dump file.
+ * This file is for debugging/verification only — safe to delete.
+ * Set via setHandshakeDumpDir() during server init.
+ */
+let handshakeDumpDir: string | null = null;
+
+export function setHandshakeDumpDir(dir: string): void {
+  handshakeDumpDir = dir;
+}
+
+/**
  * Extract the host's execution capability declaration from client capabilities.
  * Returns null if the client did not declare `kevlar.host.execution/v1`.
- * Logs to stderr on first successful read.
+ * Logs to stderr and writes host-exec-handshake.json to handshakeDumpDir on first access.
  */
 export function getHostExecutionCapability(): HostExecutionCapability | null {
   ensureClientCapabilities();
   const experimental = clientCapabilities?.experimental as Record<string, unknown> | undefined;
+
+  function dumpHandshake(payload: Record<string, unknown>): void {
+    if (!handshakeDumpDir) return;
+    try {
+      const filePath = path.join(handshakeDumpDir, "host-exec-handshake.json");
+      fs.mkdirSync(handshakeDumpDir, { recursive: true });
+      fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf-8");
+      // Write a README so the user knows this is safe to delete
+      const readmePath = path.join(handshakeDumpDir, "host-exec-handshake.README.txt");
+      fs.writeFileSync(
+        readmePath,
+        "此目录及文件为 kevlar-4u MCP 握手能力协商的调试输出，仅用于验证。\n" +
+        "不需要时可以整个删除 host-exec-handshake.* 文件。\n",
+        "utf-8",
+      );
+    } catch {
+      // Best-effort: ignore filesystem errors (permissions, etc.)
+    }
+  }
+
   if (!experimental) {
     if (!hostExecCapLogged) {
       ensureClientInfo();
-      logger.info("Host execution capability from handshake", {
-        event: "host_exec_handshake",
+      const payload = {
         declared: false,
         capability: null,
         clientName: clientInfo?.name ?? "unknown",
         clientVersion: clientInfo?.version ?? "unknown",
+      };
+      logger.info("Host execution capability from handshake", {
+        event: "host_exec_handshake",
+        ...payload,
       });
+      dumpHandshake(payload);
       hostExecCapLogged = true;
     }
     return null;
@@ -197,26 +234,34 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
   if (!cap || typeof cap !== "object") {
     if (!hostExecCapLogged) {
       ensureClientInfo();
-      logger.info("Host execution capability from handshake", {
-        event: "host_exec_handshake",
+      const payload = {
         declared: false,
         capability: null,
         clientName: clientInfo?.name ?? "unknown",
         clientVersion: clientInfo?.version ?? "unknown",
+      };
+      logger.info("Host execution capability from handshake", {
+        event: "host_exec_handshake",
+        ...payload,
       });
+      dumpHandshake(payload);
       hostExecCapLogged = true;
     }
     return null;
   }
   if (!hostExecCapLogged) {
     ensureClientInfo();
-    logger.info("Host execution capability from handshake", {
-      event: "host_exec_handshake",
+    const payload = {
       declared: true,
       capability: cap,
       clientName: clientInfo?.name ?? "unknown",
       clientVersion: clientInfo?.version ?? "unknown",
+    };
+    logger.info("Host execution capability from handshake", {
+      event: "host_exec_handshake",
+      ...payload,
     });
+    dumpHandshake(payload);
     hostExecCapLogged = true;
   }
   return cap as HostExecutionCapability;

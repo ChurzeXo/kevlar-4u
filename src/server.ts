@@ -14,7 +14,7 @@ import { logger } from "./utils/logger.js";
 import { formatErrorResponse } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
-import { setClientInfo, setClientCapabilities } from "./execution/client.js";
+import { setClientInfo, setClientCapabilities, setHandshakeDumpDir } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import { setObservationCacheDir } from "./execution/observations.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
@@ -225,6 +225,7 @@ export async function createKevlarServer(): Promise<McpServer> {
 
   setConfigPath(skillsDir);
   setObservationCacheDir(tmpDir);
+  setHandshakeDumpDir(tmpDir);
   ensureSkillsDirectory(skillsDir);
   cleanStaleDrafts(tmpDir).catch(() => {});
 
