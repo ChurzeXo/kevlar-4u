@@ -13,6 +13,7 @@ import type {
   HostStructuredCapabilityStatus,
   DispatchFailureReason,
 } from "./plan.js";
+import { logger } from "../utils/logger.js";
 
 // ── Capability Interfaces (MECP §1) ────────────────────────────────────────────
 
@@ -138,6 +139,87 @@ export function isSamplingSupported(): boolean {
 
 export function isStructuredOutputSupported(): boolean {
   return clientCapabilities?.structuredOutput !== undefined;
+}
+
+/**
+ * Host execution capability as declared by the client during MCP handshake
+ * under `capabilities.experimental["kevlar.host.execution/v1"]`.
+ */
+export interface HostExecutionCapability {
+  version?: string;
+  ephemeralAgents?: {
+    supported?: boolean;
+    modes?: string[];
+    maxConcurrent?: number;
+    contextIsolation?: {
+      supported?: boolean;
+      guaranteeLevel?: string;
+    };
+    output?: {
+      structured?: boolean;
+      streaming?: boolean;
+    };
+  };
+  sampling?: {
+    supported?: boolean;
+    maxConcurrency?: number;
+  };
+  orchestration?: {
+    supported?: boolean;
+  };
+}
+
+let hostExecCapLogged = false;
+
+/**
+ * Extract the host's execution capability declaration from client capabilities.
+ * Returns null if the client did not declare `kevlar.host.execution/v1`.
+ * Logs to stderr on first successful read.
+ */
+export function getHostExecutionCapability(): HostExecutionCapability | null {
+  ensureClientCapabilities();
+  const experimental = clientCapabilities?.experimental as Record<string, unknown> | undefined;
+  if (!experimental) {
+    if (!hostExecCapLogged) {
+      ensureClientInfo();
+      logger.info("Host execution capability from handshake", {
+        event: "host_exec_handshake",
+        declared: false,
+        capability: null,
+        clientName: clientInfo?.name ?? "unknown",
+        clientVersion: clientInfo?.version ?? "unknown",
+      });
+      hostExecCapLogged = true;
+    }
+    return null;
+  }
+  const cap = experimental["kevlar.host.execution/v1"];
+  if (!cap || typeof cap !== "object") {
+    if (!hostExecCapLogged) {
+      ensureClientInfo();
+      logger.info("Host execution capability from handshake", {
+        event: "host_exec_handshake",
+        declared: false,
+        capability: null,
+        clientName: clientInfo?.name ?? "unknown",
+        clientVersion: clientInfo?.version ?? "unknown",
+      });
+      hostExecCapLogged = true;
+    }
+    return null;
+  }
+  if (!hostExecCapLogged) {
+    ensureClientInfo();
+    logger.info("Host execution capability from handshake", {
+      event: "host_exec_handshake",
+      declared: true,
+      capability: cap,
+      clientName: clientInfo?.name ?? "unknown",
+      clientVersion: clientInfo?.version ?? "unknown",
+    });
+    hostExecCapLogged = true;
+  }
+  return cap as HostExecutionCapability;
 }
 
 /**

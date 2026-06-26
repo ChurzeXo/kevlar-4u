@@ -236,6 +236,13 @@ export async function createKevlarServer(): Promise<McpServer> {
     {
       capabilities: {
         tools: {},
+        experimental: {
+          "kevlar.host.execution/v1": {
+            version: "1.0.0",
+            ephemeralAgents: { supported: true },
+            orchestration: { supported: true },
+          },
+        },
       },
       instructions: SERVER_INSTRUCTIONS,
     }

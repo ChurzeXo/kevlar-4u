@@ -7,7 +7,7 @@
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { logger } from "../utils/logger.js";
 import { readConfig, isValidMode } from "./config.js";
-import { getClientFingerprint } from "./client.js";
+import { getClientFingerprint, getHostExecutionCapability } from "./client.js";
 import {
   getHostStructuredObservation,
   inferTaskClass,
@@ -166,6 +166,10 @@ export function resolveExecutionPlan(
   // 3. Auto-resolve: Host Orchestration
   else {
     resolutionSource = "auto";
+
+    // Read handshake-declared host execution capability (logged to stderr on first call)
+    const hostExecCap = getHostExecutionCapability();
+
     const cachedObs = getHostStructuredObservation({
       fingerprint,
       protocolVersion: "kevlar-host-guided/v1",
