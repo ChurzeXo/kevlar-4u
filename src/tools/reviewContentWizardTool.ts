@@ -417,8 +417,8 @@ async function advanceWizard(
     }
 
     case "systemAudit":
-      // Free tier: skip pre-audit. Env var override for tests.
-      if (!isPro() && process.env.KEVLAR_TIER !== "pro") {
+      // Free tier: skip pre-audit. state.tier resolved at init time (line 318).
+      if (state.tier !== "pro" && process.env.KEVLAR_TIER !== "pro") {
         return handleInventoryCheck(tmpDir, state, personas, samplingFn);
       }
       return handleSystemAudit(skillsDir, tmpDir, state, personas, systemAuditors, samplingFn, sendProgress);
@@ -1149,7 +1149,7 @@ async function handleSubagentAuditResult(
 
     state.preAuditReport = preAuditReport;
     state.systemAuditorIds = systemAuditors.map((a) => a.meta.id);
-    state.step = (isPro() || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
+    state.step = (state.tier === "pro" || process.env.KEVLAR_TIER === "pro") ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
 
     logger.info("Subagent audit receipt processed", {
