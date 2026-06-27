@@ -228,7 +228,12 @@ export function setHandshakeDumpDir(dir: string): void {
 /**
  * Extract the host's execution capability declaration from client capabilities.
  * Returns null if the client did not declare `kevlar.host.execution/v1`.
- * Logs to stderr and writes host-exec-handshake.json to handshakeDumpDir on first access.
+ * On first access, writes a full handshake analysis dump (host-exec-handshake.json)
+ * covering all MCP capabilities per the audit-hybrid-execution.md specification:
+ *   - sampling (serial blocking)
+ *   - tasks.requests.sampling.createMessage (task-augmented parallel)
+ *   - tasks.cancel (independent cancel capability)
+ *   - kevlar.host.execution/v1 (Kevlar experimental)
  */
 export function getHostExecutionCapability(): HostExecutionCapability | null {
   ensureClientCapabilities();
@@ -262,10 +267,47 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
 
   const cap = experimental?.["kevlar.host.execution/v1"];
   const declared = cap !== undefined && cap !== null && typeof cap === "object";
+
+  // Resolve all MCP capabilities per audit-hybrid-execution.md §能力声明前提
+  const tasksCap = (clientCapabilities?.tasks as Record<string, unknown> | undefined);
+  const taskAugSampling = !!(tasksCap as any)?.requests?.sampling?.createMessage;
+  const taskCancel = !!(tasksCap as any)?.cancel;
+  const hasSampling = clientCapabilities?.sampling !== undefined;
+
   const payload = {
     clientName: clientInfo?.name ?? "unknown",
     clientVersion: clientInfo?.version ?? "unknown",
     rawClientCapabilities: clientCapabilities ?? null,
+
+    // Per audit doc lines 73-86: MCP capability declarations
+    mcpCapabilities: {
+      sampling: {
+        declared: hasSampling,
+        description: "普通串行 sampling — Server 发出请求，Client 同步阻塞返回",
+      },
+      taskAugmented: {
+        declared: taskAugSampling,
+        capabilityPath: "tasks.requests.sampling.createMessage",
+        description: "task-augmented sampling (2025-11-25) — 真并行 O(T)",
+      },
+      taskCancel: {
+        declared: taskCancel,
+        capabilityPath: "tasks.cancel",
+        description: "任务取消能力（独立声明，未声明时 MUST NOT 调用 tasks/cancel）",
+      },
+    },
+
+    // Resolution: which backend will be used
+    resolution: {
+      taskAugmentedAvailable: taskAugSampling && process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0",
+      serialSamplingAvailable: hasSampling,
+      recommendedBackend: taskAugSampling && process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0"
+        ? "sampling_task_augmented"
+        : hasSampling
+          ? "sampling_serial"
+          : "host_orchestration",
+    },
+
     kevlarHostExec: {
       declared,
       capability: declared ? cap : null,
