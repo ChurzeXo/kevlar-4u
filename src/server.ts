@@ -142,6 +142,18 @@ async function buildToolDependencies(
     setClientCapabilities(clientCaps);
   }
 
+  // Log full handshake capability declaration to stderr for diagnostics
+  logger.info("Client handshake complete", {
+    event: "client_handshake",
+    clientName: clientVersion?.name ?? "unknown",
+    clientVersion: clientVersion?.version ?? "unknown",
+    capabilities: clientCaps ? Object.keys(clientCaps) : [],
+    hasSampling: !!(clientCaps as any)?.sampling,
+    hasTaskAugmented: !!(clientCaps as any)?.tasks?.requests?.sampling?.createMessage,
+    hasTaskCancel: !!(clientCaps as any)?.tasks?.cancel,
+    hasHostExec: !!(clientCaps as any)?.experimental?.["kevlar.host.execution/v1"],
+  });
+
   return {
     skillsDir,
     tmpDir,
