@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 
 import { createToolRegistry } from "./tools/index.js";
 import type { ToolDependencies } from "./tools/types.js";
-import { logger } from "./utils/logger.js";
+import { log } from "./utils/logCategories.js";
 import { formatErrorResponse, internalError } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
@@ -65,13 +65,13 @@ async function cleanStaleDrafts(tmpDir: string) {
           const state = JSON.parse(data);
           if (state.createdAt && now - state.createdAt > 86400000) {
             await fs.promises.unlink(filePath);
-            logger.info("Cleaned stale wizard state", { event: "clean_stale_wizard", file });
+            log.wizard.info("Cleaned stale wizard state", { event: "clean_stale_wizard", file });
           }
         } catch (err) {
           // JSON parse error or missing createdAt - clean up corrupted file
           try {
             await fs.promises.unlink(filePath);
-            logger.info("Cleaned corrupted wizard state", { event: "clean_corrupted_wizard", file });
+            log.wizard.info("Cleaned corrupted wizard state", { event: "clean_corrupted_wizard", file });
           } catch {
             // Ignore cleanup errors
           }
@@ -81,16 +81,16 @@ async function cleanStaleDrafts(tmpDir: string) {
     await Promise.all(deletePromises);
   } catch (err) {
     const info = getErrorInfo(err);
-    logger.warn("Failed to clean stale wizard states", { event: "clean_stale_wizards_error", error: info.code, message: info.message });
+    log.wizard.warn("Failed to clean stale wizard states", { event: "clean_stale_wizards_error", error: info.code, message: info.message });
   }
 }
 
 function ensureSkillsDirectory(skillsDir: string) {
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
-    logger.info("Created skills directory", { event: "dir_created", path: skillsDir });
+    log.system.info("Created skills directory", { event: "dir_created", path: skillsDir });
   } else {
-    logger.info("Using skills directory", { event: "dir_using", path: skillsDir });
+    log.system.info("Using skills directory", { event: "dir_using", path: skillsDir });
   }
 }
 
@@ -113,7 +113,7 @@ function createMultiTurnSamplingFn(serverInstance: any): MultiTurnSamplingFuncti
       };
     } catch (err) {
       const info = getErrorInfo(err);
-      logger.error("Multi-turn Sampling request failed", {
+      log.sampling.error("Multi-turn Sampling request failed", {
         event: "multi_sampling_request_error",
         error: info.code,
         message: info.message,
@@ -143,7 +143,7 @@ async function buildToolDependencies(
   }
 
   // Log full handshake capability declaration to stderr for diagnostics
-  logger.info("Client handshake complete", {
+  log.handshake.info("Client handshake complete", {
     event: "client_handshake",
     clientName: clientVersion?.name ?? "unknown",
     clientVersion: clientVersion?.version ?? "unknown",
@@ -197,7 +197,7 @@ function setupCallToolHandler(
     const { name, arguments: args } = request.params;
     const startTime = Date.now();
 
-    logger.debug("Tool call received", { event: "tool_called", tool: name });
+    log.tool.debug("Tool call received", { event: "tool_called", tool: name });
 
     try {
       const sanitizedArgs = args && typeof args === "object"
@@ -205,11 +205,11 @@ function setupCallToolHandler(
         : undefined;
       const handler = registry.get(name);
       if (!handler) {
-        logger.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
+        log.tool.warn("Unknown tool requested", { event: "unknown_tool", tool: name });
         throw internalError(`Unknown tool: ${name}`);
       }
       const result = await handler(sanitizedArgs);
-      logger.info("Tool completed", {
+      log.tool.info("Tool completed", {
         event: "tool_completed",
         tool: name,
         durationMs: Date.now() - startTime,
@@ -218,7 +218,7 @@ function setupCallToolHandler(
     } catch (err) {
       const durationMs = Date.now() - startTime;
       const info = getErrorInfo(err);
-      logger.error("Tool execution failed", {
+      log.tool.error("Tool execution failed", {
         event: "tool_error",
         tool: name,
         error: info.code,

@@ -1,7 +1,7 @@
 import type { Persona } from "../utils/parser.js";
 import type { PreAuditDimensionResult } from "./reviewSteps.js";
 import { buildIsolatedSystemAuditorPrompt, buildIsolatedSystemAuditorMessage } from "../prompts/reviewWizard.js";
-import { logger } from "../utils/logger.js";
+import { log } from "../utils/logCategories.js";
 import { getErrorInfo } from "../utils/observability.js";
 import { internalError } from "../utils/errors.js";
 
@@ -41,7 +41,7 @@ export async function executeTaskAugmentedSampling(
   const TASK_TTL_MS = Number(process.env.KEVLAR_TASK_TTL_MS) || 300000;
   const MAX_TOTAL_TIMEOUT_MS = Number(process.env.KEVLAR_TASK_TOTAL_TIMEOUT_MS) || 600000;
 
-  logger.info("Starting task-augmented sampling", {
+  log.sampling.info("Starting task-augmented sampling", {
     event: "task_augmented_sampling_start",
     auditorCount: auditors.length,
     maxConcurrency,
@@ -114,7 +114,7 @@ export async function executeTaskAugmentedSampling(
       if (createResult && createResult.task && createResult.task.taskId) {
         taskEntry.taskId = createResult.task.taskId;
         taskEntry.status = "running";
-        logger.debug("Task launched", {
+        log.sampling.debug("Task launched", {
           event: "task_augmented_launched",
           auditorId: auditor.meta.id,
           taskId: createResult.task.taskId,
@@ -125,14 +125,14 @@ export async function executeTaskAugmentedSampling(
     } catch (err: any) {
       const info = getErrorInfo(err);
       if (err?.code === -1 || info.code === "REJECTED") {
-        logger.info("User rejected sampling for auditor", {
+        log.sampling.info("User rejected sampling for auditor", {
           event: "task_augmented_user_rejected",
           auditorId: auditor.meta.id,
         });
         taskEntry.status = "skipped";
         taskEntry.result = { id: auditor.meta.id, name: auditor.meta.name, findings: [] };
       } else {
-        logger.warn("Failed to create task for auditor", {
+        log.sampling.warn("Failed to create task for auditor", {
           event: "task_augmented_launch_failed",
           auditorId: auditor.meta.id,
           error: info.message,
@@ -148,7 +148,7 @@ export async function executeTaskAugmentedSampling(
   // ── Phase 2: Poll all running tasks until terminal ─────────────────────
   const runningTasks = tasks.filter((t) => t.status === "running");
   if (runningTasks.length === 0) {
-    logger.info("No tasks to poll (all launched or failed)", {
+    log.sampling.info("No tasks to poll (all launched or failed)", {
       event: "task_augmented_no_poll",
       tasks: tasks.map((t) => ({ id: t.auditorId, status: t.status })),
     });
@@ -164,7 +164,7 @@ export async function executeTaskAugmentedSampling(
     if (stillRunning.length === 0) break;
 
     if (Date.now() - startTime > MAX_TOTAL_TIMEOUT_MS) {
-      logger.warn("Task-augmented total timeout reached", {
+      log.sampling.warn("Task-augmented total timeout reached", {
         event: "task_augmented_total_timeout",
         runningCount: stillRunning.length,
       });
@@ -221,13 +221,13 @@ export async function executeTaskAugmentedSampling(
                 findings: Array.isArray(parsed.findings) ? parsed.findings : [],
               };
               taskEntry.status = "done";
-              logger.debug("Task completed", {
+              log.sampling.debug("Task completed", {
                 event: "task_augmented_completed",
                 auditorId: taskEntry.auditorId,
               });
             } catch (resultErr: any) {
               const info = getErrorInfo(resultErr);
-              logger.warn("Failed to get task result", {
+              log.sampling.warn("Failed to get task result", {
                 event: "task_augmented_result_failed",
                 auditorId: taskEntry.auditorId,
                 error: info.message,
@@ -264,7 +264,7 @@ export async function executeTaskAugmentedSampling(
               taskEntry.status = "done";
             } catch (elicitErr: any) {
               const info = getErrorInfo(elicitErr);
-              logger.warn("Failed to process input_required", {
+              log.sampling.warn("Failed to process input_required", {
                 event: "task_augmented_input_required_failed",
                 auditorId: taskEntry.auditorId,
                 error: info.message,
@@ -277,7 +277,7 @@ export async function executeTaskAugmentedSampling(
           case "failed": {
             taskEntry.result = { id: taskEntry.auditorId, name: taskEntry.auditorName, findings: [] };
             taskEntry.status = "failed";
-            logger.warn("Task failed remotely", {
+            log.sampling.warn("Task failed remotely", {
               event: "task_augmented_remote_failed",
               auditorId: taskEntry.auditorId,
               statusMessage: taskStatus.statusMessage,
@@ -287,7 +287,7 @@ export async function executeTaskAugmentedSampling(
           case "cancelled": {
             taskEntry.result = { id: taskEntry.auditorId, name: taskEntry.auditorName, findings: [] };
             taskEntry.status = "skipped";
-            logger.info("Task cancelled", {
+            log.sampling.info("Task cancelled", {
               event: "task_augmented_cancelled",
               auditorId: taskEntry.auditorId,
             });
@@ -301,12 +301,12 @@ export async function executeTaskAugmentedSampling(
         const info = getErrorInfo(pollErr);
         if (pollErr?.code === -32602) {
           // Invalid params - task already terminal, ignore
-          logger.debug("tasks/get returned invalid params (task already terminal)", {
+          log.sampling.debug("tasks/get returned invalid params (task already terminal)", {
             event: "task_augmented_poll_invalid_params",
             auditorId: taskEntry.auditorId,
           });
         } else {
-          logger.warn("Poll failed for auditor", {
+          log.sampling.warn("Poll failed for auditor", {
             event: "task_augmented_poll_failed",
             auditorId: taskEntry.auditorId,
             error: info.message,
@@ -335,7 +335,7 @@ export async function executeTaskAugmentedSampling(
     }
   }
 
-  logger.info("Task-augmented sampling complete", {
+  log.sampling.info("Task-augmented sampling complete", {
     event: "task_augmented_sampling_complete",
     total: results.length,
     withFindings: results.filter((r) => r.findings.length > 0).length,

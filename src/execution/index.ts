@@ -5,7 +5,7 @@
  */
 
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
-import { logger } from "../utils/logger.js";
+import { log } from "../utils/logCategories.js";
 import { invalidInputError, validationError } from "../utils/errors.js";
 import { readConfig, isValidMode } from "./config.js";
 import { getClientFingerprint, getHostExecutionCapability, isTaskAugmentedSamplingSupported, isSamplingSupported } from "./client.js";
@@ -60,7 +60,7 @@ export async function executeReview(
   const traceCtx: TraceContext = { traceId, spanId };
   const tracedCtx: ExecutionContext = { ...ctx, traceContext: traceCtx };
 
-  logger.info("Executing review", withTraceContext({
+  log.audit.info("Executing review", withTraceContext({
     event: "review_execute",
     mode: resolved,
     personas: ctx.personas.length,
@@ -98,7 +98,7 @@ export async function executeReview(
           .map((r) => ({ personaId: r.id, error: "No findings" })),
       };
     } catch (err: any) {
-      logger.warn("Sampling execution failed, falling back to orchestration", {
+      log.sampling.warn("Sampling execution failed, falling back to orchestration", {
         event: "sampling_fallback_to_orchestration",
         backend,
         error: (err as Error).message,
@@ -113,7 +113,7 @@ export async function executeReview(
 
   const durationMs = Date.now() - startTime;
   const failedCount = result.partialFailures?.length ?? 0;
-  logger.info("Review summary", withTraceContext({
+  log.audit.info("Review summary", withTraceContext({
     event: "review_summary",
     mode: resolved,
     personas: ctx.personas.length,
@@ -147,15 +147,15 @@ async function resolveMode(): Promise<ExecutionMode> {
   const config = readConfig();
   if (config.mode && config.mode !== "auto") {
     if (!isValidMode(config.mode)) {
-      logger.warn("Invalid persisted mode, falling back to auto", {
+      log.config.warn("Invalid persisted mode, falling back to auto", {
         event: "mode_invalid_config",
         mode: config.mode,
       });
     } else {
       if (!canExec(config.mode)) {
-        logger.warn(`Persisted mode ${config.mode} cannot execute in current environment. Will be silently downgraded.`, { event: "mode_silent_downgrade", mode: config.mode });
+        log.config.warn(`Persisted mode ${config.mode} cannot execute in current environment. Will be silently downgraded.`, { event: "mode_silent_downgrade", mode: config.mode });
       }
-      logger.debug("Using persisted mode", { event: "mode_persist", mode: config.mode });
+      log.config.debug("Using persisted mode", { event: "mode_persist", mode: config.mode });
       return config.mode;
     }
   }
@@ -164,9 +164,9 @@ async function resolveMode(): Promise<ExecutionMode> {
   const envMode = process.env.KEVLAR_MODE as ResolveableMode | undefined;
   if (envMode && envMode !== "auto" && isValidMode(envMode)) {
     if (!canExec(envMode)) {
-      logger.warn(`Env var mode ${envMode} cannot execute in current environment. Will be silently downgraded.`, { event: "mode_silent_downgrade", mode: envMode });
+      log.config.warn(`Env var mode ${envMode} cannot execute in current environment. Will be silently downgraded.`, { event: "mode_silent_downgrade", mode: envMode });
     }
-    logger.debug("Using env var mode", { event: "mode_env", mode: envMode });
+    log.config.debug("Using env var mode", { event: "mode_env", mode: envMode });
     return envMode;
   }
 
@@ -214,7 +214,7 @@ export function resolveExecutionPlan(
         plan: { backend: "sampling_task_augmented" },
         legacyMode: "mcp_sampling",
       };
-      logger.info("Auto-resolved to task-augmented sampling", {
+      log.config.info("Auto-resolved to task-augmented sampling", {
         event: "execution_plan_resolved",
         backend: "sampling_task_augmented",
       });
@@ -226,7 +226,7 @@ export function resolveExecutionPlan(
         plan: { backend: "sampling_serial" },
         legacyMode: "mcp_sampling",
       };
-      logger.info("Auto-resolved to serial MCP sampling", {
+      log.config.info("Auto-resolved to serial MCP sampling", {
         event: "execution_plan_resolved",
         backend: "sampling_serial",
       });
@@ -249,7 +249,7 @@ export function resolveExecutionPlan(
 
       const lighterTaskMatch = cachedObs?.isLighter === true;
 
-      logger.debug("Host orchestration strategy resolved", {
+      log.config.debug("Host orchestration strategy resolved", {
         event: "host_orchestration_strategy",
         strategy,
         cachedStatus: cachedObs?.status ?? "none",
@@ -266,7 +266,7 @@ export function resolveExecutionPlan(
     }
   }
 
-  logger.info("Execution plan resolved", {
+  log.config.info("Execution plan resolved", {
     event: "execution_plan_resolved",
     backend: result.plan.backend,
     strategy: "strategy" in result.plan ? result.plan.strategy : undefined,
