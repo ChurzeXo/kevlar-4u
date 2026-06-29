@@ -14,6 +14,7 @@ import type {
   DispatchFailureReason,
 } from "./plan.js";
 import { logger } from "../utils/logger.js";
+import { log } from "../utils/logCategories.js";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -35,6 +36,7 @@ export interface Capabilities {
 
 let clientInfo: { name: string; version?: string } | null = null;
 let clientCapabilities: Record<string, unknown> | null = null;
+let rawInitializeParams: Record<string, unknown> | null = null;
 
 /**
  * Lazy provider for client info, invoked on first access when {@link clientInfo}
@@ -56,6 +58,10 @@ export function setClientInfoProvider(
 
 export function setClientCapabilities(caps: Record<string, unknown> | null): void {
   clientCapabilities = caps;
+}
+
+export function setRawInitializeParams(params: Record<string, unknown> | null): void {
+  rawInitializeParams = params;
 }
 
 /**
@@ -117,26 +123,19 @@ export function getClientFingerprint(): ClientFingerprint {
 // ── Individual Capability Checks ──────────────────────────────────────────────
 
 export function isSamplingSupported(): boolean {
-  if (process.env.KEVLAR_ENABLE_SAMPLING === "true") return true;
-
   // Lazy-init: try the provider if clientCapabilities wasn't set at construction time
   ensureClientCapabilities();
 
   // Primary: check client-declared MCP capabilities (spec §5.2)
   const hasSampling = clientCapabilities?.sampling !== undefined;
-  if (hasSampling) return true;
 
-  // Fallback: some clients (e.g. WorkBuddy via custom MCP connectors) don't
-  // advertise sampling in capabilities, but do support it. Detect by client name.
-  ensureClientInfo();
-  if (clientInfo?.name) {
-    const name = clientInfo.name;
-    if (name.includes("connector:custom-mcp:") || name.includes("workbuddy")) {
-      return true;
-    }
-  }
-
-  return false;
+  const result = hasSampling;
+  log.handshake.debug("Sampling support resolved", {
+    event: "sampling_support_resolved",
+    hasSamplingCap: hasSampling,
+    result,
+  });
+  return result;
 }
 
 /**
@@ -269,14 +268,14 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
   const declared = cap !== undefined && cap !== null && typeof cap === "object";
 
   // Resolve all MCP capabilities per audit-hybrid-execution.md §能力声明前提
-  const tasksCap = (clientCapabilities?.tasks as Record<string, unknown> | undefined);
-  const taskAugSampling = !!(tasksCap as any)?.requests?.sampling?.createMessage;
-  const taskCancel = !!(tasksCap as any)?.cancel;
-  const hasSampling = clientCapabilities?.sampling !== undefined;
+  const taskAugSampling = isTaskAugmentedSamplingSupported();
+  const taskCancel = isTaskCancelSupported();
+  const hasSampling = isSamplingSupported();
 
   const payload = {
     clientName: clientInfo?.name ?? "unknown",
     clientVersion: clientInfo?.version ?? "unknown",
+    rawInitializeParams: rawInitializeParams ?? null,
     rawClientCapabilities: clientCapabilities ?? null,
 
     // Per audit doc lines 73-86: MCP capability declarations
@@ -299,11 +298,11 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
 
     // Resolution: which backend will be used
     resolution: {
-      taskAugmentedAvailable: taskAugSampling && process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0",
-      serialSamplingAvailable: hasSampling,
-      recommendedBackend: taskAugSampling && process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0"
+      taskAugmentedAvailable: taskAugSampling,
+      serialSamplingAvailable: isSamplingSupported(),
+      recommendedBackend: taskAugSampling
         ? "sampling_task_augmented"
-        : hasSampling
+        : isSamplingSupported()
           ? "sampling_serial"
           : "host_orchestration",
     },
@@ -314,7 +313,7 @@ export function getHostExecutionCapability(): HostExecutionCapability | null {
     },
   };
 
-  logger.info("Host execution capability from handshake", {
+  logger.debug("Host execution capability from handshake", {
     event: "host_exec_handshake",
     ...payload,
   });

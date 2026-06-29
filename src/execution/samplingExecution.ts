@@ -6,6 +6,7 @@ import { runSystemAuditors } from "./reviewSteps.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { internalError } from "../utils/errors.js";
 import { readConfig } from "./config.js";
+import { isTaskAugmentedSamplingSupported } from "./client.js";
 
 export interface SamplingReviewOptions {
   localFindings: any[];
@@ -31,9 +32,7 @@ export async function executeSamplingReview(
     samplingFn,
   } = options;
 
-  const taskAugEnabled = process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0";
-
-  if (taskAugEnabled) {
+  if (isTaskAugmentedSamplingSupported()) {
     try {
       logger.info("Attempting task-augmented sampling", {
         event: "sampling_exec_task_augmented",

@@ -160,14 +160,31 @@ describe("handleUpdatePersonaDraft", () => {
     assert.ok(result.content[0].text.includes("sessionId"));
   });
 
-  it("accepts sessionId with underscore, dot, hyphen, and letters", async () => {
+  it("rejects sessionId with uppercase letters", async () => {
     const result = await handleUpdatePersonaDraft(tmpDir, {
-      sessionId: "Session_1.2-Alpha",
+      sessionId: "Session-alpha",
       field: "ageRange",
       value: "25-34",
     });
-    assert.equal(result.isError, undefined);
-    assert.ok(result.content[0].text.includes("ageRange 更新成功"));
+    assert.ok(result.isError);
+  });
+
+  it("rejects sessionId with underscore", async () => {
+    const result = await handleUpdatePersonaDraft(tmpDir, {
+      sessionId: "session_alpha",
+      field: "ageRange",
+      value: "25-34",
+    });
+    assert.ok(result.isError);
+  });
+
+  it("rejects sessionId with dot", async () => {
+    const result = await handleUpdatePersonaDraft(tmpDir, {
+      sessionId: "session.alpha",
+      field: "ageRange",
+      value: "25-34",
+    });
+    assert.ok(result.isError);
   });
 
   it("rejects sessionId longer than 128 characters", async () => {

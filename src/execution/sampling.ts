@@ -23,10 +23,6 @@ export interface SamplingResolverDeps {
 export function resolveSamplingFn(
   deps: SamplingResolverDeps
 ): MultiTurnSamplingFunction | undefined {
-  if (process.env.KEVLAR_ENABLE_SAMPLING === "true") {
-    return deps.createFn();
-  }
-
   const cv = deps.getClientVersion();
   if (cv) {
     setClientInfo(cv.name, cv.version);

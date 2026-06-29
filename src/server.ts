@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
@@ -14,7 +15,7 @@ import { log } from "./utils/logCategories.js";
 import { formatErrorResponse, internalError } from "./utils/errors.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
-import { setClientInfo, setClientCapabilities, setHandshakeDumpDir } from "./execution/client.js";
+import { setClientInfo, setClientCapabilities, setRawInitializeParams, setHandshakeDumpDir, getHostExecutionCapability } from "./execution/client.js";
 import { setConfigPath } from "./execution/config.js";
 import { setObservationCacheDir } from "./execution/observations.js";
 import type { MultiTurnSamplingFunction } from "./execution/base.js";
@@ -34,6 +35,17 @@ function resolveSkillsDir(): string {
   const repoRoot = path.resolve(__dirname, "..");
   return path.join(repoRoot, "skills");
 }
+
+const _serverVersion = (() => {
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const repoRoot = path.resolve(__dirname, "..");
+    return JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf-8")).version;
+  } catch {
+    return "1.0.0";
+  }
+})();
 
 const STALE_WIZARD_SUFFIXES = new Set([
   '_draft.json',
@@ -90,7 +102,7 @@ function ensureSkillsDirectory(skillsDir: string) {
     fs.mkdirSync(skillsDir, { recursive: true });
     log.system.info("Created skills directory", { event: "dir_created", path: skillsDir });
   } else {
-    log.system.info("Using skills directory", { event: "dir_using", path: skillsDir });
+    // log.system.info("Using skills directory", { event: "dir_using", path: skillsDir });
   }
 }
 
@@ -132,28 +144,6 @@ async function buildToolDependencies(
   const proLoader = new DynamicImportProRuntimeLoader();
   const strategyProvider = await resolveStrategyProvider(proLoader, skillsDir);
 
-  // Eagerly capture client capabilities for isSamplingSupported() checks
-  const clientVersion = underlyingServer.getClientVersion();
-  if (clientVersion) {
-    setClientInfo(clientVersion.name, clientVersion.version);
-  }
-  const clientCaps = underlyingServer.getClientCapabilities();
-  if (clientCaps) {
-    setClientCapabilities(clientCaps);
-  }
-
-  // Log full handshake capability declaration to stderr for diagnostics
-  log.handshake.info("Client handshake complete", {
-    event: "client_handshake",
-    clientName: clientVersion?.name ?? "unknown",
-    clientVersion: clientVersion?.version ?? "unknown",
-    capabilities: clientCaps ? Object.keys(clientCaps) : [],
-    hasSampling: !!(clientCaps as any)?.sampling,
-    hasTaskAugmented: !!(clientCaps as any)?.tasks?.requests?.sampling?.createMessage,
-    hasTaskCancel: !!(clientCaps as any)?.tasks?.cancel,
-    hasHostExec: !!(clientCaps as any)?.experimental?.["kevlar.host.execution/v1"],
-  });
-
   return {
     skillsDir,
     tmpDir,
@@ -180,11 +170,112 @@ async function buildToolDependencies(
   };
 }
 
+export function announceHandshakeToClient(
+  underlyingServer: any,
+  clientName?: string,
+  rawInitializeParams?: any,
+): void {
+  const clientVersion = underlyingServer.getClientVersion();
+  const clientCaps = underlyingServer.getClientCapabilities();
+
+  // Prefer raw intercepted params (reliable) over SDK getters (may return null)
+  const effectiveClientName = rawInitializeParams?.clientInfo?.name
+    ?? clientVersion?.name
+    ?? clientName
+    ?? "unknown";
+  const effectiveClientVersion = rawInitializeParams?.clientInfo?.version
+    ?? clientVersion?.version
+    ?? "unknown";
+  const effectiveClientCaps = rawInitializeParams?.capabilities
+    ?? clientCaps
+    ?? null;
+
+  // Populate the execution-layer capability cache so isSamplingSupported() etc. work
+  if (clientVersion) {
+    setClientInfo(clientVersion.name, clientVersion.version);
+  }
+  if (effectiveClientCaps) {
+    setClientCapabilities(effectiveClientCaps as Record<string, unknown>);
+  }
+  if (rawInitializeParams) {
+    setRawInitializeParams(rawInitializeParams);
+  }
+
+  // Write host-exec-handshake.json dump immediately during handshake
+  // (not lazily during first tool invocation), so the file is always
+  // fresh after every client reconnect.
+  getHostExecutionCapability();
+
+  // Structured log event (debug level — viewable in client logs, not UI)
+  log.handshake.debug("Client handshake complete", {
+    event: "client_handshake",
+    clientName: effectiveClientName,
+    clientVersion: effectiveClientVersion,
+    capabilities: effectiveClientCaps ? Object.keys(effectiveClientCaps) : [],
+    hasSampling: !!(effectiveClientCaps as any)?.sampling,
+    hasTaskAugmented: !!(effectiveClientCaps as any)?.tasks?.requests?.sampling?.createMessage,
+    hasTaskCancel: !!(effectiveClientCaps as any)?.tasks?.cancel,
+    hasHostExec: !!(effectiveClientCaps as any)?.experimental?.["kevlar.host.execution/v1"],
+  });
+
+  // Send capability summary to client via logging notification
+  const capabilityKeys = effectiveClientCaps ? Object.keys(effectiveClientCaps) : [];
+  const samplingCap = !!(effectiveClientCaps as any)?.sampling;
+  const taskAugCap = !!(effectiveClientCaps as any)?.tasks?.requests?.sampling?.createMessage;
+  const taskCancelCap = !!(effectiveClientCaps as any)?.tasks?.cancel;
+
+  const summary = [
+    `[Kevlar-4u] ✅ Handshake complete with ${effectiveClientName} v${effectiveClientVersion}`,
+    `Capabilities: ${capabilityKeys.length ? capabilityKeys.join(", ") : "(none)"}`,
+    `sampling.createMessage = ${samplingCap ? "✅" : "❌"} (serial)`,
+    `tasks.requests.sampling.createMessage = ${taskAugCap ? "✅" : "❌"} (parallel)`,
+    `tasks.cancel = ${taskCancelCap ? "✅" : "❌"}`,
+  ].join("\n");
+
+  // No longer write to stderr — use MCP logging notification below
+  // writeRawStderr(summary);
+
+  try {
+    const result = underlyingServer.sendLoggingMessage({
+      level: "debug",
+      logger: "kevlar-handshake",
+      data: summary,
+    });
+    if (result && typeof result.catch === 'function') {
+      result.catch(() => {});
+    }
+  } catch {
+    // Client may not support logging — ignore
+  }
+
+}
+
+let _initialized = false;
+
+export function setServerInitialized(): void {
+  _initialized = true;
+}
+
+export function isServerInitialized(): boolean {
+  return _initialized;
+}
+
+export function _resetServerInitializedForTest(): void {
+  _initialized = false;
+}
+
+function assertInitialized(): void {
+  if (!_initialized) {
+    throw new McpError(-32002, "Server not initialized");
+  }
+}
+
 function setupListToolsHandler(
   underlyingServer: any,
   toolDefinitions: any[],
 ) {
   underlyingServer.setRequestHandler(ListToolsRequestSchema, async () => {
+    assertInitialized();
     return { tools: toolDefinitions };
   });
 }
@@ -194,6 +285,8 @@ function setupCallToolHandler(
   registry: Map<string, any>,
 ) {
   underlyingServer.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
+    assertInitialized();
+
     const { name, arguments: args } = request.params;
     const startTime = Date.now();
 
@@ -244,16 +337,25 @@ export async function createKevlarServer(): Promise<McpServer> {
   const mcpServer = new McpServer(
     {
       name: "kevlar-4u",
-      version: "1.0.0",
+      title: "Kevlar-4u 内容风险评测系统",
+      version: _serverVersion,
     },
     {
       capabilities: {
-        tools: {},
+        tools: { listChanged: true },
+        logging: {},
         experimental: {
           "kevlar.host.execution/v1": {
             version: "1.0.0",
             ephemeralAgents: { supported: true },
             orchestration: { supported: true },
+          },
+          tasks: {
+            list: {},
+            cancel: {},
+            requests: {
+              tools: { call: {} },
+            },
           },
         },
       },
@@ -262,6 +364,12 @@ export async function createKevlarServer(): Promise<McpServer> {
   );
 
   const underlyingServer = mcpServer.server;
+
+  // Hook the SDK's lifecycle callback so _initialized flips even
+  // in environments where src/index.ts transport intercept is absent (e.g. E2E tests).
+  underlyingServer.oninitialized = () => {
+    setServerInitialized();
+  };
   const deps = await buildToolDependencies(skillsDir, tmpDir, underlyingServer);
   const { registry, toolDefinitions } = createToolRegistry(deps);
 

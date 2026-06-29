@@ -113,8 +113,8 @@ export function resumeFromStructuredFailure(
 
   logger.warn("Execution downgraded", {
     event: "execution_downgraded",
-    from: `${from.backend}/${from.strategy}`,
-    to: `${to.backend}/${to.strategy}`,
+    from: `${from.backend}${"strategy" in from ? `/${from.strategy}` : ""}`,
+    to: `${to.backend}${"strategy" in to ? `/${to.strategy}` : ""}`,
     reason,
     checkpoint: "step0_completed",
   });

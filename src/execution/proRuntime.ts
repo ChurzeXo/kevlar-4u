@@ -19,9 +19,9 @@ export class DynamicImportProRuntimeLoader implements ProRuntimeLoader {
 
     // Allow disabling via env for testing
     if (process.env.KEVLAR_SKIP_PRO_IMPORT === "1") {
-      logger.info("Pro runtime disabled via KEVLAR_SKIP_PRO_IMPORT", {
-        event: "pro_runtime_skipped",
-      });
+      // logger.info("Pro runtime disabled via KEVLAR_SKIP_PRO_IMPORT", {
+      //   event: "pro_runtime_skipped",
+      // });
       return null;
     }
 
@@ -30,18 +30,18 @@ export class DynamicImportProRuntimeLoader implements ProRuntimeLoader {
       if (typeof mod.createProStrategyProvider === "function") {
         const provider = await mod.createProStrategyProvider();
         this.cached = provider;
-        logger.info("Pro runtime loaded", { event: "pro_runtime_loaded" });
+        // logger.info("Pro runtime loaded", { event: "pro_runtime_loaded" });
         return provider;
       }
-      logger.warn("Pro runtime found but no createProStrategyProvider export", {
-        event: "pro_runtime_invalid",
-      });
+      // logger.warn("Pro runtime found but no createProStrategyProvider export", {
+      //   event: "pro_runtime_invalid",
+      // });
       return null;
     } catch (err) {
-      logger.info("Pro runtime not available, using Free", {
-        event: "pro_runtime_unavailable",
-        reason: (err as Error)?.message ?? String(err),
-      });
+      // logger.info("Pro runtime not available, using Free", {
+      //   event: "pro_runtime_unavailable",
+      //   reason: (err as Error)?.message ?? String(err),
+      // });
       return null;
     }
   }
@@ -94,28 +94,28 @@ export async function resolveStrategyProvider(
         };
         const result = pro.verifyAndCreateProvider(bundle, vars);
         if (result.ok) {
-          logger.info("Loaded Pro strategy from cached bundle", {
-            event: "bundle_cache_loaded",
-            bundleId: bundle.bundleId,
-            version: bundle.version,
-          });
+          // logger.info("Loaded Pro strategy from cached bundle", {
+          //   event: "bundle_cache_loaded",
+          //   bundleId: bundle.bundleId,
+          //   version: bundle.version,
+          // });
           return result.provider;
         }
-        logger.warn("Cached strategy bundle invalid, falling back to Free", {
-          event: "bundle_cache_invalid",
-          reason: result.reason,
-        });
+        // logger.warn("Cached strategy bundle invalid, falling back to Free", {
+        //   event: "bundle_cache_invalid",
+        //   reason: result.reason,
+        // });
       }
     } catch {
-      logger.info("No cached strategy bundle, using Free", {
-        event: "bundle_cache_missing",
-      });
+      // logger.info("No cached strategy bundle, using Free", {
+      //   event: "bundle_cache_missing",
+      // });
     }
   }
 
   // 3. Fallback to Free
-  logger.warn("Falling back to Free tier", {
-    event: "fallback_to_free",
-  });
+  // logger.warn("Falling back to Free tier", {
+  //   event: "fallback_to_free",
+  // });
   return new FreeStrategyProvider();
 }

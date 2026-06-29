@@ -301,6 +301,7 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 
 /** Per-mode budget policy defaults from MECP §8.2 recommended table. */
 const BUDGET_POLICIES: Record<ExecutionMode, BudgetPolicy> = {
+  mcp_sampling: { maxAgentTokens: 8_000, maxTurns: 1, maxSessionTokens: 16_000 },
   mcp_subagent: { maxAgentTokens: 6_000, maxTurns: 2, maxSessionTokens: 24_000 },
   orchestration: { maxAgentTokens: 4_000, maxTurns: 1, maxSessionTokens: 8_000 },
 };

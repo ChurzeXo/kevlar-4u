@@ -9,7 +9,7 @@ import { writePersonaFile, invalidatePersonasCache } from "../utils/parser.js";
 import type { PersonaMeta } from "../utils/parser.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createKevlarServer } from "../server.js";
+import { createKevlarServer, _resetServerInitializedForTest } from "../server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +19,7 @@ let tmpDir: string;
 
 beforeEach(() => {
   process.env.KEVLAR_SKIP_PRO_IMPORT = "1";
+  _resetServerInitializedForTest();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-e2e-"));
   const tmpTemplates = path.join(tmpDir, "templates");
   fs.mkdirSync(tmpTemplates, { recursive: true });
@@ -438,8 +439,10 @@ describe("End-to-End integration test", () => {
       assert.ok(step2Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
       assert.ok(step2Text.includes("host_merge"), "Should use host_merge aggregation strategy");
 
-      // Parse blueprint to verify structure
-      const blueprint = JSON.parse(step2Text);
+      // Parse blueprint to verify structure (extract from code block)
+      const jsonMatch = step2Text.match(/```json\n([\s\S]*?)\n```/);
+      assert.ok(jsonMatch, "Should contain JSON code block in blueprint");
+      const blueprint = JSON.parse(jsonMatch[1]);
       assert.equal(blueprint.protocol, "kevlar.exec/v1");
       assert.equal(blueprint.execution.mode, "ephemeral_agents");
       assert.equal(blueprint.execution.isolation.level, "strict");
