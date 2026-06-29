@@ -254,13 +254,14 @@ Kevlar-4u operates on a **3-tier fallback chain** that automatically selects the
 | Tier | Mode | Identifier | Trigger | Pre-audit strategy | RST review strategy |
 |------|------|------------|---------|-------------------|-------------------|
 | L1 | MCP Sampling | `mcp_sampling` | Client declares `sampling` capability | 6 parallel agent calls via `sampling/createMessage` | Independent LLM call per persona |
-| L1 | Direct API | `direct_api` | `KEVLAR_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` set | 6 parallel direct API calls per auditor | Independent API call per persona |
 | L2 | Subagent dispatch | `mcp_subagent` | Host AI supports Task/Subagent tools | **AgentBlueprint dispatch** — Kevlar sends structured blueprint + natural-language guidance; host creates 6 isolated subagents, submits per-agent results; Pro: slot-based submission with server-side auto-aggregation | Sequential persona dispatch with per-persona subagent |
-| L3 | Orchestration (fallback) | `orchestration` | Neither sampling, API keys, nor subagent tools available | **V4 Matrix-filling protocol** — single prompt with 6 XML sandbox slots | **Reinforced role-play** — sequential persona execution with context reset gates |
+| L3 | Orchestration (fallback) | `orchestration` | Neither sampling nor subagent tools available | **V4 Matrix-filling protocol** — single prompt with 6 XML sandbox slots | **Reinforced role-play** — sequential persona execution with context reset gates |
+
+> **v2.1**: `direct_api` mode removed. Direct API calling has been superseded by MCP Sampling + Host AI's `samplingFn` injection.
 
 ### Auto mode resolution
 
-Priority order (highest → lowest): `mcp_sampling` (10) → `mcp_subagent` (15) → `direct_api` (20) → `orchestration` (30).
+Priority order (highest → lowest): `mcp_sampling` (10) → `mcp_subagent` (15) → `orchestration` (30).
 
 1. Checks mode in `skills/kevlar-config.json` (if set)
 2. Falls back to `KEVLAR_MODE` environment variable
@@ -328,7 +329,7 @@ Use `configure_wizard` to modify runtime preferences. Configuration is written t
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `KEVLAR_MODE` | `auto` | `auto`, `orchestration`, `mcp_subagent`, `mcp_sampling`, `direct_api` |
+| `KEVLAR_MODE` | `auto` | `auto`, `orchestration`, `mcp_subagent`, `mcp_sampling` |
 | `KEVLAR_MAX_CONCURRENT` | `3` | Max concurrent reviewers (L2/L3 modes) |
 | `KEVLAR_TOKEN_BUDGET_PER_TASK` | `50000` | Token budget per review task |
 | `KEVLAR_MIN_DELAY_MS` | `1000` | Minimum delay between requests |
@@ -487,7 +488,7 @@ kevlar-4u/
 │   │   └── modes/
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
-│   │       └── direct_api.ts
+│   │       └── subagent.ts
 │   ├── credential/                        # Pro: activation, license, sync, bundle cache
 │   │   ├── index.ts                       # AES-256-GCM credential store
 │   │   ├── activate.ts                    # Activation code → license
