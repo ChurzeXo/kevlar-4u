@@ -1290,8 +1290,8 @@ async function handleSubagentAuditResult(
 
     // ── Phase 2: LLM cross-validation (Step 6) for auto-aggregated slot results ──
     let dimensionsForSynergy = mergedDimensions;
-    const isAutoAggregated = !!(state as any).agentSlots?.received
-      && Object.keys((state as any).agentSlots.received).length > 0;
+    const isAutoAggregated = state.agentSlots
+      && Object.keys(state.agentSlots.received).length > 0;
     if (isAutoAggregated && samplingFn) {
       try {
         dimensionsForSynergy = await crossValidateRiskyDimensions(
@@ -1402,36 +1402,6 @@ async function handleSubagentAuditResult(
       ].join("\n"),
     );
   }
-}
-
-/** Build a fallback PreAuditReport when Step 8 LLM call fails */
-function buildFallbackReport(
-  dimensions: PreAuditDimensionResult[],
-  synergy: { triggered: string[]; overallMultiplier: number; levelUpgrades?: any[] },
-  deltaRisks: any,
-  parsed: any,
-  precedents?: Precedent[],
-): PreAuditReport {
-  // Apply synergy upgrades to dimensions
-  const dims = dimensions.map((d) => ({ ...d, findings: [...d.findings] }));
-  if (synergy?.levelUpgrades) {
-    for (const upgrade of synergy.levelUpgrades) {
-      const dim = dims.find((d: any) => d.id === upgrade.dimension);
-      if (dim && dim.level === upgrade.from) dim.level = upgrade.to;
-    }
-  }
-  return {
-    dimensions: dims,
-    summary: dims.some((d) => d.findings.length > 0)
-      ? `${dims.filter((d) => d.findings.length > 0).length}/${dims.length} 个维度存在风险发现`
-      : "全部维度通过",
-    riskProfile: parsed?.riskProfile ?? {},
-    synergyFlags: { triggered: synergy?.triggered ?? [], overallMultiplier: synergy?.overallMultiplier ?? 1, levelUpgrades: synergy?.levelUpgrades ?? [] },
-    deltaRisks,
-    attackChainAnalysis: "",
-    worstCaseNarrative: "",
-    precedents,
-  };
 }
 
 /**
@@ -2716,10 +2686,10 @@ function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolR
           `sessionId: ${state.sessionId}`,
           "workflow: review_content",
           `currentStep: ${state.step}`,
-          `targetPlatforms: ${state.targetPlatforms.join(", ") || "none"}`,
-          `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
-          `remainingPersonaIds: ${state.remainingPersonaIds.join(", ") || "none"}`,
-          `dimensions: defensive=${DEFENSIVE_DIMENSION_IDS.length}(system), offensive=${state.dimensions.offensive.length}`,
+          `targetPlatforms: ${(state.targetPlatforms ?? []).join(", ") || "none"}`,
+          `selectedPersonaIds: ${(state.selectedPersonaIds ?? []).join(", ") || "none"}`,
+          `remainingPersonaIds: ${(state.remainingPersonaIds ?? []).join(", ") || "none"}`,
+          `dimensions: defensive=${DEFENSIVE_DIMENSION_IDS.length}(system), offensive=${state.dimensions?.offensive?.length ?? 0}`,
           "```",
         ].join("\n"),
       },

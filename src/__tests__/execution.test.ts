@@ -1134,14 +1134,14 @@ describe("validateSingleAgentResult", () => {
     assert.ok(result.errors.some((e) => e.includes("status")));
   });
 
-  it("warns on unknown status value", () => {
+  it("errors on unknown status value", () => {
     const result = validateSingleAgentResult("agent-1", {
       agentId: "agent-1",
       status: "unknown",
       output: { findings: [] },
     });
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("未知的 status")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("status")));
   });
 
   it("accepts status: failed", () => {
@@ -1153,14 +1153,14 @@ describe("validateSingleAgentResult", () => {
     assert.ok(result.valid);
   });
 
-  it("falls back to result object when output is null", () => {
+  it("errors when findings is not an array", () => {
     const result = validateSingleAgentResult("agent-1", {
       agentId: "agent-1",
       status: "completed",
-      output: null,
+      output: { findings: "not-array" },
     });
-    assert.equal(result.valid, true); // fallback: uses entire result as output
-    assert.ok(result.warnings.some((w) => w.includes("findings")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("findings")));
   });
 
   it("warns when output.findings is not an array", () => {
@@ -1169,8 +1169,8 @@ describe("validateSingleAgentResult", () => {
       status: "completed",
       output: { findings: "not-array" },
     });
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("findings")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("findings")));
   });
 
   it("accepts alternate field names: id + result", () => {

@@ -14,7 +14,7 @@ import { isValidSessionId } from "../utils/sessionId.js";
 import { invalidInputError } from "../utils/errors.js";
 import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
-import { MAX_CONTINUATION_RETRIES, validateContinuationGate } from "../execution/index.js";
+import { MAX_CONTINUATION_RETRIES, validateContinuationGate, fallbackToStandardOrchestration } from "../execution/index.js";
 import {
   handleReviewContentWizard,
   type ReviewWizardInput,
@@ -280,32 +280,68 @@ export const reviewContentWizardContinueModule: ToolModule = {
       }
 
       if (activeContinuation.expiresAt < Date.now()) {
-        return {
-          content: [{ type: "text", text: "❌ 延续请求已过期，请重新发起审计。" }],
-          isError: true,
-        };
-      }
+        // Graceful degradation: expired continuation → fallback to L3 (§4.4)
+        fallbackToStandardOrchestration(state, "continuation_expired");
+        const tmpPath = statePath + ".tmp";
+        await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+        await fs.promises.rename(tmpPath, statePath);
 
-      // Retry limit: after 3 failed attempts, auto-degrade to avoid infinite loops
-      const retryCount = (activeContinuation.retryCount ?? 0) + 1;
-      activeContinuation.retryCount = retryCount;
-      if (retryCount > MAX_CONTINUATION_RETRIES) {
-        // Clean up state so user can restart
-        try { await fs.promises.unlink(statePath); } catch { /* ok */ }
+        const allPersonas = await loadAllPersonas(deps.skillsDir);
+        const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+        const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+        const stripped = state.orchestrationPreAuditContext?.stripped;
+        const promptText = ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(
+          state.content, localFindings, stripped,
+        );
+
         return {
           content: [{
             type: "text",
             text: [
-              `🛑 **已达最大重试次数（${MAX_CONTINUATION_RETRIES} 次）** — 会话已自动终止。`,
+              "⏰ **延续请求已过期** — 已自动降级到标准宿主编排模式。",
               "",
-              "可能的原因：",
-              "- 宿主 AI 连续返回格式不正确的 ExecutionReceipt",
-              "- Subagent 调度能力不足",
+              promptText,
               "",
-              "建议：重新发起评测流程。",
+              "---",
+              `会话 ID：${state.sessionId}`,
+              `预期版本：${state.revision}`,
+              `延续 ID：${state.activeContinuation?.continuationId}`,
             ].join("\n"),
           }],
-          isError: true,
+        };
+      }
+
+      // Retry limit: after 3 failed attempts, auto-degrade to L3 orchestration (§6.3)
+      const retryCount = (activeContinuation.retryCount ?? 0) + 1;
+      activeContinuation.retryCount = retryCount;
+      if (retryCount > MAX_CONTINUATION_RETRIES) {
+        fallbackToStandardOrchestration(state, "max_retries_exceeded");
+        const tmpPath = statePath + ".tmp";
+        await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+        await fs.promises.rename(tmpPath, statePath);
+
+        const allPersonas = await loadAllPersonas(deps.skillsDir);
+        const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+        const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+        const stripped = state.orchestrationPreAuditContext?.stripped;
+        const promptText = ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(
+          state.content, localFindings, stripped,
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `🛑 **已达最大重试次数（${MAX_CONTINUATION_RETRIES} 次）** — 已自动降级到标准宿主编排模式。`,
+              "",
+              promptText,
+              "",
+              "---",
+              `会话 ID：${state.sessionId}`,
+              `预期版本：${state.revision}`,
+              `延续 ID：${state.activeContinuation?.continuationId}`,
+            ].join("\n"),
+          }],
         };
       }
     }

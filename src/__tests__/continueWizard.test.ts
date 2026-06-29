@@ -230,7 +230,7 @@ describe("reviewContentWizardContinue — standard continuation checks (non-suba
     assert.ok(textOf(result).includes("Checkpoint 不匹配"));
   });
 
-  it("rejects when continuation has expired", async () => {
+  it("falls back to orchestration when continuation has expired", async () => {
     const sid = makeSessionId();
     writeStateFile(tmpDir, sid, baseState({
       sessionId: sid,
@@ -250,13 +250,14 @@ describe("reviewContentWizardContinue — standard continuation checks (non-suba
       continuationId: "cont-123",
     });
 
-    assert.equal(result.isError, true);
-    assert.ok(textOf(result).includes("延续请求已过期"));
+    assert.equal(result.isError, undefined); // gracefully degraded
+    assert.ok(textOf(result).includes("已过期"));
+    assert.ok(textOf(result).includes("已自动降级"));
   });
 });
 
 describe("reviewContentWizardContinue — retry limit exceeded", () => {
-  it("deletes state file and returns error after 3 retries", async () => {
+  it("falls back to orchestration after 3 retries instead of deleting state", async () => {
     const sid = makeSessionId();
     const sp = statePath(tmpDir, sid);
     writeStateFile(tmpDir, sid, baseState({
@@ -277,9 +278,10 @@ describe("reviewContentWizardContinue — retry limit exceeded", () => {
       continuationId: "cont-123",
     });
 
-    assert.equal(result.isError, true);
+    assert.equal(result.isError, undefined); // no error — gracefully degraded
     assert.ok(textOf(result).includes("已达最大重试次数"));
-    assert.ok(!fs.existsSync(sp), "state file should be deleted after max retries");
+    assert.ok(textOf(result).includes("已自动降级"), "should mention auto-degrade");
+    assert.ok(fs.existsSync(sp), "state file should persist after L3 fallback");
   });
 
   it("does NOT delete state file or return error on 2nd retry (below limit)", async () => {
@@ -832,5 +834,78 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     assert.equal(result.isError, undefined);
     const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
     assert.equal(s.agentSlots.received["agent-1"].status, "failed");
+  });
+
+  it("returns error when all agents failed (zero completed)", async () => {
+    const sid = makeSessionId();
+    // Pre-populate agent-1 as failed, submit agent-2 as failed → zero completed
+    writeStateFile(tmpDir, sid, proSlotState(sid, {
+      agentSlots: {
+        total: 2,
+        received: {
+          "agent-1": {
+            agentId: "agent-1",
+            status: "failed",
+            submittedAt: Date.now() - 10000,
+            output: { findings: [] },
+          },
+        },
+      },
+      revision: 2,
+    }));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 2,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-2",
+      receipt: { agentId: "agent-2", status: "failed", output: { findings: [] } },
+    });
+
+    assert.ok(result.isError);
+    assert.ok(textOf(result).includes("全部 agent 执行失败"), "should report all agents failed");
+  });
+
+  it("triggers partial auto-finalize when continuation expired with partial slots", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid, {
+      agentSlots: {
+        total: 2,
+        received: {
+          "agent-1": {
+            agentId: "agent-1",
+            status: "completed",
+            submittedAt: Date.now() - 10000,
+            output: { findings: [{ keyword: "risky" }] },
+          },
+        },
+      },
+      revision: 2,
+      activeContinuation: {
+        continuationId: `cont-slot-${sid}`,
+        checkpoint: "preaudit_completed",
+        expiresAt: Date.now() - 1, // already expired
+        retryCount: 0,
+      },
+    }));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 2,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-2",
+      receipt: { agentId: "agent-2", status: "completed", output: { findings: [] } },
+    });
+
+    // Should auto-finalize with partial results (not error)
+    assert.equal(result.isError, undefined);
+    const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
+    // After finalizeSlots, state should have incremented revision and cleared continuation
+    assert.ok(s.revision >= 3, "revision should be incremented after finalize");
+    assert.ok(!s.activeContinuation, "continuation should be cleared after finalize");
   });
 });

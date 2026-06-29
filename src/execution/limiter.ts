@@ -8,14 +8,20 @@ import { logger, getErrorInfo } from "../utils/observability.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
+function clampInt(envKey: string, fallback: number, min: number, max: number): number {
+  const raw = Number(process.env[envKey]);
+  if (isNaN(raw)) return fallback;
+  return Math.max(min, Math.min(max, raw));
+}
+
 interface RateLimitConfig {
   maxConcurrent: number;
   minDelayMs: number;
 }
 
 const DEFAULT_CONFIG: RateLimitConfig = {
-  maxConcurrent: Number(process.env.KEVLAR_MAX_CONCURRENT) || 3,
-  minDelayMs: Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000,
+  maxConcurrent: clampInt("KEVLAR_MAX_CONCURRENT", 3, 1, 10),
+  minDelayMs: Math.max(0, Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000),
 };
 
 // ── Semaphore ─────────────────────────────────────────────────────────────────
@@ -104,9 +110,9 @@ interface RetryConfig {
 }
 
 const DEFAULT_RETRY: RetryConfig = {
-  maxRetries: Number(process.env.KEVLAR_RETRY_MAX) || 3,
-  backoffMs: Number(process.env.KEVLAR_RETRY_BACKOFF_MS) || 1000,
-  backoffMultiplier: Number(process.env.KEVLAR_RETRY_BACKOFF_MULTIPLIER) || 2,
+  maxRetries: clampInt("KEVLAR_RETRY_MAX", 3, 0, 10),
+  backoffMs: Math.max(0, Number(process.env.KEVLAR_RETRY_BACKOFF_MS) || 1000),
+  backoffMultiplier: Math.max(1, Number(process.env.KEVLAR_RETRY_BACKOFF_MULTIPLIER) || 2),
 };
 
 export type RetryableErrorType =

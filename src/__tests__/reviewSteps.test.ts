@@ -17,6 +17,8 @@ import {
   normalizePreAuditDimensions,
   mergeLocalFindingsIntoAudits,
   computeDeltaAnalysis,
+  crossValidateRiskyDimensions,
+  finalizePreAuditReport,
   executeFullPipeline,
   stepStripContext,
   stepBareAudit,
@@ -353,5 +355,138 @@ describe("orchestrationFinal.resume", () => {
     assert.equal(result.output.dimensions.length, 1);
     assert.equal(result.output.summary, "Test summary");
     assert.equal(result.output.worstCaseNarrative, "Worst case");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8.2: Cross-validation LLM failure → skip pair (P1-3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("crossValidateRiskyDimensions — LLM failure handling", () => {
+  test("skips a pair when samplingFn throws, continues others", async () => {
+    const auditors = [
+      makePersona("network_culture_risk", "暗语破译"),
+      makePersona("context_distortion", "语境猎手"),
+    ];
+
+    // Failing samplingFn: throws on first call, succeeds on subsequent
+    let callCount = 0;
+    const samplingFn: AuditLlmCaller = async () => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error("LLM timeout");
+      }
+      return {
+        content: JSON.stringify({
+          findings: [{ keyword: "ok", status: "confirmed", reason: "looks fine" }],
+        }),
+      };
+    };
+
+    const phase1Results: PreAuditDimensionResult[] = [
+      { id: "network_culture_risk", name: "暗语破译", findings: [{ keyword: "bad" }], level: "🟡" },
+      { id: "context_distortion", name: "语境猎手", findings: [{ keyword: "risky" }], level: "🟡" },
+    ];
+
+    const result = await crossValidateRiskyDimensions(
+      "test content",
+      phase1Results,
+      auditors,
+      samplingFn,
+    );
+
+    // Should not throw; both pairs attempted
+    assert.ok(result.length >= 2);
+    assert.ok(callCount >= 2, "should have attempted multiple pairs");
+  });
+
+  test("returns phase1Results unchanged when no risky dimensions", async () => {
+    const auditors = [makePersona("legal_compliance", "合规哨兵")];
+    const samplingFn: AuditLlmCaller = async () => {
+      throw new Error("should not be called");
+    };
+
+    const phase1Results: PreAuditDimensionResult[] = [
+      { id: "legal_compliance", name: "合规哨兵", findings: [], level: "🟢" },
+    ];
+
+    const result = await crossValidateRiskyDimensions(
+      "test",
+      phase1Results,
+      auditors,
+      samplingFn,
+    );
+
+    assert.deepEqual(result, phase1Results);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §8.2: Final arbitration LLM failure → fallback summary (P1-4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("finalizePreAuditReport — LLM failure fallback", () => {
+  test("returns deterministic summary when caller throws", async () => {
+    const caller: AuditLlmCaller = async () => {
+      throw new Error("LLM API error");
+    };
+
+    const auditors = [
+      makePersona("social_risk", "社伦判官"),
+    ];
+
+    const crossValidated: PreAuditDimensionResult[] = [
+      { id: "social_risk", name: "社伦判官", findings: [{ keyword: "risky", suggestedLevel: "🟡" }], level: "🟡" },
+    ];
+
+    const synergy = {
+      triggered: ["测试协同"],
+      overallMultiplier: 2.0,
+      levelUpgrades: [{ dimension: "social_risk", from: "🟡", to: "🔴", reason: "test" }],
+    };
+
+    const report = await finalizePreAuditReport(
+      "test content",
+      [],
+      crossValidated,
+      crossValidated,
+      auditors,
+      caller,
+      synergy,
+    );
+
+    // Still produces a valid report via summarizeFallback
+    assert.ok(typeof report.summary === "string");
+    assert.ok(report.summary.length > 0);
+    assert.ok(report.dimensions.length > 0);
+
+    // Synergy level upgrades still applied
+    const dim = report.dimensions.find((d: any) => d.id === "social_risk");
+    assert.ok(dim);
+    assert.equal(dim.level, "🔴");
+  });
+
+  test("returns default summary when all dimensions pass", async () => {
+    const caller: AuditLlmCaller = async () => {
+      throw new Error("LLM down");
+    };
+
+    const auditors = [makePersona("legal_compliance", "合规哨兵")];
+    const crossValidated: PreAuditDimensionResult[] = [
+      { id: "legal_compliance", name: "合规哨兵", findings: [], level: "🟢" },
+    ];
+
+    const report = await finalizePreAuditReport(
+      "test",
+      [],
+      crossValidated,
+      crossValidated,
+      auditors,
+      caller,
+    );
+
+    assert.equal(report.summary, "全部维度通过");
+    assert.equal(report.dimensions.length, 1);
+    assert.equal(report.dimensions[0].level, "🟢");
   });
 });

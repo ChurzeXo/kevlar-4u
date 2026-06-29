@@ -286,10 +286,10 @@ export function runAggregationValidation(
   }
   checks.aggregationConsistent = aggregationConsistent;
 
-  // 4. 自适应分流兼容性
-  const requestedMode = blueprint?.execution?.mode || "ephemeral_agents";
-  const actualMode = receipt.execution?.actualMode || "orchestration_fallback";
-  const executionMismatch = requestedMode !== "ephemeral_agents" || (actualMode !== "native_subagent" && actualMode !== "simulated_agent");
+  // 4. 自适应分流兼容性：比较 blueprint 请求模式 vs receipt 实际执行模式
+  const requestedBlueMode = blueprint?.execution?.mode;
+  const actualExecMode = receipt.execution?.actualMode;
+  const executionMismatch = !!(requestedBlueMode && actualExecMode && requestedBlueMode !== actualExecMode);
   checks.executionMismatch = executionMismatch;
 
   // 5. 隔离安全惩罚
@@ -488,8 +488,8 @@ export function validateReceipt(receipt: any): ReceiptValidation {
       }
       if (!agent.status) {
         errors.push(`${prefix}: 缺少必填字段 "status" (应为 "completed" 或 "failed")`);
-      } else if (!["completed", "failed", "partial"].includes(agent.status)) {
-        warnings.push(`${prefix}: 未知的 status 值 "${agent.status}"`);
+      } else if (!["completed", "failed"].includes(agent.status)) {
+        warnings.push(`${prefix}: 未知的 status 值 "${agent.status}"（仅允许 "completed" / "failed"）`);
       }
       if (!agent.output) {
         errors.push(`${prefix}: 缺少必填字段 "output"`);
@@ -550,14 +550,14 @@ export function validateSingleAgentResult(
   if (!status) {
     errors.push('缺少必填字段 "status"');
   } else if (!["completed", "failed"].includes(status)) {
-    warnings.push(`未知的 status 值 "${status}"，视为失败`);
+    errors.push(`无效的 status 值 "${status}"，仅允许 "completed" 或 "failed"`);
   }
 
   const output = result.output || result.result || result;
   if (!output || typeof output !== "object") {
     errors.push('缺少必填字段 "output"');
   } else if (!Array.isArray(output.findings)) {
-    warnings.push('output.findings 不是数组，将使用空数组');
+    errors.push('output.findings 必须是数组');
   }
 
   return {

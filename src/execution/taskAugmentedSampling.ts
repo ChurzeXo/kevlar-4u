@@ -37,9 +37,9 @@ export async function executeTaskAugmentedSampling(
   timingContext?: string,
   maxConcurrency: number = 6,
 ): Promise<PreAuditDimensionResult[]> {
-  const DEFAULT_POLL_MS = Number(process.env.KEVLAR_TASK_POLL_MS) || 1000;
-  const TASK_TTL_MS = Number(process.env.KEVLAR_TASK_TTL_MS) || 300000;
-  const MAX_TOTAL_TIMEOUT_MS = Number(process.env.KEVLAR_TASK_TOTAL_TIMEOUT_MS) || 600000;
+  const DEFAULT_POLL_MS = Math.max(200, Number(process.env.KEVLAR_TASK_POLL_MS) || 1000);
+  const TASK_TTL_MS = Math.max(60000, Number(process.env.KEVLAR_TASK_TTL_MS) || 300000);
+  const MAX_TOTAL_TIMEOUT_MS = Math.max(120000, Number(process.env.KEVLAR_TASK_TOTAL_TIMEOUT_MS) || 600000);
 
   log.sampling.info("Starting task-augmented sampling", {
     event: "task_augmented_sampling_start",
