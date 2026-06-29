@@ -6,6 +6,7 @@
 
 import { loadAllPersonas, loadPersonasByIds, Persona } from "../utils/parser.js";
 import { log } from "../utils/logCategories.js";
+import { writeRawStderr } from "../utils/logger.js";
 import { invalidInputError, validationError } from "../utils/errors.js";
 import { readConfig, isValidMode } from "./config.js";
 import { getClientFingerprint, getHostExecutionCapability, isTaskAugmentedSamplingSupported, isSamplingSupported } from "./client.js";
@@ -206,16 +207,14 @@ export function resolveExecutionPlan(
   else {
     resolutionSource = "auto";
 
-    const taskAugEnabled = process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0";
-
-    // L1: Task-augmented sampling (true parallel) — requires explicit opt-in
-    if (taskAugEnabled && isTaskAugmentedSamplingSupported()) {
+    // L1: Task-augmented sampling (true parallel)
+    if (isTaskAugmentedSamplingSupported()) {
       result = {
         plan: { backend: "sampling_task_augmented" },
         legacyMode: "mcp_sampling",
       };
-      log.config.info("Auto-resolved to task-augmented sampling", {
-        event: "execution_plan_resolved",
+      log.config.debug("Auto-resolved to task-augmented sampling", {
+        event: "sampling_task_augmented_detected",
         backend: "sampling_task_augmented",
       });
     }
@@ -226,8 +225,8 @@ export function resolveExecutionPlan(
         plan: { backend: "sampling_serial" },
         legacyMode: "mcp_sampling",
       };
-      log.config.info("Auto-resolved to serial MCP sampling", {
-        event: "execution_plan_resolved",
+      log.config.debug("Auto-resolved to serial MCP sampling", {
+        event: "sampling_serial_detected",
         backend: "sampling_serial",
       });
     }
@@ -266,14 +265,28 @@ export function resolveExecutionPlan(
     }
   }
 
-  log.config.info("Execution plan resolved", {
-    event: "execution_plan_resolved",
+  const resolvedMode = result.legacyMode;
+  const requestedMode = config.mode && config.mode !== "auto"
+    ? config.mode
+    : process.env.KEVLAR_MODE ?? "auto";
+  log.config.info("Mode resolved", {
+    event: "mode_resolved",
+    requested: requestedMode,
+    resolved: resolvedMode,
+    reason: resolutionSource,
     backend: result.plan.backend,
     strategy: "strategy" in result.plan ? result.plan.strategy : undefined,
-    resolutionSource,
     taskClass: result.plan.backend === "host_orchestration" ? taskClass : undefined,
     clientFingerprint: { name: fingerprint?.name, version: fingerprint?.version },
   });
+
+  writeRawStderr(
+    `[Kevlar-4u] 🎯 Backend: ${result.plan.backend}` +
+    ("strategy" in result.plan && result.plan.strategy ? ` (${result.plan.strategy})` : "") +
+    ` | client: sampling=${isSamplingSupported() ? "✅" : "❌"}` +
+    ` taskAug=${isTaskAugmentedSamplingSupported() ? "✅" : "❌"}` +
+    ` | source: ${resolutionSource}`,
+  );
 
   return result;
 }
@@ -312,8 +325,7 @@ export function getModesInfo(): ModesInfo {
   });
 
   // Add MCP sampling modes based on capability detection
-  const taskAugEnabled = process.env.KEVLAR_ENABLE_TASK_AUGMENTED !== "0";
-  const hasTaskAug = taskAugEnabled && isTaskAugmentedSamplingSupported();
+  const hasTaskAug = isTaskAugmentedSamplingSupported();
   const hasSampling = isSamplingSupported();
 
   modes.push({

@@ -107,12 +107,11 @@
     "modes": {
       "auto": "自动模式（推荐）",
       "orchestration": "宿主辅助兜底模式",
-      "mcp_sampling": "MCP 采样模式",
-      "direct_api": "直接 API 模式"
+      "mcp_sampling": "MCP 采样模式"
     }
   },
   "getModes": {
     "title": "查看执行模式",
-    "description": "查询宿主辅助兜底、MCP 采样、直接 API 三种执行模式的可用性及当前配置状态。"
+    "description": "查询宿主辅助兜底、MCP 采样等执行模式的可用性及当前配置状态。"
   }
 }

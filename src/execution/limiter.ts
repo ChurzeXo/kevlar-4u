@@ -251,7 +251,7 @@ export class CircuitBreaker {
   check(): void {
     if (this.isOpen()) {
       throw new CircuitBreakerOpenError(
-        "Direct API circuit breaker is open — failure rate exceeds threshold. Downgrading to orchestration mode."
+        "Circuit breaker is open — failure rate exceeds threshold. Downgrading to orchestration mode."
       );
     }
   }

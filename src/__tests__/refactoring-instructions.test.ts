@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createKevlarServer } from "../server.js";
+import { createKevlarServer, _resetServerInitializedForTest } from "../server.js";
 import {
   TOOL_DESCRIPTION,
   buildFinalRenderInstructions,
@@ -36,6 +36,7 @@ function copyTemplatesTo(tmpDir: string): void {
 }
 
 beforeEach(() => {
+  _resetServerInitializedForTest();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-refactor-"));
   copyTemplatesTo(tmpDir);
   process.env.KEVLAR_SKILLS_DIR = tmpDir;
@@ -133,7 +134,7 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
 
     it("buildPreAuditFinalizerPrompt does NOT include rendering instructions", () => {
       const prompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
-      assert.ok(!prompt.includes("排版与输出协议"), "Direct API/Sampling finalizer should NOT include rendering instructions");
+      assert.ok(!prompt.includes("排版与输出协议"), "Sampling finalizer should NOT include rendering instructions");
     });
   });
 
@@ -148,17 +149,17 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
         undefined,
         FREE_SEGMENTS,
       );
-      const directApiPrompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
+      const samplingPrompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
 
       const commonRules = buildCommonRiskRules();
       assert.ok(orchestrationPrompt.includes(commonRules), "Orchestration finalizer should include common risk rules");
-      assert.ok(directApiPrompt.includes(commonRules), "Direct API/Sampling finalizer should include common risk rules");
+      assert.ok(samplingPrompt.includes(commonRules), "Sampling finalizer should include common risk rules");
     });
 
-    it("Direct API/Sampling finalizer includes core reasoning framework for semantic parity", () => {
-      const directApiPrompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
+    it("Sampling finalizer includes core reasoning framework for semantic parity", () => {
+      const samplingPrompt = buildPreAuditFinalizerPrompt([], undefined, FREE_SEGMENTS);
       const coreFramework = buildCoreReasoningFramework();
-      assert.ok(directApiPrompt.includes(coreFramework), "Direct API/Sampling finalizer should include core reasoning framework");
+      assert.ok(samplingPrompt.includes(coreFramework), "Sampling finalizer should include core reasoning framework");
     });
   });
 });

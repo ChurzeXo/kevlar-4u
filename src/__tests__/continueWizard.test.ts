@@ -630,3 +630,207 @@ describe("reviewContentWizardContinue — edge cases", () => {
     assert.ok(!result.isError || t.includes("会话 ID"), "should return fallback prompt");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slot-based per-agent submission tests (§4.5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("reviewContentWizardContinue — slot-based agent submission", () => {
+  function proSlotState(sessionId: string, overrides: Record<string, unknown> = {}) {
+    const agentIds = ["agent-1", "agent-2"];
+    return baseState({
+      sessionId,
+      step: "waitingForSubagentAudit",
+      revision: 1,
+      tier: "pro",
+      blueprint: {
+        protocol: "kevlar.exec/v1",
+        agents: agentIds.map((id) => ({ id, role: "safety_reviewer" })),
+        continuation: {
+          agentSlots: {
+            total: 2,
+            agentIds,
+            allowPartialSubmit: true,
+          },
+        },
+      },
+      activeContinuation: {
+        continuationId: `cont-slot-${sessionId}`,
+        checkpoint: "preaudit_completed",
+        expiresAt: Date.now() + 600000,
+        retryCount: 0,
+      },
+      ...overrides,
+    });
+  }
+
+  function proSlotDeps() {
+    return makeDeps({
+      strategyProvider: {
+        getEntitlement: async () => "pro" as const,
+        getReviewPlan: async () => ({
+          tier: "pro" as const,
+          steps: ["system_audit"],
+          visibility: { preAuditDetails: "full" as const, upgradePrompt: "disabled" as const },
+          strategySessionId: "test-session",
+          strategyVersion: "1.0",
+          strategyHash: "abc123",
+        }),
+        getWeights: async () => ({ rules: [] }),
+        getSynergyRules: () => [],
+        getIsolationMode: () => "process" as const,
+      },
+    });
+  }
+
+  it("rejects agentId for Free tier", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid, { tier: "free" }));
+
+    const handler = reviewContentWizardContinueModule.handler(makeDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-1",
+      receipt: { agentId: "agent-1", status: "completed", output: { findings: [{ keyword: "risky" }] } },
+    });
+
+    assert.ok(result.isError);
+    assert.ok(textOf(result).includes("仅限 Pro"));
+  });
+
+  it("rejects invalid continuationId format in slot path", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+      continuationId: "BAD!ID",
+      agentId: "agent-1",
+      receipt: { agentId: "agent-1", status: "completed", output: { findings: [] } },
+    });
+
+    assert.ok(result.isError);
+    assert.ok(textOf(result).includes("格式不合法"));
+  });
+
+  it("rejects invalid agentId format", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "bad agent!",
+      receipt: { agentId: "bad agent!", status: "completed", output: { findings: [] } },
+    });
+
+    assert.ok(result.isError);
+    assert.ok(textOf(result).includes("agentId 格式不合法"));
+  });
+
+  it("rejects unknown agentId not in blueprint", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-99",
+      receipt: { agentId: "agent-99", status: "completed", output: { findings: [] } },
+    });
+
+    assert.ok(result.isError);
+    assert.ok(textOf(result).includes("未知的 agentId"));
+  });
+
+  it("accepts first slot and returns progress with expectedRevision", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-1",
+      receipt: { agentId: "agent-1", status: "completed", output: { findings: [{ keyword: "risky" }] } },
+    });
+
+    assert.equal(result.isError, undefined); // not an error
+    const t = textOf(result);
+    assert.ok(t.includes("已收到 agent"), "should confirm receipt");
+    assert.ok(t.includes("expectedRevision"), "should include expectedRevision for next call");
+
+    // Verify state was updated: revision incremented, slot populated
+    const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
+    assert.ok(s.revision >= 2, "revision should be incremented");
+    assert.ok(s.agentSlots, "agentSlots should exist");
+    assert.ok(s.agentSlots.received["agent-1"], "slot should contain agent-1 result");
+    assert.equal(s.agentSlots.received["agent-1"].status, "completed");
+  });
+
+  it("allows overwrite on repeated slot submission", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, {
+      ...proSlotState(sid),
+      revision: 2,
+      agentSlots: {
+        total: 2,
+        received: {
+          "agent-1": {
+            agentId: "agent-1",
+            status: "completed",
+            submittedAt: Date.now() - 10000,
+            output: { findings: [{ keyword: "old" }] },
+          },
+        },
+      },
+    });
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 2,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-1",
+      receipt: { agentId: "agent-1", status: "completed", output: { findings: [{ keyword: "new" }] },
+      },
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(textOf(result).includes("覆盖先前提交"), "should indicate overwrite");
+  });
+
+  it("accepts agents with status: failed (not used in aggregation)", async () => {
+    const sid = makeSessionId();
+    writeStateFile(tmpDir, sid, proSlotState(sid));
+
+    const handler = reviewContentWizardContinueModule.handler(proSlotDeps());
+    const result = await handler({
+      sessionId: sid,
+      checkpoint: "preaudit_completed",
+      expectedRevision: 1,
+      continuationId: `cont-slot-${sid}`,
+      agentId: "agent-1",
+      receipt: { agentId: "agent-1", status: "failed", output: { findings: [] } },
+    });
+
+    assert.equal(result.isError, undefined);
+    const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
+    assert.equal(s.agentSlots.received["agent-1"].status, "failed");
+  });
+});

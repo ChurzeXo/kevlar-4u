@@ -2,6 +2,7 @@
  * Continuation Tool (v3)
  *
  * Provides a safe, versioned submission channel for host orchestration results.
+ * Supports both batch (full receipt) and Pro per-agent slot-based submission.
  */
 
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -14,8 +15,15 @@ import { invalidInputError } from "../utils/errors.js";
 import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
 import { MAX_CONTINUATION_RETRIES, validateContinuationGate } from "../execution/index.js";
-import { handleReviewContentWizard, type ReviewWizardInput, ORCHESTRATION_AUDIT_GUIDANCE, ORCHESTRATION_STEP0_GUIDANCE } from "./reviewContentWizardTool.js";
+import {
+  handleReviewContentWizard,
+  type ReviewWizardInput,
+  ORCHESTRATION_AUDIT_GUIDANCE,
+  ORCHESTRATION_STEP0_GUIDANCE,
+  buildSyntheticReceipt,
+} from "./reviewContentWizardTool.js";
 import { buildOrchestrationAuditPrompt, buildOrchestrationStep0Prompt } from "../prompts/reviewWizard.js";
+import { validateSingleAgentResult } from "../execution/protocol.js";
 
 // ── Tool Definition ───────────────────────────────────────────────────────────
 
@@ -24,7 +32,8 @@ export const reviewContentWizardContinueDefinition: Tool = {
   description:
     "提交宿主编排执行结果并继续审计流程。" +
     "与 review_content_wizard 不同，此工具使用 session checkpoint + revision 协议确保结果一致性，" +
-    "防止旧回合覆盖新状态。当 Kevlar 返回 continuation contract 时，必须使用此工具提交结果。",
+    "防止旧回合覆盖新状态。当 Kevlar 返回 continuation contract 时，必须使用此工具提交结果。" +
+    "Pro 用户可通过 agentId 逐 agent 提交结果，Kevlar 自动聚合。",
 
   inputSchema: {
     type: "object",
@@ -61,6 +70,13 @@ export const reviewContentWizardContinueDefinition: Tool = {
         type: "object",
         description: "符合 kevlar.exec/v1 协议的 ExecutionReceipt 结构体",
       },
+      agentId: {
+        type: "string",
+        description:
+          "Pro only: agent ID for per-agent slot submission. " +
+          "When present, Kevlar saves the result to the agent slot and auto-aggregates when all slots filled. " +
+          "Must match an agentId from the blueprint's agentSlots.agentIds.",
+      },
     },
     required: ["sessionId", "checkpoint", "expectedRevision", "continuationId"],
   },
@@ -79,6 +95,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
     const continuationId = args.continuationId as string;
     const result = args.result as string | undefined;
     const receiptInput = args.receipt as any;
+    const agentId = args.agentId as string | undefined;
 
     if (!sessionId || typeof sessionId !== "string") {
       return {
@@ -94,7 +111,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
       };
     }
 
-    // Load wizard state
+    // ── Load wizard state ──────────────────────────────────────────────────
     const statePath = path.join(deps.tmpDir, `${sessionId}_review_wizard.json`);
     let state: any;
     try {
@@ -107,7 +124,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
       };
     }
 
-    // Parse receipt if in subagent audit phase
+    // Parse receipt if in string form
     let receipt = receiptInput;
     if (!receipt && result) {
       try {
@@ -117,6 +134,14 @@ export const reviewContentWizardContinueModule: ToolModule = {
       }
     }
 
+    // ── Pro: Slot-based per-agent submission ─────────────────────────────
+    if (agentId) {
+      return await handleAgentSlot(
+        deps, state, statePath, sessionId, expectedRevision, continuationId, agentId, receipt, result,
+      );
+    }
+
+    // ── Standard batch submission (full receipt) ─────────────────────────
     // ── validateContinuationGate Integration ───────────────────────────────
     if (state.step === "waitingForSubagentAudit" || state.step === "waitingForPersonaAudit") {
       try {
@@ -153,7 +178,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
           const allPersonas = await loadAllPersonas(deps.skillsDir);
           const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
           let promptText = "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。\n";
-          
+
           if (state.step === "waitingForOrchestrationAudit") {
             promptText += ORCHESTRATION_AUDIT_GUIDANCE + buildOrchestrationAuditPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext);
           } else {
@@ -180,6 +205,15 @@ export const reviewContentWizardContinueModule: ToolModule = {
         };
       }
     } else {
+      // ContinuationId format validation (§7.1)
+      const CONTINUATION_ID_RE = /^[a-z0-9-]+$/;
+      if (typeof continuationId !== "string" || !CONTINUATION_ID_RE.test(continuationId)) {
+        return {
+          content: [{ type: "text", text: `❌ continuationId 格式不合法: "${continuationId}"。仅允许 [a-z0-9-]+` }],
+          isError: true,
+        };
+      }
+
       // Standard/Legacy Continuation Checks (fallback steps)
       if (typeof state.revision !== "number") {
         state.revision = 1;
@@ -295,3 +329,314 @@ export const reviewContentWizardContinueModule: ToolModule = {
     return await handleReviewContentWizard(deps.skillsDir, deps.tmpDir, wizardInput);
   },
 };
+
+// ── Slot-Based Per-Agent Submission Handler (Pro) ───────────────────────────
+
+async function handleAgentSlot(
+  deps: ToolDependencies,
+  state: any,
+  statePath: string,
+  sessionId: string,
+  expectedRevision: number,
+  continuationId: string,
+  agentId: string,
+  receipt: any,
+  result: string | undefined,
+): Promise<ToolResult> {
+  // ── Step check ──────────────────────────────────────────────────────────
+  if (state.step !== "waitingForSubagentAudit") {
+    return {
+      content: [{
+        type: "text",
+        text: `❌ 当前步骤不支持逐 agent 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 步骤可用。`,
+      }],
+      isError: true,
+    };
+  }
+
+  // ── Tier check (Pro only) ───────────────────────────────────────────────
+  if (state.tier !== "pro") {
+    return {
+      content: [{ type: "text", text: "❌ 逐 agent 提交仅限 Pro 用户。请使用 batch 方式（全量 receipt）提交。" }],
+      isError: true,
+    };
+  }
+
+  // ── Continuation validation (Gates 1 & 2 only: revision + continuationId) ─
+  // continuationId format validation (§7.1)
+  const CONT_SLOT_ID_RE = /^[a-z0-9-]+$/;
+  if (typeof continuationId !== "string" || !CONT_SLOT_ID_RE.test(continuationId)) {
+    return {
+      content: [{ type: "text", text: `❌ continuationId 格式不合法。仅允许 [a-z0-9-]+` }],
+      isError: true,
+    };
+  }
+
+  // For slot-based submissions, state.revision increments on each write (§4.5).
+  // Accept any submission where continuationId matches and the host's
+  // expectedRevision is >= the blueprint's original revision.
+  const blueprintRevision = state.activeContinuation?._blueprintRevision
+    ?? state.activeContinuation?.expectedRevisionOverride
+    ?? expectedRevision;
+  if (expectedRevision < blueprintRevision) {
+    return {
+      content: [{
+        type: "text",
+        text: [
+          "⛔ **Stale Continuation** — revision 落后于蓝图版本。",
+          `当前蓝图版本: ${blueprintRevision}, 提交版本: ${expectedRevision}`,
+          "请使用蓝图返回的 expectedRevision。",
+        ].join("\n"),
+      }],
+      isError: true,
+    };
+  }
+
+  if (!state.activeContinuation || state.activeContinuation.continuationId !== continuationId) {
+    return {
+      content: [{
+        type: "text",
+        text: "⛔ **Continuation ID 不匹配**",
+      }],
+      isError: true,
+    };
+  }
+
+  // ── Continuation expiry → slot deadline auto-finalize ────────────────────
+  const isExpired = state.activeContinuation.expiresAt < Date.now();
+
+  // ── Agent ID format validation (§7.1) ─────────────────────────────────────
+  const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
+  if (!AGENT_ID_RE.test(agentId)) {
+    return {
+      content: [{
+        type: "text",
+        text: `❌ agentId 格式不合法: "${agentId}"。仅允许 [a-zA-Z0-9_-]+`,
+      }],
+      isError: true,
+    };
+  }
+
+  // ── Agent ID validation ──────────────────────────────────────────────────
+  const blueprint = (state as any).blueprint;
+  const expectedAgentIds: string[] = blueprint?.continuation?.agentSlots?.agentIds ?? [];
+  if (expectedAgentIds.length > 0 && !expectedAgentIds.includes(agentId)) {
+    return {
+      content: [{
+        type: "text",
+        text: `❌ 未知的 agentId "${agentId}"。期望: ${expectedAgentIds.join(", ")}`,
+      }],
+      isError: true,
+    };
+  }
+
+  // ── Parse slot result ────────────────────────────────────────────────────
+  let parsedResult: any = receipt;
+  if (!parsedResult && result) {
+    try {
+      parsedResult = JSON.parse(result.trim());
+    } catch { /* null */ }
+  }
+
+  if (!parsedResult || typeof parsedResult !== "object") {
+    return {
+      content: [{ type: "text", text: "❌ Agent 结果必须是有效的 JSON 对象（通过 receipt 或 result 字段）。" }],
+      isError: true,
+    };
+  }
+
+  // ── Validate single agent result ─────────────────────────────────────────
+  const validation = validateSingleAgentResult(agentId, parsedResult);
+  if (!validation.valid) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: [
+            "❌ **Agent 结果格式错误**",
+            "",
+            ...validation.errors.map((e: string) => `- ${e}`),
+            ...(validation.warnings.length > 0 ? ["", "⚠️ 警告:"] : []),
+            ...validation.warnings.map((w: string) => `- ${w}`),
+          ].join("\n"),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  // ── Write to slot ────────────────────────────────────────────────────────
+  const total = blueprint?.continuation?.agentSlots?.total ?? expectedAgentIds.length;
+  if (!state.agentSlots) {
+    state.agentSlots = { total, received: {} };
+  }
+
+  // Re-submission check — warn but allow overwrite
+  const isResubmit = !!state.agentSlots.received[agentId];
+  if (!isResubmit && Object.keys(state.agentSlots.received).length >= total) {
+    // Edge case: slot already full
+    return {
+      content: [{
+        type: "text",
+        text: `⚠️ 所有 ${total} 个 agent 槽位已满，无法提交更多结果。`,
+      }],
+      isError: true,
+    };
+  }
+
+  const outputFindings = parsedResult.output?.findings
+    || parsedResult.result?.findings
+    || parsedResult.findings
+    || [];
+  const outputOutput = parsedResult.output || parsedResult.result || {};
+  const status = parsedResult.status || "completed";
+
+  state.agentSlots.received[agentId] = {
+    agentId,
+    status,
+    submittedAt: Date.now(),
+    output: {
+      findings: Array.isArray(outputFindings) ? outputFindings : [],
+      reasoning: outputOutput.reasoning || parsedResult.reasoning || "",
+    },
+  };
+
+  // §4.5: Increment revision on each slot write for audit trail
+  state.revision = (state.revision ?? 0) + 1;
+  // Preserve the original blueprint revision so subsequent submissions can
+  // reference any revision >= the blueprint's baseline.
+  if (state.activeContinuation && !state.activeContinuation._blueprintRevision) {
+    state.activeContinuation._blueprintRevision = expectedRevision;
+  }
+
+  // ── Check if all slots filled ────────────────────────────────────────────
+  const receivedIds = new Set(Object.keys(state.agentSlots.received));
+  const allFilled = expectedAgentIds.length > 0
+    && expectedAgentIds.every((id: string) => receivedIds.has(id));
+
+  // Compute completed vs failed counts
+  const receivedSlots = Object.values(state.agentSlots.received) as any[];
+  const completedCount = receivedSlots.filter((s: any) => s.status === "completed").length;
+  const failedCount = receivedSlots.filter((s: any) => s.status !== "completed").length;
+
+  // Save state after slot write
+  const tmpPath = statePath + ".tmp";
+  await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.promises.rename(tmpPath, statePath);
+
+  // ── Phase 4: Slot deadline auto-finalize ─────────────────────────────────
+  // If the continuation has expired, force partial aggregation with
+  // whatever results are available (accepted agents only).
+  if (isExpired && !allFilled) {
+    return await finalizeSlots(deps, state, statePath, sessionId, total, completedCount, agentId);
+  }
+
+  if (!allFilled) {
+    const remaining = expectedAgentIds.filter((id: string) => !receivedIds.has(id));
+    const progressParts: string[] = [
+      `✅ 已收到 agent **"${agentId}"** 的审计结果。`,
+    ];
+    if (isResubmit) progressParts.push("（覆盖先前提交的结果）");
+    if (failedCount > 0) {
+      progressParts.push(`完成: ${completedCount}/${total}, 失败: ${failedCount}/${total}`);
+    } else {
+      progressParts.push(`进度: ${receivedIds.size}/${total} 个 agent 已提交。`);
+    }
+    if (remaining.length > 0) {
+      progressParts.push(`等待: ${remaining.join(", ")}`);
+    }
+    progressParts.push(
+      "",
+      "使用相同的 sessionId, checkpoint, continuationId",
+      `expectedRevision: ${state.revision}`,
+      "继续提交其他 agent 结果。",
+    );
+    return {
+      content: [{ type: "text", text: progressParts.join("\n") }],
+    };
+  }
+
+  // ── All slots filled — check if any completed ────────────────────────────
+  if (completedCount === 0) {
+    return {
+      content: [{
+        type: "text",
+        text: [
+          "❌ **全部 agent 执行失败，无法聚合。**",
+          "",
+          `共 ${total} 个 agent，全部返回 status: "failed"。`,
+          "请检查内容或宿主环境后重试。",
+        ].join("\n"),
+      }],
+      isError: true,
+    };
+  }
+
+  // ── All slots filled (or expired + partial) — auto-aggregate ─────────────
+  return await finalizeSlots(deps, state, statePath, sessionId, total, completedCount, agentId);
+}
+
+/**
+ * Build synthetic receipt from available slot results and route through wizard.
+ */
+async function finalizeSlots(
+  deps: ToolDependencies,
+  state: any,
+  statePath: string,
+  sessionId: string,
+  total: number,
+  completedCount: number,
+  lastAgentId: string,
+): Promise<ToolResult> {
+  if (completedCount === 0) {
+    return {
+      content: [{
+        type: "text",
+        text: [
+          "❌ **没有可用的 agent 结果，无法聚合。**",
+          "",
+          `共 ${total} 个 agent，全部返回 status: "failed" 或未提交。`,
+          "请检查内容或宿主环境后重试。",
+        ].join("\n"),
+      }],
+      isError: true,
+    };
+  }
+
+  const allPersonas = await loadAllPersonas(deps.skillsDir);
+  const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+
+  let syntheticReceipt: any;
+  try {
+    syntheticReceipt = buildSyntheticReceipt(
+      state.agentSlots.received,
+      systemAuditors,
+    );
+  } catch (err: any) {
+    return {
+      content: [{
+        type: "text",
+        text: `❌ 自动聚合失败：${err.message}`,
+      }],
+      isError: true,
+    };
+  }
+
+  // Finalize: increment revision, clear continuation
+  state.revision += 1;
+  state.activeContinuation = undefined;
+  const finalTmpPath = statePath + ".tmp";
+  await fs.promises.writeFile(finalTmpPath, JSON.stringify(state, null, 2), "utf-8");
+  await fs.promises.rename(finalTmpPath, statePath);
+
+  // Route through wizard for auto-processing (mergeLocalFindingsIntoAudits + calculateSynergy)
+  const wizardInput: ReviewWizardInput = {
+    sessionId,
+    userMessage: JSON.stringify(syntheticReceipt),
+    samplingFn: deps.resolveSamplingFn(),
+    sendProgress: deps.sendProgress,
+    strategyProvider: deps.strategyProvider,
+  };
+
+  return await handleReviewContentWizard(deps.skillsDir, deps.tmpDir, wizardInput);
+}

@@ -107,12 +107,11 @@
     "modes": {
       "auto": "Auto mode (Recommended)",
       "orchestration": "Host-assisted fallback mode",
-      "mcp_sampling": "MCP Sampling mode",
-      "direct_api": "Direct API mode"
+      "mcp_sampling": "MCP Sampling mode"
     }
   },
   "getModes": {
     "title": "View Execution Modes",
-    "description": "Query availability and current configuration status of host-assisted fallback, MCP sampling, and direct API execution modes."
+    "description": "Query availability and current configuration status of host-assisted fallback, MCP sampling, and subagent dispatch execution modes."
   }
 }

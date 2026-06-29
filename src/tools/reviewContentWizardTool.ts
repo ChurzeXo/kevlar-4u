@@ -41,7 +41,7 @@ import {
   type Step0Result,
 } from "../prompts/reviewWizard.js";
 import { isSamplingSupported } from "../execution/client.js";
-import { validateReceipt } from "../execution/protocol.js";
+import { validateReceipt, fallbackToStandardOrchestration } from "../execution/protocol.js";
 import {
   resolveExecutionPlan,
   type ExecutionPlan,
@@ -234,6 +234,11 @@ interface ReviewWizardState {
   targetRegions?: string[];  // 推广目标地区 ["zh-CN", "en-US", ...]
   strategySessionId?: string;
   strategyHash?: string;
+  // Pro: slot-based per-agent result tracking (003)
+  agentSlots?: {
+    total: number;
+    received: Record<string, import("../execution/protocol.js").AgentSlotResult>;
+  };
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
   orchestrationTurn2Results?: {
     // Turn 2 审计结果，用于 Turn 3 的中间状态
@@ -265,6 +270,26 @@ export const reviewContentWizardModule: ToolModule = {
 };
 
 // ── v3: Continuation Contract Helper ───────────────────────────────────────────
+
+/**
+ * Transition the wizard state to a new step and emit the required
+ * state_transition log event for audit traceability (§6.3).
+ */
+function transitionState(
+  state: ReviewWizardState,
+  nextStep: ReviewWizardStep,
+  reason: string,
+): void {
+  const prevStep: string = (state as any).step ?? "idle";
+  state.step = nextStep;
+  logger.info("State transition", {
+    event: "state_transition",
+    from: prevStep,
+    to: nextStep,
+    reason,
+    sessionId: state.sessionId,
+  });
+}
 
 /**
  * Set up a continuation contract on the wizard state.
@@ -362,7 +387,7 @@ export async function handleReviewContentWizard(
 
     // Free tier: skip system audit, go to persona selection
     if (isFreeTier && state.step === "systemAudit") {
-      state.step = "checkPersonaInventory";
+      transitionState(state, "checkPersonaInventory", "free_tier_skip_preaudit");
       await saveState(tmpDir, state);
     }
 
@@ -522,7 +547,7 @@ async function handleRegionSelection(
 
   // Accept region input (only when user explicitly provides region keywords)
   state.targetRegions = parsedRegions.length > 0 ? parsedRegions : ["global"];
-  state.step = "systemAudit";
+  transitionState(state, "systemAudit", "region_selection_completed");
   return { stepAdvanced: true } as any;
 }
 
@@ -602,7 +627,7 @@ async function handleSystemAudit(
   if (plan?.backend === "host_orchestration" && plan.strategy === "structured") {
     const stripped = stripContext(state.content);
     state.orchestrationPreAuditContext = { localFindings, stripped };
-    state.step = "waitingForSubagentAudit";
+    transitionState(state, "waitingForSubagentAudit", "structured_blueprint_dispatch");
     setContinuation(state, "waitingForSubagentAudit", "preaudit_completed");
 
     const prompts = await resolvePromptSegments();
@@ -611,14 +636,58 @@ async function handleSystemAudit(
 
     await saveState(tmpDir, state);
 
+    const isProTier = state.tier === "pro";
+
+    const perAgentGuidance = isProTier
+      ? [
+          "",
+          "### Pro option: submit per-agent results individually",
+          "If your environment can submit results as each agent completes:",
+          "1. Execute each agent independently",
+          "2. For each completed agent, call `review_content_wizard_continue` with:",
+          "   - The same sessionId, checkpoint, expectedRevision, continuationId",
+          `   - \`agentId\`: the agent's ID (e.g., \`${(blueprint.agents[0] as any)?.id || "legal_compliance"}\`)`,
+          "   - `result`: a JSON object with the agent's findings (agentId + status + output)",
+          "3. Kevlar will auto-aggregate when all agents have reported",
+          "",
+        ].join("\n")
+      : "";
+
+    const blueprintText = [
+      "## Kevlar-4u Subagent Dispatch Request",
+      "",
+      "I need you to audit the following content across multiple dimensions.",
+      "Create independent subagents for each agent, executing in parallel",
+      "with isolated context.",
+      "",
+      "### If you can execute subagent dispatch (batch)",
+      "1. Read each agent definition in the AgentBlueprint below",
+      "2. Create a subagent for each agent and execute the review independently",
+      "3. Aggregate all results into a single ExecutionReceipt (per kevlar.exec/v1)",
+      "4. Call `review_content_wizard_continue` with the receipt",
+      "   (include sessionId, checkpoint, expectedRevision from the blueprint)",
+      perAgentGuidance,
+      "### If you CANNOT execute subagent dispatch",
+      "(e.g., your environment doesn't support parallel subagents)",
+      "→ Call `review_content_wizard` again with `userMessage: \"SEQUENTIAL_FALLBACK\"`",
+      "  I will switch to standard host orchestration mode automatically.",
+      "",
+      "---",
+      "### AgentBlueprint",
+      "",
+      "```json",
+      JSON.stringify(blueprint, null, 2),
+      "```",
+    ].join("\n");
+
     return {
-      content: [{ type: "text", text: JSON.stringify(blueprint, null, 2) }],
+      content: [{ type: "text", text: blueprintText }],
     };
   }
 
   // Standard Fallback: host AI performs Step 0b (decoding) + web search
   const stripped = stripContext(state.content);
-  state.step = "waitingForOrchestrationStep0";
+  transitionState(state, "waitingForOrchestrationStep0", "standard_orchestration_fallback");
   state.orchestrationPreAuditContext = { localFindings, stripped };
   setContinuation(state, "waitingForOrchestrationStep0", "step0_completed");
   await saveState(tmpDir, state);
@@ -667,6 +736,16 @@ function buildAgentBlueprint(
     };
   });
 
+  // §2.1: agents length must equal 6 (6 defensive system auditors)
+  if (agents.length !== 6) {
+    logger.warn("AgentBlueprint agent count mismatch", {
+      event: "agent_count_mismatch",
+      expected: 6,
+      actual: agents.length,
+      agentIds: agents.map((a) => a.id),
+    });
+  }
+
   const activeCont = state.activeContinuation;
 
   return {
@@ -695,8 +774,89 @@ function buildAgentBlueprint(
       checkpoint: activeCont?.checkpoint || "preaudit_completed",
       expectedRevision: state.revision ?? 1,
       idempotencyKey: activeCont?.continuationId,
+      // Pro: agent slot metadata for per-agent result submission
+      ...(state.tier === "pro"
+        ? {
+            agentSlots: {
+              total: agents.length,
+              agentIds: agents.map((a) => a.id),
+              allowPartialSubmit: true,
+            } satisfies import("../execution/protocol.js").ContinuationSpec["agentSlots"],
+          }
+        : {}),
     },
   };
+}
+
+/**
+ * Build a synthetic ExecutionReceipt from per-agent slot results for auto-aggregation.
+ *
+ * Maps each AgentSlotResult to a PreAuditDimensionResult using the
+ * corresponding system auditor's identity. The output receipt conforms
+ * to kevlar.exec/v1 and can be routed through handleSubagentAuditResult
+ * which runs mergeLocalFindingsIntoAudits + calculateSynergy (Phase 1).
+ */
+export function buildSyntheticReceipt(
+  agentSlots: Record<string, import("../execution/protocol.js").AgentSlotResult>,
+  systemAuditors: Persona[],
+): any {
+  const slots = Object.values(agentSlots);
+  const completedSlots = slots.filter((s) => s.status === "completed");
+  const failedSlots = slots.filter((s) => s.status !== "completed");
+
+  if (completedSlots.length === 0) {
+    throw internalError("All agents failed — no completed results to aggregate");
+  }
+
+  const isPartial = failedSlots.length > 0;
+  const agents = completedSlots.map((s) => ({
+    id: s.agentId,
+    status: s.status,
+    output: s.output,
+  }));
+
+  const dimensions = completedSlots.map((s) => {
+    const auditor = systemAuditors.find((a) => a.meta.id === s.agentId);
+    const findings = (s.output?.findings ?? []).map((f: any) => ({
+      ...f,
+      _slotAgentId: s.agentId,
+    }));
+    const level = (s.output as any)?.overallLevel
+      || guessLevelFromFindings(findings)
+      || "🟢";
+    return {
+      id: s.agentId,
+      name: auditor?.meta?.name || s.agentId,
+      findings,
+      level,
+    };
+  });
+
+  const reportCount = dimensions.filter((d) => d.findings.length > 0).length;
+  const totalSlots = slots.length;
+  return {
+    protocol: "kevlar.exec/v1",
+    agents,
+    ...(isPartial ? { _isPartial: true, _failedAgents: failedSlots.map((s) => s.agentId) } : {}),
+    aggregation: {
+      dimensions,
+      summary: isPartial
+        ? (reportCount > 0
+          ? `${reportCount}/${dimensions.length} 个维度存在风险发现 (partial: ${failedSlots.length}/${totalSlots} agents unavailable)`
+          : `全部维度通过 (partial: ${failedSlots.length}/${totalSlots} agents unavailable)`)
+        : (reportCount > 0
+          ? `${reportCount}/${dimensions.length} 个维度存在风险发现 (auto-aggregated)`
+          : "全部维度通过 (auto-aggregated)"),
+    },
+  };
+}
+
+function guessLevelFromFindings(findings: any[]): string | undefined {
+  if (!findings || findings.length === 0) return undefined;
+  const levels = findings.map((f: any) => f.level || f.suggestedLevel || "🟢");
+  if (levels.includes("🔴")) return "🔴";
+  if (levels.includes("🟡")) return "🟡";
+  return undefined;
 }
 
 /**
@@ -904,7 +1064,7 @@ async function handleOrchestrationStep0Result(
       precedents,
     );
     state.orchestrationPreAuditContext.stripped = stripped;
-    state.step = "waitingForOrchestrationAudit";
+    transitionState(state, "waitingForOrchestrationAudit", "step0_result_parsed");
     setContinuation(state, "waitingForOrchestrationAudit", "preaudit_started");
     await saveState(tmpDir, state);
 
@@ -993,7 +1153,7 @@ async function handleOrchestrationAuditResult(
       synergyResult,
       deltaRisks,
     };
-    state.step = "waitingForOrchestrationFinal";
+    transitionState(state, "waitingForOrchestrationFinal", "turn2_audit_processed");
     setContinuation(state, "waitingForOrchestrationFinal", "preaudit_completed");
     await saveState(tmpDir, state);
 
@@ -1049,6 +1209,19 @@ async function handleSubagentAuditResult(
   samplingFn?: MultiTurnSamplingFunction,
   strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
+  // ── SEQUENTIAL_FALLBACK → drop to standard orchestration ───────────────
+  const trimmed = userMessage.trim();
+  if (trimmed === "SEQUENTIAL_FALLBACK") {
+    fallbackToStandardOrchestration(state, "subagent_fallback");
+    const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+    const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
+    );
+  }
+
   // ── Early schema validation ─────────────────────────────────────────────
   let parsed: any;
   try {
@@ -1115,9 +1288,29 @@ async function handleSubagentAuditResult(
       systemAuditors,
     );
 
+    // ── Phase 2: LLM cross-validation (Step 6) for auto-aggregated slot results ──
+    let dimensionsForSynergy = mergedDimensions;
+    const isAutoAggregated = !!(state as any).agentSlots?.received
+      && Object.keys((state as any).agentSlots.received).length > 0;
+    if (isAutoAggregated && samplingFn) {
+      try {
+        dimensionsForSynergy = await crossValidateRiskyDimensions(
+          content,
+          mergedDimensions,
+          systemAuditors,
+          samplingFn,
+        );
+      } catch (err) {
+        logger.warn("Auto-aggregation cross-validation failed, using merged dimensions", {
+          event: "slot_cross_validation_failed",
+          error: getErrorInfo(err).message,
+        });
+      }
+    }
+
     // ── Step 7: Synergy calculation (code step)
     const dimensionLevels: Record<string, string> = {};
-    for (const dim of mergedDimensions) {
+    for (const dim of dimensionsForSynergy) {
       dimensionLevels[dim.id] = dim.level ?? "🟢";
     }
     const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
@@ -1126,18 +1319,43 @@ async function handleSubagentAuditResult(
     // Apply synergy level upgrades
     if (synergyResult.levelUpgrades.length > 0) {
       for (const upgrade of synergyResult.levelUpgrades) {
-        const dim = mergedDimensions.find((d: any) => d.id === upgrade.dimension);
+        const dim = dimensionsForSynergy.find((d: any) => d.id === upgrade.dimension);
         if (dim && dim.level === upgrade.from) {
           dim.level = upgrade.to;
         }
       }
     }
 
+    // ── Phase 5: Step 8 — LLM final arbitration for auto-aggregated slot results ──
+    let finalReport: PreAuditReport | null = null;
+    if (isAutoAggregated && samplingFn) {
+      try {
+        const step8Prompts = await resolvePromptSegments();
+        finalReport = await finalizePreAuditReport(
+          content,
+          localFindings,
+          mergedDimensions,
+          dimensionsForSynergy,
+          systemAuditors,
+          samplingFn,
+          synergyResult,
+          deltaRisks,
+          precedents,
+          step8Prompts,
+        );
+      } catch (err) {
+        logger.warn("Auto-aggregation final arbitration failed, using synergy result", {
+          event: "slot_final_arbitration_failed",
+          error: getErrorInfo(err).message,
+        });
+      }
+    }
+
     // Construct final preAuditReport conforming to kevlar.audit/v1
-    const preAuditReport: PreAuditReport = {
-      dimensions: mergedDimensions,
-      summary: aggregation.summary || (mergedDimensions.some((d) => d.findings.length > 0)
-        ? `${mergedDimensions.filter((d) => d.findings.length > 0).length}/${mergedDimensions.length} 个维度存在风险发现`
+    const preAuditReport: PreAuditReport = finalReport ?? {
+      dimensions: dimensionsForSynergy,
+      summary: aggregation.summary || (dimensionsForSynergy.some((d) => d.findings.length > 0)
+        ? `${dimensionsForSynergy.filter((d) => d.findings.length > 0).length}/${dimensionsForSynergy.length} 个维度存在风险发现`
         : "全部维度通过"),
       attackChainAnalysis: attackChainAnalysis || aggregation.attackChainAnalysis || "",
       worstCaseNarrative: worstCaseNarrative || aggregation.worstCaseNarrative || "",
@@ -1612,7 +1830,7 @@ async function handleInventoryCheck(
 
   // 无评审员：提示创建，流程暂停
   if (personas.length === 0) {
-    state.step = "waitingForPersonaCreation";
+    transitionState(state, "waitingForPersonaCreation", "no_personas_available");
     state.selectedPersonaIds = [];
     state.remainingPersonaIds = [];
     await saveState(tmpDir, state);
@@ -1629,7 +1847,7 @@ async function handleInventoryCheck(
   }
 
   // 有评审员：展示结果，询问下一步
-  state.step = "waitingForReviewDecision";
+  transitionState(state, "waitingForReviewDecision", "inventory_check_completed");
   await saveState(tmpDir, state);
 
   const summaryBlock = isFree ? "" : buildPreAuditSummaryBlock(state, prompts) + "\n\n";
@@ -1705,9 +1923,9 @@ async function handleReviewDecision(
   // 用户确认：执行评审员推荐
   // 仅 1-2 位评审员：直接全选
   if (personas.length <= 2) {
+    transitionState(state, "waitingForReviewerConfirmation", "personas_auto_selected_all");
     state.selectedPersonaIds = [...personas.map((p) => p.meta.id)];
     state.remainingPersonaIds = [];
-    state.step = "waitingForReviewerConfirmation";
     await saveState(tmpDir, state);
     return toolResponse(
       state,
@@ -1729,7 +1947,7 @@ async function handleReviewDecision(
 
   state.selectedPersonaIds = [...recommendation.personaIds];
   state.remainingPersonaIds = personas.filter((p) => !recommendedIds.has(p.meta.id)).map((p) => p.meta.id);
-  state.step = "waitingForReviewerConfirmation";
+  transitionState(state, "waitingForReviewerConfirmation", "recommendation_completed");
   await saveState(tmpDir, state);
 
   const remainingPersonas = personas.filter((p) => !recommendedIds.has(p.meta.id));
@@ -1841,7 +2059,7 @@ async function handleSwapReviewer(
   state.selectedPersonaIds.push(addedId);
   state.remainingPersonaIds.push(removedId);
 
-  state.step = "waitingForReviewerConfirmation";
+  transitionState(state, "waitingForReviewerConfirmation", "reviewer_swapped");
   await saveState(tmpDir, state);
 
   const updatedSelected = personas.filter((p) => state.selectedPersonaIds.includes(p.meta.id));
@@ -1966,7 +2184,7 @@ async function handleRstConfirmation(
   const wantsRst = /^(是|继续|确认|好的|好|yes|y|1|开始|舆论仿真推演|仿真推演|开始仿真推演|开始舆论仿真推演)$/i.test(normalized);
 
   if (wantsRst) {
-    state.step = "checkPersonaInventory";
+    transitionState(state, "checkPersonaInventory", "rst_confirmed");
     await saveState(tmpDir, state);
     // Pre-audit results are in state.preAuditReport; they flow into
     // Focus Topics when RST runs via handleInventoryCheck → executeReview.
@@ -1975,7 +2193,7 @@ async function handleRstConfirmation(
 
   const wantsSkip = /^(否|不|取消|跳过|不用|不需要|结束|退出|skip|no|n|2)$/i.test(normalized);
   if (wantsSkip) {
-    state.step = "completed";
+    transitionState(state, "completed", "rst_skipped");
     await saveState(tmpDir, state);
     return toolResponse(state, "六维风险检测已完成，未进入舆论仿真推演。需要评测新内容时，请重新开始。");
   }
@@ -2305,7 +2523,7 @@ async function handlePersonaAuditResult(
       reportParts.push("");
     }
 
-    state.step = "completed";
+    transitionState(state, "completed", "persona_audit_completed");
     const upgradePrompt =
       state.tier === "free"
         ? "\n\n---\n\n" + (await resolvePromptSegments()).freeTierUpgradePrompt
@@ -2354,7 +2572,7 @@ async function executeReview(
   // Build AgentBlueprint with isolated persona agents
   const blueprint = buildPersonaAgentBlueprint(state, selectedPersonas);
 
-  state.step = "waitingForPersonaAudit";
+  transitionState(state, "waitingForPersonaAudit", "persona_review_dispatched");
   (state as any).blueprint = blueprint;
   setContinuation(state, "waitingForPersonaAudit", "persona_audit_started");
 

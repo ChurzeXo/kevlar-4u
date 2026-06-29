@@ -56,6 +56,42 @@ export interface ContinuationSpec {
   checkpoint: string;
   expectedRevision: number;
   idempotencyKey?: string;
+  // Pro: slot-based per-agent result submission metadata
+  agentSlots?: {
+    total: number;
+    agentIds: string[];
+    allowPartialSubmit: true;
+  };
+}
+
+/**
+ * Single agent result submitted independently via slot-based protocol.
+ * Used when ContinuationSpec.agentSlots is present.
+ */
+export interface AgentSlotResult {
+  agentId: string;
+  status: "completed" | "failed";
+  submittedAt: number;
+  output: {
+    findings: Finding[];
+    reasoning?: string;
+  };
+}
+
+export interface Finding {
+  id?: string;
+  keyword?: string;
+  level?: string;
+  suggestedLevel?: string;
+  description?: string;
+  detail?: string;
+  category?: string;
+  location?: string;
+  context?: string;
+  suggestions?: string[];
+  reason?: string;
+  confident?: boolean;
+  [key: string]: unknown;
 }
 
 // ── 3.2 Execution Receipt ────────────────────────────────────────────────────
@@ -328,6 +364,12 @@ export function validateContinuationGate(
     receipt: any;
   }
 ): AggregationValidation {
+  // 0. 输入格式校验（§7.1）
+  const CONTINUATION_ID_RE = /^[a-z0-9-]+$/;
+  if (typeof submission.continuationId !== "string" || !CONTINUATION_ID_RE.test(submission.continuationId)) {
+    throw validationError("invalid_continuation_id_format");
+  }
+
   // 1. 基础物理拦截：锁机制与生命周期对齐
   if (currentState.revision !== submission.expectedRevision) {
     throw validationError("stale_continuation_revision_locked");
@@ -365,6 +407,12 @@ export function fallbackToStandardOrchestration(state: any, reason: string) {
       expiresAt: Date.now() + 30 * 60 * 1000,
       retryCount: 0,
     };
+    logger.info("State transition", {
+      event: "state_transition",
+      from: "waitingForSubagentAudit",
+      to: "waitingForOrchestrationAudit",
+      reason: `structured_fallback:${reason}`,
+    });
   } else {
     state.step = "waitingForOrchestrationStep0";
     state.activeContinuation = {
@@ -373,6 +421,12 @@ export function fallbackToStandardOrchestration(state: any, reason: string) {
       expiresAt: Date.now() + 30 * 60 * 1000,
       retryCount: 0,
     };
+    logger.info("State transition", {
+      event: "state_transition",
+      from: "initiated",
+      to: "waitingForOrchestrationStep0",
+      reason: `structured_fallback:${reason}`,
+    });
   }
   state.revision = (state.revision ?? 0) + 1;
 
@@ -461,6 +515,50 @@ export function validateReceipt(receipt: any): ReceiptValidation {
   warnings.push(
     "validateReceipt 仅执行格式校验；后续请调用 runAggregationValidation(receipt, blueprint) 进行完整的语义验证（智能体对齐、执行模式匹配、隔离安全检测等）"
   );
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+/**
+ * Validate a single agent result submitted via slot-based protocol.
+ * Checks agentId, status, and output.findings structure.
+ */
+export function validateSingleAgentResult(
+  expectedAgentId: string,
+  result: any,
+): ReceiptValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!result || typeof result !== "object") {
+    errors.push("Agent result 不是有效的 JSON 对象");
+    return { valid: false, errors, warnings };
+  }
+
+  const agentId = result.agentId || result.id || result.agent_id;
+  if (!agentId) {
+    errors.push('缺少必填字段 "agentId"');
+  } else if (agentId !== expectedAgentId) {
+    errors.push(`agentId 不匹配: 期望 "${expectedAgentId}", 收到 "${agentId}"`);
+  }
+
+  const status = result.status;
+  if (!status) {
+    errors.push('缺少必填字段 "status"');
+  } else if (!["completed", "failed"].includes(status)) {
+    warnings.push(`未知的 status 值 "${status}"，视为失败`);
+  }
+
+  const output = result.output || result.result || result;
+  if (!output || typeof output !== "object") {
+    errors.push('缺少必填字段 "output"');
+  } else if (!Array.isArray(output.findings)) {
+    warnings.push('output.findings 不是数组，将使用空数组');
+  }
 
   return {
     valid: errors.length === 0,

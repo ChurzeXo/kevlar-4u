@@ -10,7 +10,7 @@
  *   import { logger, getErrorInfo, withDuration, generateTraceId, generateSpanId } from "./observability.js";
  *
  *   // 1. Structured logging
- *   logger.info("Review started", { event: "review_start", mode: "direct_api", personas: 5 });
+ *   logger.info("Review started", { event: "review_start", mode: "mcp_sampling", personas: 5 });
  *   logger.warn("Rate limit approaching", { event: "rate_limit_warning" });
  *   logger.error("Execution failed", { event: "execute_error", error: "TIMEOUT" });
  *

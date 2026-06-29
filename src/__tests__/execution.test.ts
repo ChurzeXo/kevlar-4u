@@ -20,6 +20,8 @@ import { executePersonasInParallel } from "../execution/parallel.js";
 import {
   runAggregationValidation,
   validateContinuationGate,
+  validateReceipt,
+  validateSingleAgentResult,
   fallbackToStandardOrchestration,
   type AgentBlueprint,
   type ExecutionReceipt,
@@ -108,13 +110,16 @@ describe("isSamplingSupported", () => {
   });
 });
 
-describe("KEVLAR_ENABLE_SAMPLING override", () => {
-  it("returns true when KEVLAR_ENABLE_SAMPLING=true", () => {
-    process.env.KEVLAR_ENABLE_SAMPLING = "true";
+describe("isSamplingSupported (no env override)", () => {
+  it("no longer has KEVLAR_ENABLE_SAMPLING env override — relies on real caps", () => {
+    // Ensure env var is not set
+    const saved = process.env.KEVLAR_ENABLE_SAMPLING;
+    delete process.env.KEVLAR_ENABLE_SAMPLING;
     try {
-      assert.ok(isSamplingSupported());
+      // With no client caps set, should return false
+      assert.equal(isSamplingSupported(), false);
     } finally {
-      delete process.env.KEVLAR_ENABLE_SAMPLING;
+      if (saved !== undefined) process.env.KEVLAR_ENABLE_SAMPLING = saved;
     }
   });
 });
@@ -962,5 +967,218 @@ describe("fallbackToStandardOrchestration", () => {
     };
     fallbackToStandardOrchestration(state, "schema_mismatch");
     assert.equal(state.revision, 6);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Protocol v1: validateReceipt Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("validateReceipt", () => {
+  it("validates a well-formed receipt", () => {
+    const result = validateReceipt(makeValidReceipt());
+    assert.ok(result.valid);
+    assert.equal(result.errors.length, 0);
+  });
+
+  it("rejects null input", () => {
+    const result = validateReceipt(null);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.length > 0);
+    assert.ok(result.errors.some((e) => e.includes("不是有效")));
+  });
+
+  it("rejects non-object input", () => {
+    const result = validateReceipt("not-an-object");
+    assert.equal(result.valid, false);
+  });
+
+  it("warns on protocol version mismatch", () => {
+    const receipt = makeValidReceipt({ protocol: "v2.0" });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, true); // protocol mismatch is a warning, not error
+    assert.ok(result.warnings.some((w) => w.includes("协议版本不匹配")));
+  });
+
+  it("errors when agents array is missing", () => {
+    const receipt = makeValidReceipt({ agents: undefined });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("agents")));
+  });
+
+  it("errors when agents array is empty", () => {
+    const receipt = makeValidReceipt({ agents: [] });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("为空")));
+  });
+
+  it("errors when agent is missing id", () => {
+    const receipt = makeValidReceipt({
+      agents: [{ status: "completed", output: { findings: [] } }],
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("id")));
+  });
+
+  it("errors when agent is missing status", () => {
+    const receipt = makeValidReceipt({
+      agents: [{ id: "a", output: { findings: [] } }],
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("status")));
+  });
+
+  it("errors when agent is missing output", () => {
+    const receipt = makeValidReceipt({
+      agents: [{ id: "a", status: "completed" }],
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("output")));
+  });
+
+  it("warns on string output", () => {
+    const receipt = makeValidReceipt({
+      agents: [{ id: "a", status: "completed", output: "plain text" }],
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("字符串")));
+  });
+
+  it("warns on unknown status value", () => {
+    const receipt = makeValidReceipt({
+      agents: [{ id: "a", status: "invalid_status", output: { findings: [] } }],
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("未知的 status")));
+  });
+
+  it("warns when aggregation is missing", () => {
+    const receipt = makeValidReceipt({ aggregation: undefined });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("聚合报告")));
+  });
+
+  it("warns when aggregation.dimensions is not an array", () => {
+    const receipt = makeValidReceipt({
+      aggregation: { summary: "ok" },
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("dimensions")));
+  });
+
+  it("warns when aggregation.summary is not a string", () => {
+    const receipt = makeValidReceipt({
+      aggregation: { dimensions: [], summary: 123 },
+    });
+    const result = validateReceipt(receipt);
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("summary")));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Protocol v1: validateSingleAgentResult Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("validateSingleAgentResult", () => {
+  it("validates a well-formed agent result", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-1",
+      status: "completed",
+      output: { findings: [{ keyword: "risky" }] },
+    });
+    assert.ok(result.valid);
+    assert.equal(result.errors.length, 0);
+  });
+
+  it("rejects null input", () => {
+    const result = validateSingleAgentResult("agent-1", null);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("不是有效")));
+  });
+
+  it("errors when agentId is missing", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      status: "completed",
+      output: { findings: [] },
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("agentId")));
+  });
+
+  it("errors when agentId does not match expected", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-2",
+      status: "completed",
+      output: { findings: [] },
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("不匹配")));
+  });
+
+  it("errors when status is missing", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-1",
+      output: { findings: [] },
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("status")));
+  });
+
+  it("warns on unknown status value", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-1",
+      status: "unknown",
+      output: { findings: [] },
+    });
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("未知的 status")));
+  });
+
+  it("accepts status: failed", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-1",
+      status: "failed",
+      output: { findings: [] },
+    });
+    assert.ok(result.valid);
+  });
+
+  it("falls back to result object when output is null", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-1",
+      status: "completed",
+      output: null,
+    });
+    assert.equal(result.valid, true); // fallback: uses entire result as output
+    assert.ok(result.warnings.some((w) => w.includes("findings")));
+  });
+
+  it("warns when output.findings is not an array", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      agentId: "agent-1",
+      status: "completed",
+      output: { findings: "not-array" },
+    });
+    assert.equal(result.valid, true);
+    assert.ok(result.warnings.some((w) => w.includes("findings")));
+  });
+
+  it("accepts alternate field names: id + result", () => {
+    const result = validateSingleAgentResult("agent-1", {
+      id: "agent-1",
+      status: "completed",
+      result: { findings: [{ keyword: "risky" }] },
+    });
+    assert.ok(result.valid);
   });
 });

@@ -53,7 +53,7 @@ All local testing uses `tsx` directly — no build needed:
 
 ## Free Architecture
 
-- **Execution modes** (`src/execution/index.ts`): `orchestration` (priority 30, always available), `direct_api` (20), `mcp_sampling` (10), `mcp_subagent` (15). Auto-resolved: config → `KEVLAR_MODE` env → capability detection. Priority order: `mcp_sampling` (10) → `mcp_subagent` (15) → `direct_api` (20) → `orchestration` (30).
+- **Execution modes** (`src/execution/index.ts`): `orchestration` (priority 30, always available), `mcp_sampling` (10), `mcp_subagent` (15). Auto-resolved: config → `KEVLAR_MODE` env → capability detection. Priority order: `mcp_sampling` (10) → `mcp_subagent` (15) → `orchestration` (30).
 - **mcp_subagent mode**: Instructs host AI to spawn subagents for parallel execution of system audit dimensions. Provides true isolation and parallelism (unlike serial role-play in orchestration mode). Requires host AI to support Task/Subagent tools (e.g., Claude Code, opencode). Falls back to orchestration if not supported. See `docs/subagent-refactor.md` for details.
 - **Non-orchestration modes** use a review lock with 5min TTL (`src/execution/lock.ts`) to prevent concurrent runs. Orchestration is exempt.
 - **Two-stage pipeline**: System pre-audit (9-step pipeline) → RST review (user personas with Focus Topic transformation).
@@ -113,15 +113,13 @@ New files are auto-discovered via content sniffing (presence of a `personas` key
 
 | Variable | Purpose |
 |---|---|
-| `KEVLAR_MODE` | `auto`, `orchestration`, `mcp_sampling`, `direct_api` |
+| `KEVLAR_MODE` | `auto`, `orchestration`, `mcp_sampling` |
 | `KEVLAR_MAX_CONCURRENT` | Max concurrent reviewers (1-10) |
 | `KEVLAR_API_KEY` | Preferred direct API key |
 | `ANTHROPIC_API_KEY` | Anthropic fallback API key |
 | `OPENAI_API_KEY` | OpenAI fallback API key |
 | `KEVLAR_SKILLS_DIR` | Override default `skills/` path |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error` |
-| `KEVLAR_ENABLE_SAMPLING` | Force-enable MCP sampling (debug) |
-| `KEVLAR_ENABLE_TASK_AUGMENTED` | Enable task-augmented parallel sampling (default: enabled). Set "0" to disable |
 | `KEVLAR_MIN_DELAY_MS` | Min delay between persona executions (default: 1000) |
 | `KEVLAR_TOKEN_BUDGET_PER_TASK` | Token budget per review task |
 | `KEVLAR_FORCE_HOST_STRUCTURED` | Bypass observation cache, always try structured |

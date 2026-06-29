@@ -756,8 +756,23 @@ export async function executeFullPipeline(
     }
   };
 
+  // §3.3: All intermediate results stored on ctx for observability
+  const ctx: ReviewStepContext = {
+    content,
+    systemAuditors,
+    localFindings,
+    caller,
+    step0Result,
+    webContextMap,
+    precedents,
+    timingContext,
+    sendProgress,
+    prompts,
+    synergyRules,
+  };
+
   // Step 1: Strip context
-  const stripped = stripContext(content);
+  ctx.stripped = stripContext(content);
 
   // Step 2: Bare-text audit (3 dimensions)
   emit("🧪 [1/4] 正在执行裸文维度审计（Step 2）...");
@@ -767,57 +782,57 @@ export async function executeFullPipeline(
       a.meta.id === "network_culture_risk" ||
       a.meta.id === "cross_lingual_distortion",
   );
-  const bareFindings =
+  ctx.bareFindings =
     bareOnlyAuditors.length > 0
-      ? await runSystemAuditors(stripped.bare, bareOnlyAuditors, caller, undefined, localFindings, step0Result, webContextMap)
+      ? await runSystemAuditors(ctx.stripped.bare, bareOnlyAuditors, caller, undefined, localFindings, step0Result, webContextMap)
       : [];
 
   // Step 3: Full-text audit (all auditors)
   emit(`📊 [2/4] 正在并发执行全维度深度审计（Step 3，共 ${systemAuditors.length} 个维度）...`);
-  const auditorResults = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings, step0Result, webContextMap);
+  ctx.fullFindings = await runSystemAuditors(content, systemAuditors, caller, timingContext, localFindings, step0Result, webContextMap);
 
   // Step 4: Delta analysis
-  const deltaRisks = computeDeltaAnalysis(bareFindings, auditorResults);
+  ctx.deltaRisks = computeDeltaAnalysis(ctx.bareFindings, ctx.fullFindings);
 
   // Step 5: Merge local findings
-  const mergedResults = normalizePreAuditDimensions(
-    mergeLocalFindingsIntoAudits(auditorResults, localFindings),
+  ctx.mergedResults = normalizePreAuditDimensions(
+    mergeLocalFindingsIntoAudits(ctx.fullFindings, localFindings),
     systemAuditors,
   );
 
   // Step 6: Cross-validation
   emit("🔀 [3/4] 正在执行交叉验证（Step 6）...");
-  const crossValidatedResults = await crossValidateRiskyDimensions(content, mergedResults, systemAuditors, caller);
+  ctx.crossValidatedResults = await crossValidateRiskyDimensions(content, ctx.mergedResults, systemAuditors, caller);
 
   // Step 7: Synergy calculation
   const dimensionLevels: Record<string, string> = {};
-  for (const dim of crossValidatedResults) {
+  for (const dim of ctx.crossValidatedResults) {
     dimensionLevels[dim.id] = dim.level ?? "🟢";
   }
   const timingFlag = localFindings.some((f: any) => f.timingWindowId) ? ["timing_risk"] : [];
-  const synergy = calculateSynergy(dimensionLevels, timingFlag, synergyRules);
+  ctx.synergy = calculateSynergy(dimensionLevels, timingFlag, synergyRules);
 
   // Step 8: Final arbitration
   emit("⚖️ [4/4] 正在进行最终仲裁（Step 8）...");
   const report = await finalizePreAuditReport(
     content,
     localFindings,
-    mergedResults,
-    crossValidatedResults,
+    ctx.mergedResults,
+    ctx.crossValidatedResults,
     systemAuditors,
     caller,
-    synergy,
-    deltaRisks,
+    ctx.synergy,
+    ctx.deltaRisks,
     precedents,
     prompts,
   );
 
   report.synergyFlags = {
-    triggered: synergy.triggered,
-    overallMultiplier: synergy.overallMultiplier,
-    levelUpgrades: synergy.levelUpgrades,
+    triggered: ctx.synergy.triggered,
+    overallMultiplier: ctx.synergy.overallMultiplier,
+    levelUpgrades: ctx.synergy.levelUpgrades,
   };
-  report.deltaRisks = deltaRisks;
+  report.deltaRisks = ctx.deltaRisks;
 
   return report;
 }
