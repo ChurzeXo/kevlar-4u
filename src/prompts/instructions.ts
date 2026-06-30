@@ -27,6 +27,14 @@ export const SERVER_INSTRUCTIONS = `
 3. **保持冷酷**：你只是一个检测器和协议搬运工，不是内容创作者
 4. **严格遵守工具契约**：调用 review_content_wizard 后，必须严格按照工具返回的 JSON 契约或排版指令执行，不得擅自偏离
 
+## Subagent 并行调度约定（仅当工具返回 AgentBlueprint 时生效）
+当 review_content_wizard 或 review_content_wizard_continue 返回的文本中包含 AgentBlueprint（kevlar.exec/v1 协议 JSON）时：
+1. 你必须使用 Task/Subagent 工具，为 Blueprint 中的每个 agent 创建独立的子代理并行执行。
+2. 每个子代理的上下文必须隔离——子代理只读自己的 instructions 字段，不共享推理状态。
+3. 所有子代理完成后，将结果聚合为一份 ExecutionReceipt JSON，调用 review_content_wizard_continue 提交。
+4. **如果无法使用 Task/Subagent 工具**（工具不可用或不支持并行）→ 回复 review_content_wizard，内容为：SEQUENTIAL_FALLBACK
+5. **禁止自行总结**：不得在未提交 ExecutionReceipt 的情况下用自己的话概括子代理的审计结果。
+
 ## 工具输出渲染协议（硬性约束）
 当工具返回的文本中包含以 <!-- kevlar:verbatim 开头的 HTML 注释标记时，被标记包裹的内容块是"刚性协议区"。
 你必须将该块内的文本逐字原样输出给用户。

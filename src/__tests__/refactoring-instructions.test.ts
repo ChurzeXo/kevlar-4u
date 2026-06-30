@@ -56,6 +56,13 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
       assert.ok(SERVER_INSTRUCTIONS.includes("保持冷酷"), "Should contain red line: stay cold");
     });
 
+    it("SERVER_INSTRUCTIONS contains subagent dispatch conventions", () => {
+      assert.ok(SERVER_INSTRUCTIONS.includes("Subagent 并行调度约定"), "Should contain subagent dispatch conventions header");
+      assert.ok(SERVER_INSTRUCTIONS.includes("AgentBlueprint"), "Should mention AgentBlueprint");
+      assert.ok(SERVER_INSTRUCTIONS.includes("SEQUENTIAL_FALLBACK"), "Should explain SEQUENTIAL_FALLBACK");
+      assert.ok(SERVER_INSTRUCTIONS.includes("禁止自行总结"), "Should forbid summarizing agent results");
+    });
+
     it("SERVER_INSTRUCTIONS does NOT contain rendering protocol", () => {
       assert.ok(!SERVER_INSTRUCTIONS.includes("排版与输出协议"), "Should NOT contain rendering protocol");
       assert.ok(!SERVER_INSTRUCTIONS.includes("Markdown 表格"), "Should NOT contain Markdown table instructions");
