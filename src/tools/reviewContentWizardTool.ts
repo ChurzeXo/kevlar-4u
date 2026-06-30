@@ -200,6 +200,7 @@ type ReviewWizardStep =
   | "waitingForPersonaCreation"
   | "waitingForReviewDecision"
   | "waitingForReviewerConfirmation"
+  | "waitingForNextRound"
   | "rstConfirmation"
   | "completed";
 
@@ -229,6 +230,8 @@ interface ReviewWizardState {
   remainingPersonaIds: string[];
   systemAuditorIds: string[];
   dimensions: DimensionsConfig;
+  usedPersonaIds?: string[];  // 已参与过评审的人设 ID（用于"换一批"排除）
+  pendingPersonaIds?: string[];  // 当前展示给用户的人设 ID 列表（按展示顺序）
   preAuditReport?: any;
   tier?: "free" | "pro";
   targetRegions?: string[];  // 推广目标地区 ["zh-CN", "en-US", ...]
@@ -487,6 +490,9 @@ async function advanceWizard(
 
     case "waitingForPersonaAudit":
       return handlePersonaAuditResult(tmpDir, state, personas, userMessage, samplingFn);
+
+    case "waitingForNextRound":
+      return handleNextRound(tmpDir, state, personas, userMessage, samplingFn);
 
     case "completed":
       return toolResponse(state, "这个评测流程已经完成。需要评测新内容时，请重新开始一个会话。");
@@ -1779,15 +1785,6 @@ async function handleInventoryCheck(
   const prompts = await resolvePromptSegments();
   const isFree = state.tier === "free";
 
-  const freeOptions = [
-    "<!-- kevlar:verbatim-options:start -->",
-    "请选择：",
-    "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
-    "2. 目标平台风控模拟（暂未开放，Pro 专属，占位示意）",
-    "3. 六维风险检测 🔓（升级专业版）",
-    "<!-- kevlar:verbatim-options:end -->",
-  ].join("\n");
-
   const proOptions = [
     "<!-- kevlar:verbatim-options:start -->",
     "六维风险检测已完成。请选择：",
@@ -1795,8 +1792,6 @@ async function handleInventoryCheck(
     "2. 目标平台风控模拟（暂未开放，敬请期待）",
     "<!-- kevlar:verbatim-options:end -->",
   ].join("\n");
-
-  const optionsBlock = isFree ? freeOptions : proOptions;
 
   // 无评审员：提示创建，流程暂停
   if (personas.length === 0) {
@@ -1816,15 +1811,42 @@ async function handleInventoryCheck(
     );
   }
 
-  // 有评审员：展示结果，询问下一步
+  if (isFree) {
+    // Free 版：AI 推荐 + 用户选择
+    const usedIds = new Set(state.usedPersonaIds || []);
+    const availablePersonas = personas.filter(p => !usedIds.has(p.meta.id));
+    const targetPersonas = availablePersonas.length > 0 ? availablePersonas : personas;
+
+    const recommendation = await recommendPersonas(state, targetPersonas, samplingFn);
+    const recommendedSet = new Set(recommendation.personaIds);
+    const recommendedPersonas = targetPersonas.filter(p => recommendedSet.has(p.meta.id));
+    const displayPersonas = recommendedPersonas.length > 0 ? recommendedPersonas : targetPersonas.slice(0, 3);
+
+    state.pendingPersonaIds = displayPersonas.map(p => p.meta.id);
+    transitionState(state, "waitingForReviewDecision", "inventory_check_completed");
+    await saveState(tmpDir, state);
+
+    const displayText = [
+      "接下来进行舆论仿真推演。根据内容特色，推荐了以下评审员：",
+      "",
+      ...displayPersonas.map((p, i) =>
+        `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"}`,
+      ),
+      "",
+      "输入编号选择评审员（例如「1,2」），或回复：",
+      "- 「查看全部」浏览所有评审员",
+      "- 「创建」新建评审员",
+    ].join("\n");
+
+    return toolResponse(state, displayText);
+  }
+
+  // Pro 版：显示六维风险检测结果 + 选项
   transitionState(state, "waitingForReviewDecision", "inventory_check_completed");
   await saveState(tmpDir, state);
 
-  const summaryBlock = isFree ? "" : buildPreAuditSummaryBlock(state, prompts) + "\n\n";
-  return toolResponse(
-    state,
-    summaryBlock + optionsBlock,
-  );
+  const summaryBlock = buildPreAuditSummaryBlock(state, prompts) + "\n\n";
+  return toolResponse(state, summaryBlock + proOptions);
 }
 
 // ── 用户选择下一步 ────────────────────────────────────────────────────────────
@@ -1840,27 +1862,64 @@ async function handleReviewDecision(
   const normalized = userMessage.trim();
   const isFree = state.tier === "free";
 
-  // 选项 3（仅 Free 版）：升级 Pro → 六维风险检测
-  if (isFree && /^(3|六维|六维风险检测|升级|pro|专业版|升级专业版|解锁)$/i.test(normalized)) {
-    return toolResponse(
-      state,
-      [
-        "六维风险检测是 Pro 版专属功能，可对内容进行合规、语境、网络文化、事实与跨语言全维度深度分析。",
-        "",
-        "升级方式：",
-        "1. 运行 `npx kevlar-4u --activate --code <激活码>`",
-        "2. 或访问 https://kevlar4u.xyz 获取激活码",
-        "",
-        "升级后请重新调用 review_content_wizard 继续评测。",
-      ].join("\n"),
+  // ═══ Free 版：编号选择 / 查看全部 / 创建 ═══
+  if (isFree) {
+    if (/^(创建|新建|新增|new|create)$/i.test(normalized)) {
+      transitionState(state, "waitingForPersonaCreation", "user_wants_new_persona");
+      await saveState(tmpDir, state);
+      return toolResponse(state, "好的，开始创建新评审员。创建完成后将回到内容评测流程。");
+    }
+
+    if (/^(查看全部|全部|所有|完整列表|show all|all)$/i.test(normalized)) {
+      state.pendingPersonaIds = personas.map(p => p.meta.id);
+      await saveState(tmpDir, state);
+      const personaLines = personas.map((p, i) =>
+        `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"}`,
+      );
+      return toolResponse(state,
+        "所有评审员（共 " + personas.length + " 位）：\n\n" +
+        personaLines.join("\n") +
+        "\n\n输入编号选择（例如「1,3,5」），或回复「创建」新建评审员。",
+      );
+    }
+
+    const numbers = normalized.split(/[,，、\s]+/)
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n) && n > 0);
+
+    if (numbers.length > 0) {
+      if (numbers.length > 5) {
+        return toolResponse(state, "❌ 一次最多选择 5 位评审员。请重新选择。");
+      }
+
+      const pendingIds = state.pendingPersonaIds || personas.map(p => p.meta.id);
+      const maxIndex = Math.max(...numbers);
+
+      if (maxIndex > pendingIds.length) {
+        return toolResponse(state,
+          "❌ 编号 " + maxIndex + " 超出范围（共 " + pendingIds.length + " 位评审员）。请重新输入。",
+        );
+      }
+
+      const selectedIds = [...new Set(numbers.map(n => pendingIds[n - 1]).filter(Boolean))];
+
+      state.selectedPersonaIds = selectedIds;
+      state.remainingPersonaIds = personas
+        .filter(p => !selectedIds.includes(p.meta.id))
+        .map(p => p.meta.id);
+
+      // Directly execute: user explicitly chose by number, no need for extra confirmation
+      await saveState(tmpDir, state);
+      return executeReview(skillsDir, tmpDir, state, samplingFn);
+    }
+
+    return toolResponse(state,
+      "请输入编号选择评审员（例如「1,2」），或回复「查看全部」「创建」。",
     );
   }
 
-  // 选项 2：目标平台风控模拟
+  // ═══ Pro 版：保留原有选项 ═══
   if (/^(2|目标平台风控模拟|平台风控|风控模拟|平台检查|平台违禁限流排查|违禁限流排查)$/i.test(normalized)) {
-    const optionsSuffix = isFree
-      ? "2. 目标平台风控模拟（暂未开放，Pro 专属，占位示意）\n3. 六维风险检测 🔓（升级专业版）"
-      : "2. 目标平台风控模拟（暂未开放，敬请期待）";
     return toolResponse(
       state,
       [
@@ -1868,30 +1927,25 @@ async function handleReviewDecision(
         "",
         "请选择：",
         "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
-        optionsSuffix,
+        "2. 目标平台风控模拟（暂未开放，敬请期待）",
       ].join("\n"),
     );
   }
 
-  // 选项 1：舆论仿真推演
   const wantsReview = /^(1|需要|开始|开始舆论仿真推演|确认|执行|继续|好的|好|ok|yes|舆论仿真推演|舆论仿真|仿真推演)$/i.test(normalized);
 
   if (!wantsReview) {
-    const optionsSuffix = isFree
-      ? "2. 目标平台风控模拟（暂未开放，Pro 专属，占位示意）\n3. 六维风险检测 🔓（升级专业版）"
-      : "2. 目标平台风控模拟（暂未开放，敬请期待）";
     return toolResponse(
       state,
       [
         "请选择：",
         "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
-        optionsSuffix,
+        "2. 目标平台风控模拟（暂未开放，敬请期待）",
       ].join("\n"),
     );
   }
 
   // 用户确认：执行评审员推荐
-  // 仅 1-2 位评审员：直接全选
   if (personas.length <= 2) {
     transitionState(state, "waitingForReviewerConfirmation", "personas_auto_selected_all");
     state.selectedPersonaIds = [...personas.map((p) => p.meta.id)];
@@ -1911,7 +1965,6 @@ async function handleReviewDecision(
     );
   }
 
-  // 3 位及以上：AI 推荐 1-3 位
   const recommendation = await recommendPersonas(state, personas, samplingFn);
   const recommendedIds = new Set(recommendation.personaIds);
 
@@ -2143,6 +2196,58 @@ function heuristicRecommendation(state: ReviewWizardState, personas: Persona[]):
   };
 }
 
+// ── 评审完成：下一轮选择 ────────────────────────────────────────────────────────
+
+async function handleNextRound(
+  tmpDir: string,
+  state: ReviewWizardState,
+  personas: Persona[],
+  userMessage: string,
+  samplingFn?: MultiTurnSamplingFunction,
+): Promise<ToolResult> {
+  const normalized = userMessage.trim().toLowerCase();
+
+  // 换一批评审员
+  if (/^(换一批|换|继续|继续评测|再来一轮|next|continue|1)$/i.test(normalized)) {
+    // Track used personas so handleInventoryCheck can exclude them
+    await saveState(tmpDir, state);
+    return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+  }
+
+  // 解锁 Pro
+  if (/^(解锁|升级|pro|专业版|六维|六维风险检测|解锁pro|3)$/i.test(normalized)) {
+    return toolResponse(
+      state,
+      [
+        "六维风险检测是 Pro 版专属功能，可对内容进行合规、语境、网络文化、事实与跨语言全维度深度分析。",
+        "",
+        "升级方式：",
+        "1. 运行 `npx kevlar-4u --activate --code <激活码>`",
+        "2. 或访问 https://kevlar4u.xyz 获取激活码",
+        "",
+        "升级后请重新调用 review_content_wizard 继续评测。",
+      ].join("\n"),
+    );
+  }
+
+  // 结束评测
+  if (/^(结束|停止|退出|完成|不|不了|算了|结束评测|exit|quit|no|2)$/i.test(normalized)) {
+    transitionState(state, "completed", "user_ended");
+    await cleanupState(tmpDir, state.sessionId);
+    return toolResponse(state, "评测已结束。需要评测新内容时，请重新开始。");
+  }
+
+  return toolResponse(
+    state,
+    [
+      "评测完成。是否继续？",
+      "1. 换一批评审员 — 从未参与本轮的角色中重新筛选",
+      "2. 结束评测",
+      "3. 解锁六维风险检测 🔓（专业版）",
+    ].join("\n"),
+  );
+}
+
 async function handleRstConfirmation(
   tmpDir: string,
   state: ReviewWizardState,
@@ -2242,7 +2347,7 @@ function buildIsolatedPersonaPrompt(
     '  "overallConclusion": "一句话总评",',
     '  "mostDestructiveRisk": "最具破坏性的风险点",',
     '  "coreControversy": "核心争议焦点",',
-    '  "simulatedReaction": "模拟该角色在评论区可能发表的真实反应（2-5句话，自然语气）"',
+    '  "simulatedReaction": "模拟该角色在评论区可能发表的真实反应（口语化、短句、带语气词/吐槽/个人情绪，可以有不完美表达，不要长篇大论，不要总结性语言，根据该评审员的性格特点进行评论）"',
     "}",
     "```",
     "",
@@ -2493,17 +2598,30 @@ async function handlePersonaAuditResult(
       reportParts.push("");
     }
 
+    if (state.tier === "free") {
+      transitionState(state, "waitingForNextRound", "persona_audit_completed");
+      state.usedPersonaIds = [...(state.usedPersonaIds || []), ...state.selectedPersonaIds];
+      await saveState(tmpDir, state);
+      const updateNote = await checkForUpdate().catch(() => null);
+      const optionsText = [
+        "<!-- kevlar:verbatim-options:start -->",
+        "评测完成。是否继续？",
+        "- 换一批评审员 — 从未参与本轮的角色中重新筛选",
+        "- 解锁六维风险检测 🔓（专业版）",
+        "- 结束评测",
+        "<!-- kevlar:verbatim-options:end -->",
+      ].join("\n");
+      return toolResponse(
+        state,
+        reportParts.join("\n") + "\n\n---\n\n" + optionsText + (updateNote ?? ""),
+      );
+    }
+
     transitionState(state, "completed", "persona_audit_completed");
-    const upgradePrompt =
-      state.tier === "free"
-        ? "\n\n---\n\n" + (await resolvePromptSegments()).freeTierUpgradePrompt
-        : "";
-
     const updateNote = await checkForUpdate().catch(() => null);
-
     const response = toolResponse(
       state,
-      reportParts.join("\n") + "\n\n---\n\n评测完成。" + upgradePrompt + (updateNote ?? "")
+      reportParts.join("\n") + "\n\n---\n\n评测完成。" + (updateNote ?? ""),
     );
     await cleanupState(tmpDir, state.sessionId);
     return response;
@@ -2579,6 +2697,8 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     if (!state.dimensions) {
       state.dimensions = { ...DEFAULT_DIMENSIONS_CONFIG };
     }
+    if (state.usedPersonaIds === undefined) state.usedPersonaIds = [];
+    if (state.pendingPersonaIds === undefined) state.pendingPersonaIds = [];
     if (Date.now() - state.createdAt > 10 * 60 * 1000) {
       await cleanupState(tmpDir, sessionId);
       return {
@@ -2592,6 +2712,8 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         remainingPersonaIds: [],
         systemAuditorIds: [],
         dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
+        usedPersonaIds: [],
+        pendingPersonaIds: [],
       };
     }
 
@@ -2618,6 +2740,8 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     remainingPersonaIds: [],
     systemAuditorIds: [],
     dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
+    usedPersonaIds: [],
+    pendingPersonaIds: [],
     tier: undefined,
     strategySessionId: undefined,
     strategyHash: undefined,

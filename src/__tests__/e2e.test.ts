@@ -98,16 +98,16 @@ describe("End-to-End integration test", () => {
 
       assert.ok(step2, "Step 2 response should exist");
       const step2Text = (step2.content as any)[0].text;
-      assert.ok(step2Text.includes("请选择"), "Should ask for the next review action");
-      assert.ok(step2Text.includes("1. 舆论仿真推演"), "Should offer review as the next action");
+      assert.ok(step2Text.includes("接下来进行舆论仿真推演"), "Should show review intro");
+      assert.ok(step2Text.includes("输入编号选择"), "Should ask for persona number selection");
       assert.ok(step2Text.includes("currentStep: waitingForReviewDecision"), "Should be in review decision step");
 
-      // Step 3: confirm review → waitingForReviewerConfirmation
+      // Step 3: select persona by number → directly dispatches AgentBlueprint
       const step3 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
           sessionId,
-          userMessage: "开始舆论仿真推演",
+          userMessage: "1",
         },
       });
 
@@ -115,29 +115,15 @@ describe("End-to-End integration test", () => {
       assert.ok(Array.isArray(step3.content), "Step 3 response should have content array");
       assert.equal(step3.content[0].type, "text");
       const step3Text = step3.content[0].text;
-      assert.ok(step3Text.includes("当前共有 1 位评审员"), "Should show persona count");
-      assert.ok(step3Text.includes("currentStep: waitingForReviewerConfirmation"), "Should be in reviewer confirmation step");
-
-      // Step 4: "开始舆论仿真推演" → AgentBlueprint dispatch
-      const step4 = await client.callTool({
-        name: "review_content_wizard",
-        arguments: {
-          sessionId,
-          userMessage: "开始舆论仿真推演",
-        },
-      });
-
-      assert.ok(step4, "Step 4 response should exist");
-      const step4Text = (step4.content as any)[0].text;
 
       // Verify AgentBlueprint structure in the response
-      assert.ok(step4Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol marker");
-      assert.ok(step4Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
-      assert.ok(step4Text.includes("currentStep: waitingForPersonaAudit"), "Should be in persona audit step");
+      assert.ok(step3Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol marker");
+      assert.ok(step3Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
+      assert.ok(step3Text.includes("currentStep: waitingForPersonaAudit"), "Should be in persona audit step");
 
       // Extract the JSON blueprint (before the kevlar-state block)
-      const jsonEnd = step4Text.indexOf("```kevlar-state");
-      const jsonText = jsonEnd > 0 ? step4Text.substring(0, jsonEnd).trim() : step4Text;
+      const jsonEnd = step3Text.indexOf("```kevlar-state");
+      const jsonText = jsonEnd > 0 ? step3Text.substring(0, jsonEnd).trim() : step3Text;
       const blueprint = JSON.parse(jsonText);
 
       assert.equal(blueprint.protocol, "kevlar.exec/v1");
@@ -159,7 +145,7 @@ describe("End-to-End integration test", () => {
       assert.ok(continuationId, "Should have continuationId");
       assert.ok(typeof revision === "number", "Should have revision number");
 
-      // Step 5: Submit persona audit ExecutionReceipt via continue tool
+      // Step 4: Submit persona audit ExecutionReceipt via continue tool
       const mockReceipt = {
         protocol: "kevlar.exec/v1",
         agents: [
@@ -204,7 +190,7 @@ describe("End-to-End integration test", () => {
       const step5Text = (step5.content as any)[0].text;
       assert.ok(step5Text.includes("E2E Tester"), "Final report should include persona name");
       assert.ok(step5Text.includes("舆论仿真推演报告"), "Final report should include report header");
-      assert.ok(step5Text.includes("currentStep: completed"), "Wizard should be marked as completed");
+      assert.ok(step5Text.includes("currentStep: waitingForNextRound"), "Wizard should show next round options");
     } finally {
       await client.close();
       await server.close();
