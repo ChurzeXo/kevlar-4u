@@ -15,6 +15,7 @@ import { invalidInputError } from "../utils/errors.js";
 import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
 import { MAX_CONTINUATION_RETRIES, validateContinuationGate, fallbackToStandardOrchestration } from "../execution/index.js";
+import { rejected, degraded, formatStatusMessage } from "../execution/continuationStatus.js";
 import {
   handleReviewContentWizard,
   type ReviewWizardInput,
@@ -99,14 +100,14 @@ export const reviewContentWizardContinueModule: ToolModule = {
 
     if (!sessionId || typeof sessionId !== "string") {
       return {
-        content: [{ type: "text", text: "❌ 缺少 sessionId。" }],
+        content: [{ type: "text", text: formatStatusMessage(rejected("missing_session_id"), "❌ 缺少 sessionId。") }],
         isError: true,
       };
     }
 
     if (!isValidSessionId(sessionId)) {
       return {
-        content: [{ type: "text", text: "❌ 无效的 sessionId 格式。" }],
+        content: [{ type: "text", text: formatStatusMessage(rejected("invalid_session_id_format"), "❌ 无效的 sessionId 格式。") }],
         isError: true,
       };
     }
@@ -119,7 +120,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
       state = JSON.parse(raw);
     } catch {
       return {
-        content: [{ type: "text", text: "❌ 未找到此 session 的状态文件，会话可能已过期。" }],
+        content: [{ type: "text", text: formatStatusMessage(rejected("session_expired"), "❌ 未找到此 session 的状态文件，会话可能已过期。") }],
         isError: true,
       };
     }
@@ -161,15 +162,18 @@ export const reviewContentWizardContinueModule: ToolModule = {
             return {
               content: [{
                 type: "text",
-                text: [
-                  "⛔ **并行评审执行失败** — 宿主 AI 未返回有效的 ExecutionReceipt。",
-                  "",
-                  "可能的原因：",
-                  "- 宿主 AI 不支持 Subagent 并行调度",
-                  "- 返回的 JSON 格式不符合 kevlar.persona-review/v1 协议",
-                  "",
-                  "建议：请使用其他 MCP 客户端（如支持 Task/Subagent 工具的客户端）重试。",
-                ].join("\n"),
+                text: formatStatusMessage(
+                  rejected("invalid_execution_receipt"),
+                  [
+                    "⛔ **并行评审执行失败** — 宿主 AI 未返回有效的 ExecutionReceipt。",
+                    "",
+                    "可能的原因：",
+                    "- 宿主 AI 不支持 Subagent 并行调度",
+                    "- 返回的 JSON 格式不符合 kevlar.persona-review/v1 协议",
+                    "",
+                    "建议：请使用其他 MCP 客户端（如支持 Task/Subagent 工具的客户端）重试。",
+                  ].join("\n"),
+                ),
               }],
               isError: true,
             };
@@ -177,7 +181,14 @@ export const reviewContentWizardContinueModule: ToolModule = {
 
           const allPersonas = await loadAllPersonas(deps.skillsDir);
           const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
-          let promptText = "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。\n";
+          let promptText = formatStatusMessage(
+            degraded("schema_mismatch", {
+              sessionId: state.sessionId,
+              revision: state.revision,
+              continuationId: state.activeContinuation?.continuationId,
+            }),
+            "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。",
+          ) + "\n";
 
           if (state.step === "waitingForOrchestrationAudit") {
             promptText += ORCHESTRATION_AUDIT_GUIDANCE + buildOrchestrationAuditPrompt(state.content, systemAuditors, state.orchestrationPreAuditContext);
@@ -200,7 +211,10 @@ export const reviewContentWizardContinueModule: ToolModule = {
         }
       } catch (err: any) {
         return {
-          content: [{ type: "text", text: `❌ 门禁验证失败：${err.message}` }],
+          content: [{ type: "text", text: formatStatusMessage(
+            rejected("gate_validation_failed", { error: err.message }),
+            `❌ 门禁验证失败：${err.message}`,
+          ) }],
           isError: true,
         };
       }
@@ -209,7 +223,10 @@ export const reviewContentWizardContinueModule: ToolModule = {
       const CONTINUATION_ID_RE = /^[a-z0-9-]+$/;
       if (typeof continuationId !== "string" || !CONTINUATION_ID_RE.test(continuationId)) {
         return {
-          content: [{ type: "text", text: `❌ continuationId 格式不合法: "${continuationId}"。仅允许 [a-z0-9-]+` }],
+          content: [{ type: "text", text: formatStatusMessage(
+            rejected("invalid_continuation_id_format"),
+            `❌ continuationId 格式不合法: "${continuationId}"。仅允许 [a-z0-9-]+`,
+          ) }],
           isError: true,
         };
       }
@@ -224,15 +241,18 @@ export const reviewContentWizardContinueModule: ToolModule = {
           content: [
             {
               type: "text",
-              text: [
-                "⛔ **Stale Continuation** — 此延续已过期。",
-                "",
-                `- 预期版本：${expectedRevision}`,
-                `- 当前版本：${state.revision}`,
-                `- 延续 ID：${continuationId}`,
-                "",
-                "会话状态已被更近的操作更新。请使用最新的 continuation contract 重试。",
-              ].join("\n"),
+              text: formatStatusMessage(
+                rejected("stale_revision", { currentRevision: state.revision, expectedRevision }),
+                [
+                  "⛔ **Stale Continuation** — 此延续已过期。",
+                  "",
+                  `- 预期版本：${expectedRevision}`,
+                  `- 当前版本：${state.revision}`,
+                  `- 延续 ID：${continuationId}`,
+                  "",
+                  "会话状态已被更近的操作更新。请使用最新的 continuation contract 重试。",
+                ].join("\n"),
+              ),
             },
           ],
           isError: true,
@@ -242,7 +262,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
       const activeContinuation = state.activeContinuation;
       if (!activeContinuation) {
         return {
-          content: [{ type: "text", text: "❌ 此会话没有活动的延续请求。" }],
+          content: [{ type: "text", text: formatStatusMessage(rejected("no_active_continuation"), "❌ 此会话没有活动的延续请求。") }],
           isError: true,
         };
       }
@@ -252,11 +272,14 @@ export const reviewContentWizardContinueModule: ToolModule = {
           content: [
             {
               type: "text",
-              text: [
-                "⛔ **Continuation ID 不匹配**",
-                `期望：${activeContinuation.continuationId}`,
-                `收到：${continuationId}`,
-              ].join("\n"),
+              text: formatStatusMessage(
+                rejected("continuation_id_mismatch", { expected: activeContinuation.continuationId, received: continuationId }),
+                [
+                  "⛔ **Continuation ID 不匹配**",
+                  `期望：${activeContinuation.continuationId}`,
+                  `收到：${continuationId}`,
+                ].join("\n"),
+              ),
             },
           ],
           isError: true,
@@ -268,11 +291,14 @@ export const reviewContentWizardContinueModule: ToolModule = {
           content: [
             {
               type: "text",
-              text: [
-                "⛔ **Checkpoint 不匹配**",
-                `期望：${activeContinuation.checkpoint}`,
-                `收到：${checkpoint}`,
-              ].join("\n"),
+              text: formatStatusMessage(
+                rejected("checkpoint_mismatch", { expected: activeContinuation.checkpoint, received: checkpoint }),
+                [
+                  "⛔ **Checkpoint 不匹配**",
+                  `期望：${activeContinuation.checkpoint}`,
+                  `收到：${checkpoint}`,
+                ].join("\n"),
+              ),
             },
           ],
           isError: true,
@@ -298,7 +324,14 @@ export const reviewContentWizardContinueModule: ToolModule = {
           content: [{
             type: "text",
             text: [
-              "⏰ **延续请求已过期** — 已自动降级到标准宿主编排模式。",
+              formatStatusMessage(
+                degraded("continuation_expired", {
+                  sessionId: state.sessionId,
+                  revision: state.revision,
+                  continuationId: state.activeContinuation?.continuationId,
+                }),
+                "⏰ **延续请求已过期** — 已自动降级到标准宿主编排模式。",
+              ),
               "",
               promptText,
               "",
@@ -332,7 +365,15 @@ export const reviewContentWizardContinueModule: ToolModule = {
           content: [{
             type: "text",
             text: [
-              `🛑 **已达最大重试次数（${MAX_CONTINUATION_RETRIES} 次）** — 已自动降级到标准宿主编排模式。`,
+              formatStatusMessage(
+                degraded("max_retries_exceeded", {
+                  sessionId: state.sessionId,
+                  revision: state.revision,
+                  continuationId: state.activeContinuation?.continuationId,
+                  maxRetries: MAX_CONTINUATION_RETRIES,
+                }),
+                `🛑 **已达最大重试次数（${MAX_CONTINUATION_RETRIES} 次）** — 已自动降级到标准宿主编排模式。`,
+              ),
               "",
               promptText,
               "",
@@ -384,7 +425,10 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: `❌ 当前步骤不支持逐 agent 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 步骤可用。`,
+        text: formatStatusMessage(
+          rejected("invalid_step", { currentStep: state.step }),
+          `❌ 当前步骤不支持逐 agent 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 步骤可用。`,
+        ),
       }],
       isError: true,
     };
@@ -393,7 +437,7 @@ async function handleAgentSlot(
   // ── Tier check (Pro only) ───────────────────────────────────────────────
   if (state.tier !== "pro") {
     return {
-      content: [{ type: "text", text: "❌ 逐 agent 提交仅限 Pro 用户。请使用 batch 方式（全量 receipt）提交。" }],
+      content: [{ type: "text", text: formatStatusMessage(rejected("pro_only"), "❌ 逐 agent 提交仅限 Pro 用户。请使用 batch 方式（全量 receipt）提交。") }],
       isError: true,
     };
   }
@@ -403,7 +447,7 @@ async function handleAgentSlot(
   const CONT_SLOT_ID_RE = /^[a-z0-9-]+$/;
   if (typeof continuationId !== "string" || !CONT_SLOT_ID_RE.test(continuationId)) {
     return {
-      content: [{ type: "text", text: `❌ continuationId 格式不合法。仅允许 [a-z0-9-]+` }],
+      content: [{ type: "text", text: formatStatusMessage(rejected("invalid_continuation_id_format"), `❌ continuationId 格式不合法。仅允许 [a-z0-9-]+`) }],
       isError: true,
     };
   }
@@ -418,11 +462,14 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: [
-          "⛔ **Stale Continuation** — revision 落后于蓝图版本。",
-          `当前蓝图版本: ${blueprintRevision}, 提交版本: ${expectedRevision}`,
-          "请使用蓝图返回的 expectedRevision。",
-        ].join("\n"),
+        text: formatStatusMessage(
+          rejected("stale_revision", { blueprintRevision, expectedRevision }),
+          [
+            "⛔ **Stale Continuation** — revision 落后于蓝图版本。",
+            `当前蓝图版本: ${blueprintRevision}, 提交版本: ${expectedRevision}`,
+            "请使用蓝图返回的 expectedRevision。",
+          ].join("\n"),
+        ),
       }],
       isError: true,
     };
@@ -432,7 +479,7 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: "⛔ **Continuation ID 不匹配**",
+        text: formatStatusMessage(rejected("continuation_id_mismatch"), "⛔ **Continuation ID 不匹配**"),
       }],
       isError: true,
     };
@@ -447,7 +494,10 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: `❌ agentId 格式不合法: "${agentId}"。仅允许 [a-zA-Z0-9_-]+`,
+        text: formatStatusMessage(
+          rejected("invalid_agent_id_format", { agentId }),
+          `❌ agentId 格式不合法: "${agentId}"。仅允许 [a-zA-Z0-9_-]+`,
+        ),
       }],
       isError: true,
     };
@@ -460,7 +510,10 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: `❌ 未知的 agentId "${agentId}"。期望: ${expectedAgentIds.join(", ")}`,
+        text: formatStatusMessage(
+          rejected("unknown_agent_id", { agentId, expectedAgentIds }),
+          `❌ 未知的 agentId "${agentId}"。期望: ${expectedAgentIds.join(", ")}`,
+        ),
       }],
       isError: true,
     };
@@ -476,7 +529,7 @@ async function handleAgentSlot(
 
   if (!parsedResult || typeof parsedResult !== "object") {
     return {
-      content: [{ type: "text", text: "❌ Agent 结果必须是有效的 JSON 对象（通过 receipt 或 result 字段）。" }],
+      content: [{ type: "text", text: formatStatusMessage(rejected("invalid_json"), "❌ Agent 结果必须是有效的 JSON 对象（通过 receipt 或 result 字段）。") }],
       isError: true,
     };
   }
@@ -488,13 +541,16 @@ async function handleAgentSlot(
       content: [
         {
           type: "text",
-          text: [
-            "❌ **Agent 结果格式错误**",
-            "",
-            ...validation.errors.map((e: string) => `- ${e}`),
-            ...(validation.warnings.length > 0 ? ["", "⚠️ 警告:"] : []),
-            ...validation.warnings.map((w: string) => `- ${w}`),
-          ].join("\n"),
+          text: formatStatusMessage(
+            rejected("agent_result_format_error", { agentId, errors: validation.errors, warnings: validation.warnings }),
+            [
+              "❌ **Agent 结果格式错误**",
+              "",
+              ...validation.errors.map((e: string) => `- ${e}`),
+              ...(validation.warnings.length > 0 ? ["", "⚠️ 警告:"] : []),
+              ...validation.warnings.map((w: string) => `- ${w}`),
+            ].join("\n"),
+          ),
         },
       ],
       isError: true,
@@ -514,7 +570,7 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: `⚠️ 所有 ${total} 个 agent 槽位已满，无法提交更多结果。`,
+        text: formatStatusMessage(rejected("slots_full", { total }), `⚠️ 所有 ${total} 个 agent 槽位已满，无法提交更多结果。`),
       }],
       isError: true,
     };
@@ -597,12 +653,15 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: [
-          "❌ **全部 agent 执行失败，无法聚合。**",
-          "",
-          `共 ${total} 个 agent，全部返回 status: "failed"。`,
-          "请检查内容或宿主环境后重试。",
-        ].join("\n"),
+        text: formatStatusMessage(
+          rejected("all_agents_failed", { total }),
+          [
+            "❌ **全部 agent 执行失败，无法聚合。**",
+            "",
+            `共 ${total} 个 agent，全部返回 status: "failed"。`,
+            "请检查内容或宿主环境后重试。",
+          ].join("\n"),
+        ),
       }],
       isError: true,
     };
@@ -628,12 +687,15 @@ async function finalizeSlots(
     return {
       content: [{
         type: "text",
-        text: [
-          "❌ **没有可用的 agent 结果，无法聚合。**",
-          "",
-          `共 ${total} 个 agent，全部返回 status: "failed" 或未提交。`,
-          "请检查内容或宿主环境后重试。",
-        ].join("\n"),
+        text: formatStatusMessage(
+          rejected("all_agents_failed", { total }),
+          [
+            "❌ **没有可用的 agent 结果，无法聚合。**",
+            "",
+            `共 ${total} 个 agent，全部返回 status: "failed" 或未提交。`,
+            "请检查内容或宿主环境后重试。",
+          ].join("\n"),
+        ),
       }],
       isError: true,
     };
@@ -652,7 +714,10 @@ async function finalizeSlots(
     return {
       content: [{
         type: "text",
-        text: `❌ 自动聚合失败：${err.message}`,
+        text: formatStatusMessage(
+          rejected("agent_result_format_error", { error: err.message }),
+          `❌ 自动聚合失败：${err.message}`,
+        ),
       }],
       isError: true,
     };

@@ -6,6 +6,7 @@ import * as os from "os";
 
 import { reviewContentWizardContinueModule } from "../tools/continueWizardTool.js";
 import { isValidSessionId } from "../utils/sessionId.js";
+import { rejected, degraded, progress, formatStatus, formatStatusMessage, parseStatus } from "../execution/continuationStatus.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -907,5 +908,50 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     // After finalizeSlots, state should have incremented revision and cleared continuation
     assert.ok(s.revision >= 3, "revision should be incremented after finalize");
     assert.ok(!s.activeContinuation, "continuation should be cleared after finalize");
+  });
+});
+
+// ── Structured Continuation Status protocol tests ───────────────────────────
+
+describe("ContinuationStatus — structured status protocol", () => {
+  it("formatStatus embeds JSON inside KEVLAR_STATUS markers", () => {
+    const status = rejected("stale_revision", { currentRevision: 5, expectedRevision: 3 });
+    const wire = formatStatus(status);
+    assert.ok(wire.startsWith("[KEVLAR_STATUS]\n"));
+    assert.ok(wire.includes("[/KEVLAR_STATUS]"));
+    assert.ok(wire.includes('"stale_revision"'));
+  });
+
+  it("parseStatus extracts structured status from wire format", () => {
+    const original = rejected("continuation_id_mismatch", { expected: "cont-1", received: "cont-2" });
+    const wire = formatStatusMessage(original, "Human message");
+    const parsed = parseStatus(wire);
+    assert.equal(parsed?.status, "rejected");
+    assert.equal(parsed?.reason, "continuation_id_mismatch");
+    assert.equal(parsed?.retry, false);
+    assert.deepEqual(parsed?.details, { expected: "cont-1", received: "cont-2" });
+  });
+
+  it("parseStatus returns null when no marker present", () => {
+    assert.equal(parseStatus("plain text"), null);
+  });
+
+  it("degraded status includes retry: false", () => {
+    const s = degraded("continuation_expired", { sessionId: "s1" });
+    assert.equal(s.status, "degraded");
+    assert.equal(s.retry, false);
+  });
+
+  it("progress status includes retry: true", () => {
+    const s = progress("slot_received", { agentId: "a1", remaining: 2 });
+    assert.equal(s.status, "progress");
+    assert.equal(s.retry, true);
+  });
+
+  it("formatStatusMessage includes human message after structured envelope", () => {
+    const msg = formatStatusMessage(rejected("no_active_continuation"), "❌ 此会话没有活动的延续请求。");
+    assert.ok(msg.includes("[KEVLAR_STATUS]"));
+    assert.ok(msg.includes("[/KEVLAR_STATUS]"));
+    assert.ok(msg.includes("此会话没有活动的延续请求。"));
   });
 });
