@@ -20,7 +20,25 @@ ChurzeXo/kevlar-4u (public, AGPL-3.0)       ChurzeXo/kevlar-pro-runtime (private
 
 ---
 
-## 一、初次设置（仅首次执行）
+## 一、提交策略决策表
+
+| 场景 | Free 代码 `src/` | Pro 子模块 `src/pro/` | 后端数据库 `kevlar4u.xyz` | 操作 |
+|---|---|---|---|---|
+| 只改 Free 代码，不发布 | 提交+推送 | 不动 | 不动 | `git add/commit/push` on main |
+| 只改 Pro 代码，不发布 | 不动 | `npm run commit:pro` 自动处理 | 不动 | `npm run commit:pro`（提交子模块 + 更新主仓指针） |
+| 同时改 Free + Pro，不发布 | 先提交+推送 | 再 `npm run commit:pro` | 不动 | `git add/commit/push` → `npm run commit:pro` |
+| 准备发布（npm publish 前） | ✅ 确保已提交 | ✅ 确保已提交 | **先同步再发布** | `npm run sync:backend -- "变更摘要"` → `npm version patch` → `git push --tags` |
+| 发布后发现漏了 DB 同步 | 不动 | 不动 | **补同步** | `npm run sync:backend -- "变更摘要"` |
+
+**关键原则：**
+- **后端数据库在 npm publish 前同步**——版本号相同，先写库再发布无冲突
+- 如果发布前忘记同步，发布后补同步也可以，不影响已有功能
+- 仅改代码不发布时，不需要操作数据库
+- `npm run commit:pro` = 一站式提交并推送 Pro 子模块 + 更新主仓指针，不要手动分两步做
+
+---
+
+## 二、初次设置（仅首次执行）
 
 ### 1. 在 GitHub 创建私有仓库
 
@@ -65,7 +83,7 @@ git submodule update --init --recursive   # 需要私有仓库的读权限
 
 ---
 
-## 二、日常开发工作流
+## 三、日常开发工作流
 
 ### 改 Pro 代码
 
@@ -98,9 +116,9 @@ npm run commit:pro
 
 ---
 
-## 三、NPM 包发布
+## 四、NPM 包发布
 
-### 3.1 Free 包 (kevlar-4u) — 公开
+### 4.1 Free 包 (kevlar-4u) — 公开
 
 ```bash
 cd ~/Documents/MCP-Service/kevlar
@@ -141,7 +159,7 @@ CI (`.github/workflows/release.yml`) 自动执行：
 | `NPM_TOKEN` | npm 发布 token | Settings → Secrets → Actions |
 | `PRO_REPO_DEPLOY_KEY` | Pro CI 拉取子模块的 SSH 私钥 | 同上（仅内部需配） |
 
-### 3.2 Pro 包 (@kevlar/pro-runtime) — 私有 (GitHub Packages)
+### 4.2 Pro 包 (@kevlar/pro-runtime) — 私有 (GitHub Packages)
 
 Pro 代码在 `src/pro/` 子模块中。发布于私有 GitHub Packages 而非 npm。
 
@@ -172,7 +190,7 @@ package.json 配置参考：
 }
 ```
 
-### 3.3 用户如何安装 Pro
+### 4.3 用户如何安装 Pro
 
 ```bash
 # 配置 GitHub Packages 认证
@@ -186,7 +204,7 @@ npm install @kevlar/pro-runtime  # Pro 私有包
 
 ---
 
-## 四、发布前熔断检查清单
+## 五、发布前熔断检查清单
 
 每次 `npm publish` 前确认：
 
@@ -196,15 +214,18 @@ npm install @kevlar/pro-runtime  # Pro 私有包
 ✅ dist/execution/proRuntime.js 中对 Pro 的引用保持为动态字符串 import("@kevlar/pro-runtime")
 ✅ npm test 全部通过 (315 Free + 35 Pro)
 ✅ git status 干净，无未提交的 Pro 源码泄漏
+✅ 后端数据库已同步当前版本（`curl -s https://kevlar4u.xyz/api/v1/version` 确认）
 ```
 
 ---
 
-## 五、后端数据库写入
+## 六、后端数据库写入
 
-npm publish 只推送包到 registry。`check_update` 查版本和 Pro 激活都需要 `kevlar4u.xyz` 后端数据库中有对应记录。发布新版本后必须同步更新后端。
+npm publish 只推送包到 registry。`check_update` 查版本和 Pro 激活都需要 `kevlar4u.xyz` 后端数据库中有对应记录。
 
-### 5.1 Admin Token
+> **⚠️ 必须 npm publish 前同步，不要等发布后再更新。** 详见"一、提交策略决策表"。
+
+### 6.1 Admin Token
 
 `POST /api/v1/admin/version` 需要 admin token，由 `ADMIN_API_TOKEN` 环境变量控制。
 
@@ -235,7 +256,7 @@ curl -s ... -H "Authorization: Bearer $ADMIN_API_TOKEN" ...
 
 > **注意**：`ADMIN_API_TOKEN` 是后端环境变量，不存储在 kevlar-4u 仓库中。开发环境默认值仅用于本地测试。
 
-### 5.2 更新版本号
+### 6.2 更新版本号
 
 每次发布新版本后执行：
 
@@ -265,7 +286,7 @@ curl -s -X POST https://kevlar4u.xyz/api/v1/admin/version \
 curl -s https://kevlar4u.xyz/api/v1/version
 ```
 
-### 5.3 生成 Pro 激活码
+### 6.3 生成 Pro 激活码
 
 ```bash
 curl -s https://kevlar4u.xyz/api/v1/admin/seed
@@ -279,7 +300,7 @@ curl -s https://kevlar4u.xyz/api/v1/admin/seed
 
 ---
 
-## 六、环境变量速查
+## 七、环境变量速查
 
 | 变量 | 用途 |
 |---|---|
@@ -292,7 +313,7 @@ curl -s https://kevlar4u.xyz/api/v1/admin/seed
 
 ---
 
-## 七、本地开发说明
+## 八、本地开发说明
 
 子模块 + tsconfig paths 方案，无需 npm link。
 
