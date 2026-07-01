@@ -5,22 +5,10 @@
 
 import fs from "fs";
 import path from "path";
-import os from "os";
 import { execSync } from "child_process";
+import { getRegistry } from "./registry.js";
 
 const MCP_NAME = "kevlar-4u";
-
-function getClaudeConfigPath(): string {
-  const H = os.homedir();
-  if (process.platform === "darwin") {
-    return path.join(H, "Library/Application Support/Claude/claude_desktop_config.json");
-  }
-  if (process.platform === "win32") {
-    return path.join(H, "AppData/Roaming/Claude/claude_desktop_config.json");
-  }
-  // Linux: Claude Desktop currently not officially supported, but try common path
-  return "";
-}
 
 async function setup() {
   console.log("🛡️  Setting up Kevlar-4u Server (Zero-Config)...");
@@ -50,7 +38,8 @@ async function setup() {
   }
 
   // ── 3. Inject Claude Desktop config ──────────────────────────
-  const configPath = getClaudeConfigPath();
+  const claude = getRegistry().find((c) => c.id === "claude");
+  const configPath = claude?.configPath() ?? "";
 
   if (!configPath) {
     console.log(
