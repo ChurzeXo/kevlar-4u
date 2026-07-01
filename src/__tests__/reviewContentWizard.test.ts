@@ -60,9 +60,19 @@ function extractSessionId(text: string): string {
 
 /**
  * Extract just the AgentBlueprint JSON from a wizard response that includes
- * a kevlar-state block appended after the blueprint.
+ * a kevlar-state block or markdown json code block.
  */
 function extractAgentBlueprintJson(text: string): string {
+  // New format: text inside ```json ... ``` block
+  const jsonBlockStart = text.indexOf("```json");
+  if (jsonBlockStart >= 0) {
+    const contentStart = jsonBlockStart + 7;
+    const jsonBlockEnd = text.indexOf("\n```", contentStart);
+    if (jsonBlockEnd >= 0) {
+      return text.substring(contentStart, jsonBlockEnd).trim();
+    }
+  }
+  // Legacy format fallback: text before ```kevlar-state
   const idx = text.indexOf("```kevlar-state");
   return idx >= 0 ? text.substring(0, idx).trim() : text.trim();
 }
@@ -170,9 +180,8 @@ const startText = textOf(started);
       userMessage: "开始舆论仿真推演",
     });
     const reviewerText = textOf(reviewerDone);
-    // After Phase 2 refactor, review execution dispatches an AgentBlueprint for
-    // parallel subagent persona review instead of running orchestrator inline.
-    assert.ok(reviewerText.includes("currentStep: waitingForPersonaAudit"));
+    // Review execution dispatches an AgentBlueprint with wrapper instructions
+    assert.ok(reviewerText.includes("Persona Review — Subagent Dispatch Request"));
     assert.ok(reviewerText.includes("kevlar.exec/v1"));
     assert.ok(reviewerText.includes("persona_reviewer"));
     assert.ok(reviewerText.includes("review_content_wizard_continue"));
@@ -234,9 +243,8 @@ const startText = textOf(started);
       userMessage: "开始舆论仿真推演",
     });
     const reviewerText = textOf(reviewerDone);
-    // After Phase 2 refactor, review execution dispatches an AgentBlueprint for
-    // parallel subagent persona review instead of running orchestrator inline.
-    assert.ok(reviewerText.includes("currentStep: waitingForPersonaAudit"));
+    // Review execution dispatches an AgentBlueprint with wrapper instructions
+    assert.ok(reviewerText.includes("Persona Review — Subagent Dispatch Request"));
     assert.ok(reviewerText.includes("kevlar.exec/v1"));
     assert.ok(reviewerText.includes("persona_reviewer"));
     assert.ok(reviewerText.includes("review_content_wizard_continue"));
@@ -564,13 +572,13 @@ describe("AgentBlueprint structure validation", () => {
     });
     assert.ok(textOf(confirmed).includes("currentStep: waitingForReviewerConfirmation"));
 
-    // Execute review → waitingForPersonaAudit (AgentBlueprint dispatched)
+    // Execute review → dispatches AgentBlueprint with wrapper instructions
     const dispatch = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始舆论仿真推演",
     });
     const dispatchText = textOf(dispatch);
-    assert.ok(dispatchText.includes("currentStep: waitingForPersonaAudit"));
+    assert.ok(dispatchText.includes("Persona Review — Subagent Dispatch Request"));
 
     // Parse the AgentBlueprint JSON from response
     const blueprint = JSON.parse(extractAgentBlueprintJson(dispatchText));

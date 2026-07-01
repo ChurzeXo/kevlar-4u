@@ -157,7 +157,6 @@ export const reviewContentWizardContinueModule: ToolModule = {
           await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
           await fs.promises.rename(tmpPath, statePath);
 
-          // Persona audit has no orchestration fallback — abort cleanly
           if (state.step === "waitingForPersonaAudit") {
             return {
               content: [{
@@ -169,13 +168,16 @@ export const reviewContentWizardContinueModule: ToolModule = {
                     "",
                     "可能的原因：",
                     "- 宿主 AI 不支持 Subagent 并行调度",
-                    "- 返回的 JSON 格式不符合 kevlar.persona-review/v1 协议",
+                    "- 返回的 JSON 格式不符合 kevlar.exec/v1 协议",
                     "",
-                    "建议：请使用其他 MCP 客户端（如支持 Task/Subagent 工具的客户端）重试。",
+                    "如果你的环境不支持并行 Subagent 调度，",
+                    "请调用 `review_content_wizard`（注意不是 _continue）并发送内容：`SEQUENTIAL_FALLBACK`",
+                    "Kevlar 将退出并行调度流程，让你重新选择评审员。",
+                    "",
+                    "或者你可以修正 Receipt 格式后通过 `review_content_wizard_continue` 重试。",
                   ].join("\n"),
                 ),
               }],
-              isError: true,
             };
           }
 
@@ -421,13 +423,13 @@ async function handleAgentSlot(
   result: string | undefined,
 ): Promise<ToolResult> {
   // ── Step check ──────────────────────────────────────────────────────────
-  if (state.step !== "waitingForSubagentAudit") {
+  if (state.step !== "waitingForSubagentAudit" && state.step !== "waitingForPersonaAudit") {
     return {
       content: [{
         type: "text",
         text: formatStatusMessage(
           rejected("invalid_step", { currentStep: state.step }),
-          `❌ 当前步骤不支持逐 agent 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 步骤可用。`,
+          `❌ 当前步骤不支持逐 agent 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 或 waitingForPersonaAudit 步骤可用。`,
         ),
       }],
       isError: true,

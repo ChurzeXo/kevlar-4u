@@ -119,11 +119,13 @@ describe("End-to-End integration test", () => {
       // Verify AgentBlueprint structure in the response
       assert.ok(step3Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol marker");
       assert.ok(step3Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
-      assert.ok(step3Text.includes("currentStep: waitingForPersonaAudit"), "Should be in persona audit step");
+      assert.ok(step3Text.includes("Persona Review — Subagent Dispatch Request"), "Should contain dispatch request");
 
-      // Extract the JSON blueprint (before the kevlar-state block)
-      const jsonEnd = step3Text.indexOf("```kevlar-state");
-      const jsonText = jsonEnd > 0 ? step3Text.substring(0, jsonEnd).trim() : step3Text;
+      // Extract the JSON blueprint from the ```json code block
+      const jsonStart = step3Text.indexOf("```json");
+      const contentStart = jsonStart + 7;
+      const jsonBlockEnd = step3Text.indexOf("\n```", contentStart);
+      const jsonText = jsonBlockEnd >= 0 ? step3Text.substring(contentStart, jsonBlockEnd).trim() : step3Text;
       const blueprint = JSON.parse(jsonText);
 
       assert.equal(blueprint.protocol, "kevlar.exec/v1");
@@ -293,11 +295,13 @@ describe("End-to-End integration test", () => {
       // Verify AgentBlueprint dispatch
       assert.ok(step5Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol");
       assert.ok(step5Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
-      assert.ok(step5Text.includes("waitingForPersonaAudit"), "Should be in persona audit step");
+      assert.ok(step5Text.includes("Persona Review — Subagent Dispatch Request"), "Should contain dispatch request");
 
-      // Parse blueprint
-      const jsonEnd = step5Text.indexOf("```kevlar-state");
-      const jsonText = jsonEnd > 0 ? step5Text.substring(0, jsonEnd).trim() : step5Text;
+      // Parse blueprint from ```json block
+      const jsonStart = step5Text.indexOf("```json");
+      const contentStart = jsonStart + 7;
+      const jsonBlockEnd = step5Text.indexOf("\n```", contentStart);
+      const jsonText = jsonBlockEnd >= 0 ? step5Text.substring(contentStart, jsonBlockEnd).trim() : step5Text;
       const blueprint = JSON.parse(jsonText);
       assert.equal(blueprint.protocol, "kevlar.exec/v1");
       assert.equal(blueprint.execution.isolation.level, "strict");
@@ -530,11 +534,13 @@ describe("End-to-End integration test", () => {
       });
       const step6Text = (step6.content as any)[0].text;
       assert.ok(step6Text.includes("kevlar.exec/v1"), "Should have AgentBlueprint for persona audit");
-      assert.ok(step6Text.includes("waitingForPersonaAudit"), "Should be in persona audit step");
+      assert.ok(step6Text.includes("Persona Review — Subagent Dispatch Request"), "Should contain dispatch request");
 
-      // Extract JSON from mixed content
-      const jsonEnd = step6Text.indexOf("```kevlar-state");
-      const jsonText = jsonEnd > 0 ? step6Text.substring(0, jsonEnd).trim() : step6Text;
+      // Extract JSON from ```json block
+      const jsonStart = step6Text.indexOf("```json");
+      const contentStart = jsonStart + 7;
+      const jsonBlockEnd = step6Text.indexOf("\n```", contentStart);
+      const jsonText = jsonBlockEnd >= 0 ? step6Text.substring(contentStart, jsonBlockEnd).trim() : step6Text;
       const personaBlueprint = JSON.parse(jsonText);
       assert.equal(personaBlueprint.continuation.checkpoint, "persona_audit_started");
 

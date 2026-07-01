@@ -1216,8 +1216,7 @@ async function handleSubagentAuditResult(
   strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   // ── SEQUENTIAL_FALLBACK → drop to standard orchestration ───────────────
-  const trimmed = userMessage.trim();
-  if (trimmed === "SEQUENTIAL_FALLBACK") {
+  if (userMessage.trim().includes("SEQUENTIAL_FALLBACK")) {
     fallbackToStandardOrchestration(state, "subagent_fallback");
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
@@ -2415,6 +2414,16 @@ function buildPersonaAgentBlueprint(
       checkpoint: "persona_audit_started",
       expectedRevision: state.revision ?? 1,
       idempotencyKey: `${state.sessionId}-persona-${Date.now()}`,
+      // Pro: agent slot metadata for per-agent result submission
+      ...(state.tier === "pro"
+        ? {
+            agentSlots: {
+              total: agents.length,
+              agentIds: agents.map((a) => a.id),
+              allowPartialSubmit: true,
+            } satisfies import("../execution/protocol.js").ContinuationSpec["agentSlots"],
+          }
+        : {}),
     },
   };
 }
@@ -2432,6 +2441,28 @@ async function handlePersonaAuditResult(
   userMessage: string,
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
+  // ── SEQUENTIAL_FALLBACK → return to review decision ────────────────────
+  if (userMessage.trim().includes("SEQUENTIAL_FALLBACK")) {
+    transitionState(state, "waitingForReviewDecision", "subagent_fallback");
+    const allPersonas = personas.length > 0 ? personas : await loadAllPersonas(tmpDir.replace("/tmp/", ""));
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        "⚠️ **宿主 AI 不支持并行 Subagent 调度**",
+        "",
+        "当前客户端环境无法为每位评审员创建独立的并行子代理。",
+        "请切换至支持 Task/Subagent 工具的 MCP 客户端（如 Claude Code、opencode），",
+        "或使用 standard 编排模式重新开始评测。",
+        "",
+        "你仍然可以在此会话中重新选择评审员：",
+        ...personas.map((p, i) => `  ${i + 1}. ${p.meta.name}`),
+        "",
+        "输入编号重新选择，或回复「结束」退出评测。",
+      ].join("\n"),
+    );
+  }
+
   // ── Early schema validation ─────────────────────────────────────────────
   let parsed: any;
   try {
@@ -2441,10 +2472,12 @@ async function handlePersonaAuditResult(
     return toolResponse(
       state,
       [
-        "❌ **无法解析 Host AI 返回的 Persona ExecutionReceipt**",
+        "❌ **无法解析宿主 AI 返回的 Persona ExecutionReceipt**",
         "",
         "返回内容不是有效的 JSON。请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
+        "",
+        '如果你的环境不支持并行 Subagent，请发送：`SEQUENTIAL_FALLBACK`',
       ].join("\n"),
     );
   }
@@ -2666,19 +2699,50 @@ async function executeReview(
 
   await saveState(tmpDir, state);
 
+  const isProTier = state.tier === "pro";
+
+  const perAgentGuidance = isProTier ? [
+    "",
+    "### Pro option: submit per-agent results individually",
+    "If your environment can submit results as each agent completes:",
+    "1. Execute each persona agent independently",
+    "2. For each completed agent, call `review_content_wizard_continue` with:",
+    "   - The same sessionId, checkpoint, expectedRevision, continuationId",
+    `   - \`agentId\`: the agent's ID (e.g., \`${blueprint.agents[0]?.id || "persona_1"}\`)`,
+    "   - `result`: a JSON object with the agent's findings (agentId + status + output)",
+    "3. Kevlar will auto-aggregate when all agents have reported",
+    "",
+  ].join("\n") : "";
+
+  const blueprintText = [
+    "## Kevlar-4u Persona Review — Subagent Dispatch Request",
+    "",
+    "I need you to simulate reader reactions by running each persona below",
+    "as an independent subagent with isolated context, executing in parallel.",
+    "",
+    "### If you can execute subagent dispatch (batch)",
+    "1. Read each agent definition in the AgentBlueprint below",
+    "2. Create a subagent for each agent and execute the review independently",
+    "3. Aggregate all results into a single ExecutionReceipt (per kevlar.exec/v1)",
+    "4. Call `review_content_wizard_continue` with the receipt",
+    "   (include sessionId, checkpoint, expectedRevision from the blueprint)",
+    perAgentGuidance,
+    "### If you CANNOT execute subagent dispatch",
+    "(e.g., your environment doesn't support parallel subagents)",
+    "→ Call `review_content_wizard` again with `userMessage: \"SEQUENTIAL_FALLBACK\"`",
+    "",
+    "---",
+    "### AgentBlueprint",
+    "",
+    "```json",
+    JSON.stringify(blueprint, null, 2),
+    "```",
+  ].join("\n");
+
   return {
     content: [{
       type: "text",
-      text: [
-        JSON.stringify(blueprint, null, 2),
-        "",
-        "```kevlar-state",
-        `sessionId: ${state.sessionId}`,
-        "workflow: review_content",
-        `currentStep: ${state.step}`,
-        `selectedPersonaIds: ${state.selectedPersonaIds.join(", ") || "none"}`,
-        "```",
-      ].join("\n"),
+      text: blueprintText,
     }],
   };
 }
