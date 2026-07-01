@@ -1827,6 +1827,7 @@ async function handleInventoryCheck(
     await saveState(tmpDir, state);
 
     const displayText = [
+      "<!-- kevlar:verbatim-options:start -->",
       "接下来进行舆论仿真推演。根据内容特色，推荐了以下评审员：",
       "",
       ...displayPersonas.map((p, i) =>
@@ -1836,6 +1837,7 @@ async function handleInventoryCheck(
       "输入编号选择评审员（例如「1,2」），或回复：",
       "- 「查看全部」浏览所有评审员",
       "- 「创建」新建评审员",
+      "<!-- kevlar:verbatim-options:end -->",
     ].join("\n");
 
     return toolResponse(state, displayText);
@@ -1877,9 +1879,11 @@ async function handleReviewDecision(
         `${i + 1}. ${p.meta.name} · ${p.meta.tags.join("、") || "通用"}`,
       );
       return toolResponse(state,
+        "<!-- kevlar:verbatim-options:start -->\n" +
         "所有评审员（共 " + personas.length + " 位）：\n\n" +
         personaLines.join("\n") +
-        "\n\n输入编号选择（例如「1,3,5」），或回复「创建」新建评审员。",
+        "\n\n输入编号选择（例如「1,3,5」），或回复「创建」新建评审员。\n" +
+        "<!-- kevlar:verbatim-options:end -->",
       );
     }
 
@@ -1914,7 +1918,7 @@ async function handleReviewDecision(
     }
 
     return toolResponse(state,
-      "请输入编号选择评审员（例如「1,2」），或回复「查看全部」「创建」。",
+      "<!-- kevlar:verbatim-options:start -->\n请输入编号选择评审员（例如「1,2」），或回复「查看全部」「创建」。\n<!-- kevlar:verbatim-options:end -->",
     );
   }
 
@@ -1923,11 +1927,13 @@ async function handleReviewDecision(
     return toolResponse(
       state,
       [
+        "<!-- kevlar:verbatim-options:start -->",
         "目标平台风控模拟暂未开放，敬请期待。",
         "",
         "请选择：",
         "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
         "2. 目标平台风控模拟（暂未开放，敬请期待）",
+        "<!-- kevlar:verbatim-options:end -->",
       ].join("\n"),
     );
   }
@@ -1938,9 +1944,11 @@ async function handleReviewDecision(
     return toolResponse(
       state,
       [
+        "<!-- kevlar:verbatim-options:start -->",
         "请选择：",
         "1. 舆论仿真推演 — 由评审员角色模拟真实用户的评论区反应",
         "2. 目标平台风控模拟（暂未开放，敬请期待）",
+        "<!-- kevlar:verbatim-options:end -->",
       ].join("\n"),
     );
   }
@@ -1954,6 +1962,7 @@ async function handleReviewDecision(
     return toolResponse(
       state,
       [
+        "<!-- kevlar:verbatim-options:start -->",
         `当前共有 ${personas.length} 位评审员，已全部选中：`,
         "",
         ...personas.map(
@@ -1961,6 +1970,7 @@ async function handleReviewDecision(
         ),
         "",
         "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
+        "<!-- kevlar:verbatim-options:end -->",
       ].join("\n"),
     );
   }
@@ -1977,6 +1987,7 @@ async function handleReviewDecision(
   return toolResponse(
     state,
     [
+      "<!-- kevlar:verbatim-options:start -->",
       recommendation.assistantMessage,
       "",
       ...(remainingPersonas.length > 0
@@ -1987,6 +1998,7 @@ async function handleReviewDecision(
         : []),
       "",
       "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」替换指定评审员（例如：2 换一位）。",
+      "<!-- kevlar:verbatim-options:end -->",
     ]
       .filter(Boolean)
       .join("\n"),
@@ -2027,6 +2039,7 @@ async function handleReviewerConfirmation(
   return toolResponse(
     state,
     [
+      "<!-- kevlar:verbatim-options:start -->",
       "当前已选评审员：",
       ...selectedUserPersonas.map((p, i) => `${i + 1}. ${p.meta.name} · ${p.meta.description}`),
       "",
@@ -2035,6 +2048,7 @@ async function handleReviewerConfirmation(
         : []),
       "",
       "请回复「开始舆论仿真推演」确认执行，或回复「X 换一位」替换指定评审员。",
+      "<!-- kevlar:verbatim-options:end -->",
     ].join("\n"),
   );
 }
@@ -2209,16 +2223,24 @@ async function handleNextRound(
 
   // 换一批评审员
   if (/^(换一批|换|继续|继续评测|再来一轮|next|continue|1)$/i.test(normalized)) {
-    // Track used personas so handleInventoryCheck can exclude them
     await saveState(tmpDir, state);
     return handleInventoryCheck(tmpDir, state, personas, samplingFn);
   }
 
-  // 解锁 Pro
-  if (/^(解锁|升级|pro|专业版|六维|六维风险检测|解锁pro|3)$/i.test(normalized)) {
+  const proActive = isPro();
+
+  // 解锁 Pro / 继续多维评审
+  if (/^(解锁|升级|pro|专业版|六维|六维风险检测|解锁pro|继续多维|多维评审|3)$/i.test(normalized)) {
+    if (proActive) {
+      // Pro 用户：重定向到六维检测复用 → 评审员推演
+      transitionState(state, "checkPersonaInventory", "pro_multi_dim_continue");
+      await saveState(tmpDir, state);
+      return handleInventoryCheck(tmpDir, state, personas, samplingFn);
+    }
     return toolResponse(
       state,
       [
+        "<!-- kevlar:verbatim-options:start -->",
         "六维风险检测是 Pro 版专属功能，可对内容进行合规、语境、网络文化、事实与跨语言全维度深度分析。",
         "",
         "升级方式：",
@@ -2226,6 +2248,7 @@ async function handleNextRound(
         "2. 或访问 https://kevlar4u.xyz 获取激活码",
         "",
         "升级后请重新调用 review_content_wizard 继续评测。",
+        "<!-- kevlar:verbatim-options:end -->",
       ].join("\n"),
     );
   }
@@ -2237,13 +2260,24 @@ async function handleNextRound(
     return toolResponse(state, "评测已结束。需要评测新内容时，请重新开始。");
   }
 
+  const usedIds = new Set(state.usedPersonaIds || []);
+  const remainingCount = personas.filter(p => !usedIds.has(p.meta.id)).length;
+  const proOption = proActive
+    ? "- 继续多维评审（Pro）🔓"
+    : "- 解锁六维风险检测 🔓（专业版）";
+  const swapOption = remainingCount > 0
+    ? `- 换一批评审员 — 从未参与本轮的角色中重新筛选（剩余 ${remainingCount} 位）`
+    : "- 换一批评审员 — 所有评审员均已参与";
+
   return toolResponse(
     state,
     [
+      "<!-- kevlar:verbatim-options:start -->",
       "评测完成。是否继续？",
-      "1. 换一批评审员 — 从未参与本轮的角色中重新筛选",
-      "2. 结束评测",
-      "3. 解锁六维风险检测 🔓（专业版）",
+      swapOption,
+      proOption,
+      "- 结束评测",
+      "<!-- kevlar:verbatim-options:end -->",
     ].join("\n"),
   );
 }
@@ -2637,17 +2671,26 @@ async function handlePersonaAuditResult(
       state.usedPersonaIds = [...(state.usedPersonaIds || []), ...state.selectedPersonaIds];
       await saveState(tmpDir, state);
       const updateNote = await checkForUpdate().catch(() => null);
+      const usedIds = new Set(state.usedPersonaIds || []);
+      const remainingCount = personas.filter(p => !usedIds.has(p.meta.id)).length;
+      const proActive = isPro();
+      const proOption = proActive
+        ? "- 继续多维评审（Pro）🔓"
+        : "- 解锁六维风险检测 🔓（专业版）";
+      const swapOption = remainingCount > 0
+        ? `- 换一批评审员 — 从未参与本轮的角色中重新筛选（剩余 ${remainingCount} 位）`
+        : "- 换一批评审员 — 所有评审员均已参与";
       const optionsText = [
         "<!-- kevlar:verbatim-options:start -->",
         "评测完成。是否继续？",
-        "- 换一批评审员 — 从未参与本轮的角色中重新筛选",
-        "- 解锁六维风险检测 🔓（专业版）",
+        swapOption,
+        proOption,
         "- 结束评测",
         "<!-- kevlar:verbatim-options:end -->",
       ].join("\n");
       return toolResponse(
         state,
-        reportParts.join("\n") + "\n\n---\n\n" + optionsText + (updateNote ?? ""),
+        reportParts.join("\n") + "\n\n---\n\n" + (updateNote ? updateNote + "\n\n" : "") + optionsText,
       );
     }
 
