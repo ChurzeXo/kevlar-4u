@@ -704,13 +704,15 @@ async function finalizeSlots(
   }
 
   const allPersonas = await loadAllPersonas(deps.skillsDir);
-  const systemAuditors = allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
+  const auditors = state.step === "waitingForPersonaAudit"
+    ? allPersonas.filter((p) => !p.meta.tags.includes("system_auditor"))
+    : allPersonas.filter((p) => p.meta.tags.includes("system_auditor"));
 
   let syntheticReceipt: any;
   try {
     syntheticReceipt = buildSyntheticReceipt(
       state.agentSlots.received,
-      systemAuditors,
+      auditors,
     );
   } catch (err: any) {
     return {
