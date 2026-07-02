@@ -18,6 +18,7 @@ import {
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
 import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
+import JSON5 from "json5";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { invalidInputError, validationError, internalError } from "../utils/errors.js";
 import type { ToolModule } from "./types.js";
@@ -1016,7 +1017,7 @@ async function handleOrchestrationStep0Result(
   strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   try {
-    const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+    const parsed = resilientJsonParse(userMessage);
 
     // webContextMap is provided by host AI (from its own web search)
     const webContextMap: Record<string, string> = {};
@@ -1147,7 +1148,7 @@ async function handleOrchestrationAuditResult(
   strategyProvider?: StrategyProvider,
 ): Promise<ToolResult> {
   try {
-    const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+    const parsed = resilientJsonParse(userMessage);
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
 
     // Step 5: code-layer deterministic merge
@@ -1244,15 +1245,16 @@ async function handleSubagentAuditResult(
   // ── Early schema validation ─────────────────────────────────────────────
   let parsed: any;
   try {
-    parsed = JSON.parse(stripCodeFence(userMessage.trim()));
-  } catch {
+    parsed = resilientJsonParse(userMessage);
+  } catch (jsonErr: any) {
     await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
         "❌ **无法解析 Host AI 返回的 Subagent ExecutionReceipt**",
         "",
-        "返回内容不是有效的 JSON。请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
+        `解析错误：${jsonErr?.message || "未知错误"}`,
+        "请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
       ].join("\n"),
     );
@@ -1435,7 +1437,7 @@ async function handleOrchestrationFinalResult(
   samplingFn?: MultiTurnSamplingFunction,
 ): Promise<ToolResult> {
   try {
-    const parsed = JSON.parse(stripCodeFence(userMessage.trim()));
+    const parsed = resilientJsonParse(userMessage);
     const turn2 = state.orchestrationTurn2Results;
 
     if (!turn2) {
@@ -2175,7 +2177,7 @@ async function recommendPersonas(
         ],
         maxTokens: 3072,
       });
-      const parsed = JSON.parse(stripCodeFence(response.content.trim())) as Record<string, unknown>;
+      const parsed = resilientJsonParse(response.content.trim()) as Record<string, unknown>;
       const validIds = new Set(personas.map((p) => p.meta.id));
       const personaIds = Array.isArray(parsed.personaIds)
         ? parsed.personaIds
@@ -2514,15 +2516,16 @@ async function handlePersonaAuditResult(
   // ── Early schema validation ─────────────────────────────────────────────
   let parsed: any;
   try {
-    parsed = JSON.parse(stripCodeFence(userMessage.trim()));
-  } catch {
+    parsed = resilientJsonParse(userMessage);
+  } catch (jsonErr: any) {
     await rollbackState(tmpDir, state.sessionId);
     return toolResponse(
       state,
       [
         "❌ **无法解析宿主 AI 返回的 Persona ExecutionReceipt**",
         "",
-        "返回内容不是有效的 JSON。请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
+        `解析错误：${jsonErr?.message || "未知错误"}`,
+        "请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
         "",
         '如果你的环境不支持并行 Subagent，请发送：`SEQUENTIAL_FALLBACK`',
@@ -2841,10 +2844,22 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     }
 
     // Short TTL for waiting states: if the continuation has expired,
-    // clean up and let the user know the session timed out.
+    // roll back to the last saved checkpoint and let the user retry.
     if (state.activeContinuation && state.activeContinuation.expiresAt < Date.now()) {
-      await cleanupState(tmpDir, sessionId);
-      throw internalError("评测会话已超时（等待 Host AI 返回结果超过 30 分钟），请重新发起评测。");
+      const rolledBack = await rollbackState(tmpDir, sessionId);
+      if (rolledBack && fs.existsSync(statePath)) {
+        const raw = await fs.promises.readFile(statePath, "utf-8");
+        const restoredState = JSON.parse(raw) as ReviewWizardState;
+        restoredState.activeContinuation = undefined;
+        restoredState.revision = (restoredState.revision ?? 0) + 1;
+        restoredState.step = "waitingForRegionSelection";
+        return restoredState;
+      }
+      // If rollback failed, still preserve state with content intact
+      state.activeContinuation = undefined;
+      state.revision = (state.revision ?? 0) + 1;
+      state.step = "waitingForRegionSelection";
+      return state;
     }
     if (!state.systemAuditorIds) {
       state.systemAuditorIds = [];
@@ -2951,4 +2966,41 @@ function stripCodeFence(text: string): string {
     .replace(/^```\s*/, "")
     .replace(/\s*```$/, "")
     .trim();
+}
+
+function extractPositionContext(raw: string, errorPos: number, contextRadius = 200): string {
+  const start = Math.max(0, errorPos - contextRadius);
+  const end = Math.min(raw.length, errorPos + contextRadius);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < raw.length ? "…" : "";
+  return prefix + raw.slice(start, end) + suffix;
+}
+
+function resilientJsonParse(userMessage: string): any {
+  const raw = stripCodeFence(userMessage.trim());
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON5.parse(raw);
+    } catch (json5Err: any) {
+      let msg = `JSON 解析失败`;
+      const posMatch = typeof json5Err?.message === "string"
+        ? json5Err.message.match(/position (\d+)/)
+        : null;
+
+      if (posMatch) {
+        const pos = parseInt(posMatch[1], 10);
+        const context = extractPositionContext(raw, pos);
+        msg += ` (位置 ${pos}):\n\`\`\`\n${context}\n\`\`\``;
+      } else if (typeof json5Err?.message === "string") {
+        msg += `: ${json5Err.message}`;
+      }
+
+      const err = new SyntaxError(msg);
+      (err as any).code = "JSON_PARSE_ERROR";
+      throw err;
+    }
+  }
 }

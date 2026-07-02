@@ -12,6 +12,7 @@ import { ToolResult } from "../utils/types.js";
 import type { ToolModule, ToolDependencies } from "./types.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { invalidInputError } from "../utils/errors.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { loadAllPersonas } from "../utils/parser.js";
 import type { AuditCheckpoint } from "../execution/checkpoint.js";
 import { MAX_CONTINUATION_RETRIES, validateContinuationGate, fallbackToStandardOrchestration } from "../execution/index.js";
@@ -157,25 +158,34 @@ export const reviewContentWizardContinueModule: ToolModule = {
           await fs.promises.writeFile(tmpPath, JSON.stringify(state, null, 2), "utf-8");
           await fs.promises.rename(tmpPath, statePath);
 
+          const detailedReasons = validationResult.risk.reasons.length > 0
+            ? "\n\n**验证失败详情：**\n" + validationResult.risk.reasons.map((r) => `- ${r}`).join("\n")
+            : "";
+
           if (state.step === "waitingForPersonaAudit") {
+            const errMsg = [
+              "⛔ **并行评审执行失败** — 宿主 AI 未返回有效的 ExecutionReceipt。",
+              "",
+              "可能的原因：",
+              "- 宿主 AI 不支持 Subagent 并行调度",
+              "- 返回的 JSON 格式不符合 kevlar.exec/v1 协议",
+              detailedReasons,
+              "",
+              "如果你的环境不支持并行 Subagent 调度，",
+              "请调用 `review_content_wizard`（注意不是 _continue）并发送内容：`SEQUENTIAL_FALLBACK`",
+              "Kevlar 将退出并行调度流程，让你重新选择评审员。",
+              "",
+              "或者你可以修正 Receipt 格式后通过 `review_content_wizard_continue` 重试。",
+            ].join("\n");
             return {
               content: [{
                 type: "text",
                 text: formatStatusMessage(
                   rejected("invalid_execution_receipt"),
-                  [
-                    "⛔ **并行评审执行失败** — 宿主 AI 未返回有效的 ExecutionReceipt。",
-                    "",
-                    "可能的原因：",
-                    "- 宿主 AI 不支持 Subagent 并行调度",
-                    "- 返回的 JSON 格式不符合 kevlar.exec/v1 协议",
-                    "",
-                    "如果你的环境不支持并行 Subagent 调度，",
-                    "请调用 `review_content_wizard`（注意不是 _continue）并发送内容：`SEQUENTIAL_FALLBACK`",
-                    "Kevlar 将退出并行调度流程，让你重新选择评审员。",
-                    "",
-                    "或者你可以修正 Receipt 格式后通过 `review_content_wizard_continue` 重试。",
-                  ].join("\n"),
+                  errMsg,
+                ) + "\n\n" + formatErrorWithReportPrompt(
+                  "Parallel execution receipt validation failed",
+                  "review_content_wizard_continue",
                 ),
               }],
             };
@@ -189,7 +199,8 @@ export const reviewContentWizardContinueModule: ToolModule = {
               revision: state.revision,
               continuationId: state.activeContinuation?.continuationId,
             }),
-            "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。",
+            "结构化协作执行未返回可验证结果，已自动切换为标准宿主编排模式。" +
+            (detailedReasons ? "\n\n" + detailedReasons : ""),
           ) + "\n";
 
           if (state.step === "waitingForOrchestrationAudit") {
@@ -205,6 +216,11 @@ export const reviewContentWizardContinueModule: ToolModule = {
             `会话 ID：${state.sessionId}`,
             `预期版本：${state.revision}`,
             `延续 ID：${state.activeContinuation?.continuationId}`,
+            "",
+            formatErrorWithReportPrompt(
+              "结构化协作执行未返回可验证结果 (schema_mismatch)",
+              "review_content_wizard_continue",
+            ),
           ].join("\n");
 
           return {
