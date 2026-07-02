@@ -12,6 +12,7 @@ import {
   sanitizePersistentField,
 } from "./createPersonaTool.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { invalidInputError, internalError } from "../utils/errors.js";
 import {
@@ -295,7 +296,13 @@ export async function handleCreatePersonaWizard(
     const info = getErrorInfo(err);
     logger.error("Create persona wizard failed", { event: "wizard_error", error: info.code, message: info.message });
     return {
-      content: [{ type: "text", text: getWizardFailedMessage(info.message) }],
+      content: [{
+        type: "text",
+        text: formatErrorWithReportPrompt(
+          getWizardFailedMessage(info.message),
+          "create_persona_wizard",
+        ),
+      }],
       isError: true,
     };
   }

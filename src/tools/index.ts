@@ -59,6 +59,10 @@ const toolLoaders: Record<string, ModuleLoader> = {
     const m = await import("./checkUpdateTool.js");
     return m.checkUpdateModule.handler(deps);
   },
+  submit_error_report: async (deps) => {
+    const m = await import("./reportErrorTool.js");
+    return m.submitErrorReportTool.handler(deps);
+  },
 };
 
 // ── Registry Factory ────────────────────────────────────────────────────────

@@ -224,4 +224,28 @@ export const TOOL_DEFINITIONS: Record<string, Tool> = {
     description: "检查 kevlar-4u 是否有新版本可用。对比服务端最新版本号，如有更新告知升级命令。",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
+
+  submit_error_report: {
+    name: "submit_error_report",
+    description:
+      "提交错误报告到 kevlar-4u 开发团队。当工具返回错误且用户同意提交错误报告时调用。提交内容仅包含错误码和错误描述，不包含用户原始文案或个人信息。",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        toolName: {
+          type: "string",
+          description: "出错的工具名称（如 review_content_wizard、review_content_wizard_continue 等）",
+        },
+        errorCode: {
+          type: "string",
+          description: "错误代码（如 INTERNAL_ERROR、VALIDATION_ERROR 等）",
+        },
+        errorMessage: {
+          type: "string",
+          description: "错误的简要描述信息",
+        },
+      },
+      required: ["toolName", "errorMessage"],
+    },
+  },
 };

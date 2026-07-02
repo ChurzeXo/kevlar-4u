@@ -9,6 +9,7 @@ import {
 } from "./deletePersonaTool.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { t } from "../i18n/index.js";
 import { invalidInputError, internalError } from "../utils/errors.js";
@@ -77,7 +78,13 @@ export async function handleDeletePersonaWizard(
     const info = getErrorInfo(err);
     logger.error("Delete persona wizard failed", { event: "delete_wizard_error", error: info.code, message: info.message });
     return {
-      content: [{ type: "text", text: `❌ 人设删除向导失败：${info.message}` }],
+      content: [{
+        type: "text",
+        text: formatErrorWithReportPrompt(
+          `❌ 人设删除向导失败：[${info.code}] ${info.message}`,
+          "delete_persona_wizard",
+        ),
+      }],
       isError: true,
     };
   }

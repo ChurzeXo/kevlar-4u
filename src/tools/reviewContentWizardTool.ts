@@ -17,6 +17,7 @@ import {
 } from "../execution/dimensions.js";
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { invalidInputError, validationError, internalError } from "../utils/errors.js";
 import type { ToolModule } from "./types.js";
@@ -168,7 +169,7 @@ export const reviewContentWizardToolDefinition: Tool = {
     properties: {
       sessionId: {
         type: "string",
-        description: "会话ID。首次调用时留空（工具会自动生成并返回）。后续调用必须传入相同 sessionId 以维持会话状态。",
+        description: "会话ID。首次调用时留空（工具自动生成并返回）。后续每一步必须传入相同的 sessionId，否则工具会创建新会话丢失原文！",
       },
       userMessage: {
         type: "string",
@@ -414,7 +415,13 @@ export async function handleReviewContentWizard(
       message: info.message,
     });
     return {
-      content: [{ type: "text", text: `❌ 内容评测向导失败：${info.message}` }],
+      content: [{
+        type: "text",
+        text: formatErrorWithReportPrompt(
+          `❌ 内容评测向导失败：[${info.code}] ${info.message}`,
+          "review_content_wizard",
+        ),
+      }],
       isError: true,
     };
   }
@@ -534,10 +541,16 @@ async function handleRegionSelection(
 ): Promise<ToolResult> {
   // Detect if userMessage looks like region input (not the original content)
   const parsedRegions = parseRegionInput(userMessage);
-  const isRegionInput = parsedRegions.length > 0 && userMessage.length < 100;
+
+  // Only accept as region input if EVERY segment is a valid region keyword
+  const segments = userMessage.trim().split(/[，,、\s]+/).filter(Boolean);
+  const allSegmentsValidRegions = segments.length > 0
+    && userMessage.length < 100
+    && segments.every(s => REGION_MAP[s] || REGION_MAP[s.toLowerCase()] !== undefined);
+  const isRegionInput = parsedRegions.length > 0 && allSegmentsValidRegions;
 
   // First call: userMessage is content, no region keywords detected → ask
-  if (!isRegionInput || (state.targetRegions && state.targetRegions.length > 0)) {
+  if (!isRegionInput) {
     await saveState(tmpDir, state);
     return toolResponse(
       state,
@@ -670,8 +683,8 @@ async function handleSystemAudit(
       "1. Read each agent definition in the AgentBlueprint below",
       "2. Create a subagent for each agent and execute the review independently",
       "3. Aggregate all results into a single ExecutionReceipt (per kevlar.exec/v1)",
-      "4. Call `review_content_wizard_continue` with the receipt",
-      "   (include sessionId, checkpoint, expectedRevision from the blueprint)",
+     "4. Call `review_content_wizard_continue` with the receipt",
+     "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
       perAgentGuidance,
       "### If you CANNOT execute subagent dispatch",
       "(e.g., your environment doesn't support parallel subagents)",
@@ -2448,7 +2461,7 @@ function buildPersonaAgentBlueprint(
       sessionId: state.sessionId,
       checkpoint: "persona_audit_started",
       expectedRevision: state.revision ?? 1,
-      idempotencyKey: `${state.sessionId}-persona-${Date.now()}`,
+      idempotencyKey: state.activeContinuation?.continuationId,
       // Pro: agent slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
@@ -2734,12 +2747,12 @@ async function executeReview(
     };
   }
 
-  // Build AgentBlueprint with isolated persona agents
-  const blueprint = buildPersonaAgentBlueprint(state, selectedPersonas);
-
   transitionState(state, "waitingForPersonaAudit", "persona_review_dispatched");
-  (state as any).blueprint = blueprint;
   setContinuation(state, "waitingForPersonaAudit", "persona_audit_started");
+
+  // Build AgentBlueprint AFTER setContinuation so it reads the correct revision and continuationId
+  const blueprint = buildPersonaAgentBlueprint(state, selectedPersonas);
+  (state as any).blueprint = blueprint;
 
   await saveState(tmpDir, state);
 
@@ -2769,7 +2782,7 @@ async function executeReview(
     "2. Create a subagent for each agent and execute the review independently",
     "3. Aggregate all results into a single ExecutionReceipt (per kevlar.exec/v1)",
     "4. Call `review_content_wizard_continue` with the receipt",
-    "   (include sessionId, checkpoint, expectedRevision from the blueprint)",
+    "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
     perAgentGuidance,
     "### If you CANNOT execute subagent dispatch",
     "(e.g., your environment doesn't support parallel subagents)",

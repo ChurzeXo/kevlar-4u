@@ -6,6 +6,7 @@ import { handleConfigure, ConfigureInput } from "./configureTool.js";
 import { isValidMode, isValidConcurrency } from "../execution/config.js";
 import type { ToolModule } from "./types.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 import { invalidInputError } from "../utils/errors.js";
 import { t } from "../i18n/index.js";
@@ -118,7 +119,13 @@ export async function handleConfigureWizard(
 			message: info.message,
 		});
 		return {
-			content: [{ type: "text", text: `❌ 配置向导失败：${info.message}` }],
+			content: [{
+				type: "text",
+				text: formatErrorWithReportPrompt(
+					`❌ 配置向导失败：[${info.code}] ${info.message}`,
+					"configure_wizard",
+				),
+			}],
 			isError: true,
 		};
 	}

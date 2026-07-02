@@ -9,6 +9,7 @@ import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
 import { invalidInputError } from "../utils/errors.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import {
 	updateConfig,
 	isValidMode,
@@ -125,7 +126,13 @@ export async function handleConfigure(
 	} catch (err) {
 		const info = getErrorInfo(err);
 		return {
-			content: [{ type: "text", text: `❌ 配置更新失败：${info.message}` }],
+			content: [{
+				type: "text",
+				text: formatErrorWithReportPrompt(
+					`❌ 配置更新失败：[${info.code}] ${info.message}`,
+					"configure",
+				),
+			}],
 			isError: true,
 		};
 	}

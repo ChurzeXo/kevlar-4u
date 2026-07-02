@@ -65,7 +65,12 @@ function isWizardFile(file: string): boolean {
 async function cleanStaleDrafts(tmpDir: string) {
   try {
     if (!fs.existsSync(tmpDir)) return;
-    const files = await fs.promises.readdir(tmpDir);
+    let files: string[];
+    try {
+      files = await fs.promises.readdir(tmpDir);
+    } catch {
+      return;
+    }
     const now = Date.now();
     const deletePromises: Promise<void>[] = [];
     for (const file of files) {

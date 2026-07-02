@@ -10,6 +10,7 @@ import { getModesInfo } from "../execution/index.js";
 import { readConfig } from "../execution/config.js";
 import { getCapabilitiesSummary } from "../execution/client.js";
 import type { ToolModule } from "./types.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 
 // ── Static Labels ──────────────────────────────────────────────────────────────
 
@@ -79,7 +80,13 @@ export async function handleGetModes(): Promise<ToolResult> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
-      content: [{ type: "text", text: `获取模式信息失败：${message}` }],
+      content: [{
+        type: "text",
+        text: formatErrorWithReportPrompt(
+          `获取模式信息失败：${message}`,
+          "get_execution_modes",
+        ),
+      }],
       isError: true,
     };
   }
