@@ -5,6 +5,7 @@ import type { ExecutionContext, ResolveableMode, ReviewRunContext, SamplingFunct
 import type { DimensionsConfig } from "../execution/dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG } from "../execution/dimensions.js";
 import { getErrorInfo, logger } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 
 const MAX_CONTENT_LENGTH = 100_000;
 const MAX_CONTEXT_LENGTH = 5_000;
@@ -209,8 +210,9 @@ export async function handleReviewContent(
     };
   } catch (err) {
     const info = getErrorInfo(err);
+    const msg = formatErrorWithReportPrompt(`❌ 评测执行失败：${info.message}`, "review_content_wizard");
     return {
-      content: [{ type: "text", text: `❌ 评测执行失败：${info.message}` }],
+      content: [{ type: "text", text: msg }],
       isError: true,
     };
   }

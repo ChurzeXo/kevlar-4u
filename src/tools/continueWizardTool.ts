@@ -120,8 +120,9 @@ export const reviewContentWizardContinueModule: ToolModule = {
       const raw = await fs.promises.readFile(statePath, "utf-8");
       state = JSON.parse(raw);
     } catch {
+      const msg = formatStatusMessage(rejected("session_expired"), "❌ 未找到此 session 的状态文件，会话可能已过期。");
       return {
-        content: [{ type: "text", text: formatStatusMessage(rejected("session_expired"), "❌ 未找到此 session 的状态文件，会话可能已过期。") }],
+        content: [{ type: "text", text: formatErrorWithReportPrompt(msg, "review_content_wizard_continue") }],
         isError: true,
       };
     }
@@ -228,11 +229,12 @@ export const reviewContentWizardContinueModule: ToolModule = {
           };
         }
       } catch (err: any) {
+        const msg = formatStatusMessage(
+          rejected("gate_validation_failed", { error: err.message }),
+          `❌ 门禁验证失败：${err.message}`,
+        );
         return {
-          content: [{ type: "text", text: formatStatusMessage(
-            rejected("gate_validation_failed", { error: err.message }),
-            `❌ 门禁验证失败：${err.message}`,
-          ) }],
+          content: [{ type: "text", text: formatErrorWithReportPrompt(msg, "review_content_wizard_continue") }],
           isError: true,
         };
       }
@@ -731,13 +733,14 @@ async function finalizeSlots(
       auditors,
     );
   } catch (err: any) {
+    const msg = formatStatusMessage(
+      rejected("agent_result_format_error", { error: err.message }),
+      `❌ 自动聚合失败：${err.message}`,
+    );
     return {
       content: [{
         type: "text",
-        text: formatStatusMessage(
-          rejected("agent_result_format_error", { error: err.message }),
-          `❌ 自动聚合失败：${err.message}`,
-        ),
+        text: formatErrorWithReportPrompt(msg, "review_content_wizard_continue"),
       }],
       isError: true,
     };

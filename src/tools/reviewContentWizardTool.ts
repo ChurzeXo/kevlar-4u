@@ -1097,14 +1097,15 @@ async function handleOrchestrationStep0Result(
   } catch (err) {
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ 无法解析宿主 AI 返回的 Turn 1 JSON。",
         `错误：${info.message}`,
         "请让宿主 AI 仅返回包含 blackAtoms、attackCandidates 和可选 webContextMap 的合法 JSON，然后再次提交。",
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 }
 
@@ -1201,14 +1202,15 @@ async function handleOrchestrationAuditResult(
   } catch (err) {
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ 无法解析宿主 AI 返回的 Turn 2 审计 JSON。",
         `错误：${info.message}`,
         "请让宿主 AI 仅返回包含 dimensions 和 deltaRisks 的合法 JSON，不要包含 Markdown 或解释文字，然后再次提交。",
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 }
 
@@ -1248,8 +1250,7 @@ async function handleSubagentAuditResult(
     parsed = resilientJsonParse(userMessage);
   } catch (jsonErr: any) {
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ **无法解析 Host AI 返回的 Subagent ExecutionReceipt**",
         "",
@@ -1257,7 +1258,9 @@ async function handleSubagentAuditResult(
         "请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 
   const validation = validateReceipt(parsed);
@@ -1414,14 +1417,15 @@ async function handleSubagentAuditResult(
   } catch (err) {
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ 无法解析宿主 AI 返回的 ExecutionReceipt。",
         `错误：${info.message}`,
         "请确保返回符合 protocol.ts 中 ExecutionReceipt 规格的 JSON 对象。",
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 }
 
@@ -1507,14 +1511,15 @@ async function handleOrchestrationFinalResult(
   } catch (err) {
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ 无法解析宿主 AI 返回的 Turn 3 最终仲裁 JSON。",
         `错误：${info.message}`,
         "请让宿主 AI 仅返回包含 dimensions、summary、worstCaseNarrative 的合法 JSON，然后再次提交。",
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 }
 
@@ -2519,8 +2524,7 @@ async function handlePersonaAuditResult(
     parsed = resilientJsonParse(userMessage);
   } catch (jsonErr: any) {
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ **无法解析宿主 AI 返回的 Persona ExecutionReceipt**",
         "",
@@ -2530,7 +2534,9 @@ async function handlePersonaAuditResult(
         "",
         '如果你的环境不支持并行 Subagent，请发送：`SEQUENTIAL_FALLBACK`',
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 
   const validation = validateReceipt(parsed);
@@ -2721,14 +2727,15 @@ async function handlePersonaAuditResult(
   } catch (err) {
     const info = getErrorInfo(err);
     await rollbackState(tmpDir, state.sessionId);
-    return toolResponse(
-      state,
+    const errMsg = formatErrorWithReportPrompt(
       [
         "❌ 无法解析宿主 AI 返回的 Persona ExecutionReceipt。",
         `错误：${info.message}`,
         "请确保返回符合 protocol.ts 中 ExecutionReceipt 规格的 JSON 对象。",
       ].join("\n"),
+      "review_content_wizard",
     );
+    return toolResponse(state, errMsg);
   }
 }
 

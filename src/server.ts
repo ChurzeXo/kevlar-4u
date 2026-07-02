@@ -13,6 +13,7 @@ import { createToolRegistry } from "./tools/index.js";
 import type { ToolDependencies } from "./tools/types.js";
 import { log } from "./utils/logCategories.js";
 import { formatErrorResponse, internalError } from "./utils/errors.js";
+import { formatErrorWithReportPrompt } from "./utils/errorReporting.js";
 import { getErrorInfo } from "./utils/observability.js";
 import { resolveSamplingFn } from "./execution/sampling.js";
 import { setClientInfo, setClientCapabilities, setRawInitializeParams, setHandshakeDumpDir, getHostExecutionCapability } from "./execution/client.js";
@@ -324,7 +325,12 @@ function setupCallToolHandler(
         recoverable: info.recoverable,
         durationMs,
       });
-      return formatErrorResponse(err);
+      const rawMessage = formatErrorResponse(err).content?.[0]?.text ?? `❌ ${info.message}`;
+      const reportedMessage = formatErrorWithReportPrompt(rawMessage, name);
+      return {
+        content: [{ type: "text" as const, text: reportedMessage }],
+        isError: true,
+      };
     }
   });
 }

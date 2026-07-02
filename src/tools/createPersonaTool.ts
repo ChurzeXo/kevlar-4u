@@ -16,6 +16,7 @@ import {
 	slugify,
 } from "../utils/personaIdMaps.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { isValidSessionId } from "../utils/sessionId.js";
 
 // ── Persistent Prompt Injection Defense ──────────────────────────────────────
@@ -376,9 +377,13 @@ export async function handleCreatePersona(
 			draft = await handleSaveDraft(tmpDir, input);
 		} catch (err) {
 			const info = getErrorInfo(err);
+			const msg = formatErrorWithReportPrompt(
+				`❌ 读取草稿失败：${info.message}`,
+				"create_persona_wizard",
+			);
 			return {
 				content: [
-					{ type: "text", text: `❌ 读取草稿失败：${info.message}` },
+					{ type: "text", text: msg },
 				],
 				isError: true,
 			};
@@ -444,8 +449,12 @@ export async function handleCreatePersona(
 		await writePersonaFile(skillsDir, meta, personaContent);
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
+		const msg = formatErrorWithReportPrompt(
+			`❌ 写入文件失败：${message}`,
+			"create_persona_wizard",
+		);
 		return {
-			content: [{ type: "text", text: `❌ 写入文件失败：${message}` }],
+			content: [{ type: "text", text: msg }],
 			isError: true,
 		};
 	}
@@ -546,9 +555,13 @@ export async function handleUpdatePersonaDraft(
 		}
 	} catch (err) {
 		const info = getErrorInfo(err);
+		const msg = formatErrorWithReportPrompt(
+			`❌ 读取草稿文件失败: ${info.message}`,
+			"create_persona_wizard",
+		);
 		return {
 			content: [
-				{ type: "text", text: `❌ 读取草稿文件失败: ${info.message}` },
+				{ type: "text", text: msg },
 			],
 			isError: true,
 		};
@@ -583,9 +596,13 @@ export async function handleUpdatePersonaDraft(
 		);
 	} catch (err) {
 		const info = getErrorInfo(err);
+		const msg = formatErrorWithReportPrompt(
+			`❌ 写入草稿文件失败: ${info.message}`,
+			"create_persona_wizard",
+		);
 		return {
 			content: [
-				{ type: "text", text: `❌ 写入草稿文件失败: ${info.message}` },
+				{ type: "text", text: msg },
 			],
 			isError: true,
 		};
@@ -638,9 +655,13 @@ export async function handleDeletePersonaDraft(
 		}
 	} catch (err) {
 		const info = getErrorInfo(err);
+		const msg = formatErrorWithReportPrompt(
+			`❌ 读取或校验草稿文件失败: ${info.message}`,
+			"create_persona_wizard",
+		);
 		return {
 			content: [
-				{ type: "text", text: `❌ 读取或校验草稿文件失败: ${info.message}` },
+				{ type: "text", text: msg },
 			],
 			isError: true,
 		};
@@ -650,9 +671,13 @@ export async function handleDeletePersonaDraft(
 		await fs.promises.unlink(filePath);
 	} catch (err) {
 		const info = getErrorInfo(err);
+		const msg = formatErrorWithReportPrompt(
+			`❌ 删除草稿文件失败: ${info.message}`,
+			"create_persona_wizard",
+		);
 		return {
 			content: [
-				{ type: "text", text: `❌ 删除草稿文件失败: ${info.message}` },
+				{ type: "text", text: msg },
 			],
 			isError: true,
 		};

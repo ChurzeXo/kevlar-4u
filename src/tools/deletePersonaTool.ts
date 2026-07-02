@@ -3,6 +3,7 @@ import { loadPersonaById, deletePersonaFromJson, invalidatePersonasCache } from 
 import { ToolResult } from "../utils/types.js";
 import type { ToolModule } from "./types.js";
 import { getErrorInfo } from "../utils/observability.js";
+import { formatErrorWithReportPrompt } from "../utils/errorReporting.js";
 import { invalidInputError } from "../utils/errors.js";
 import { t } from "../i18n/index.js";
 
@@ -65,8 +66,9 @@ export async function handleDeletePersona(
     invalidatePersonasCache();
   } catch (err) {
     const info = getErrorInfo(err);
+    const msg = formatErrorWithReportPrompt(`❌ 删除失败：${info.message}`, "delete_persona");
     return {
-      content: [{ type: "text", text: `❌ 删除失败：${info.message}` }],
+      content: [{ type: "text", text: msg }],
       isError: true,
     };
   }
