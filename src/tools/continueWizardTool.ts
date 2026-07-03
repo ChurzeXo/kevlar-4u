@@ -163,6 +163,52 @@ export const reviewContentWizardContinueModule: ToolModule = {
             ? "\n\n**验证失败详情：**\n" + validationResult.risk.reasons.map((r) => `- ${r}`).join("\n")
             : "";
 
+          // §4.3: If agents are simply missing (schema is otherwise valid),
+          // reject with clear instructions — do NOT auto-downgrade yet.
+          const missingIds = validationResult.missingAgentIds;
+          if (missingIds && missingIds.length > 0 && validationResult.checks.schemaValid) {
+            const blueprintAgents = (state as any).blueprint?.agents || [];
+            // Build a clear rejection telling the host EXACTLY which agents are missing
+            const missingList = missingIds.map((id: string) => {
+              const agentDef = blueprintAgents.find((a: any) => a.id === id);
+              return `- \`${id}\`${agentDef ? ` (${agentDef.role})` : ""}`;
+            }).join("\n");
+            const totalExpected = blueprintAgents.length > 0 ? blueprintAgents.length : 6;
+            const currentCount = (receipt?.agents || []).length;
+
+            const errMsg = [
+              "⛔ **Receipt 被拒绝** — 你提交的 ExecutionReceipt 缺少必需的 agent。",
+              "",
+              `**蓝图要求**：${totalExpected} 个 subagent`,
+              `**实际提交**：${currentCount} 个 agent（缺少 ${missingIds.length} 个）`,
+              "",
+              "**缺失的 agent：**",
+              missingList,
+              "",
+              "**下一步操作：**",
+              `1. 创建以上 ${missingIds.length} 个缺失的 subagent（每个 agent 的 blueprint 见之前的 Dispatch Request）`,
+              "2. 等待全部 agent 执行完毕",
+              "3. 将所有 agent 的结果聚合为完整的 ExecutionReceipt",
+              "4. 重新调用 `review_content_wizard_continue` 提交完整 receipt",
+              "",
+              `⚠️ 注意：你还有 ${Math.max(0, 3 - ((state.activeContinuation?._receiptRetries ?? 0)))} 次重试机会。`,
+              "超过重试次数后，Kevlar 将自动降级为串行编排模式。",
+              detailedReasons,
+            ].join("\n");
+            return {
+              content: [{
+                type: "text",
+                text: formatStatusMessage(
+                  rejected("incomplete_execution_receipt", { missing: missingIds, totalExpected, currentCount }),
+                  errMsg,
+                ) + "\n\n" + formatErrorWithReportPrompt(
+                  "Incomplete ExecutionReceipt — missing agents",
+                  "review_content_wizard_continue",
+                ),
+              }],
+            };
+          }
+
           if (state.step === "waitingForPersonaAudit") {
             const errMsg = [
               "⛔ **并行评审执行失败** — 宿主 AI 未返回有效的 ExecutionReceipt。",

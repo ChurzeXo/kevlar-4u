@@ -752,7 +752,17 @@ describe("runAggregationValidation", () => {
 
   it("returns valid when agent IDs exactly match blueprint", () => {
     const blueprint = makeBlueprint(["agent-1"]);
-    const receipt = makeValidReceipt();
+    const receipt = makeValidReceipt({
+      execution: {
+        requestedMode: "ephemeral_agents",
+        actualMode: "native_subagent",
+        requestedConcurrency: 1,
+        actualConcurrency: 1,
+        contextIsolation: { requested: true, achieved: true },
+        parallelism: "parallel",
+        evidenceLevel: "host_attested",
+      },
+    });
     const result = runAggregationValidation(receipt, blueprint);
     assert.equal(result.status, "valid");
     assert.ok(result.checks.allAgentsPresent);

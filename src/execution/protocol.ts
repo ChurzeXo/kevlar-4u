@@ -181,6 +181,9 @@ export interface AggregationValidation {
     level: "low" | "medium" | "high" | "unknown";
     reasons: string[];
   };
+
+  /** IDs of agents declared in the blueprint but missing from the receipt. */
+  missingAgentIds?: string[];
 }
 
 // ── 4. Validation Gates ──────────────────────────────────────────────────────
@@ -280,23 +283,54 @@ export function runAggregationValidation(
 
   // 2. 智能体数量对齐
   let allAgentsPresent = true;
+  const missingAgentIds: string[] = [];
   if (blueprint && blueprint.agents && Array.isArray(blueprint.agents)) {
-    if (!receipt.agents || receipt.agents.length !== blueprint.agents.length) {
-      allAgentsPresent = false;
-      risk.reasons.push(`Agent count mismatch: expected ${blueprint.agents.length}, got ${receipt.agents?.length || 0}`);
-    } else {
-      const blueprintIds = new Set(blueprint.agents.map((a: any) => a.id));
-      for (const agent of receipt.agents) {
-        if (!blueprintIds.has(agent.id)) {
-          allAgentsPresent = false;
-          risk.reasons.push(`Unexpected agent id in receipt: '${agent.id}'`);
-        }
+    const blueprintIds = new Set(blueprint.agents.map((a: any) => a.id));
+    const receiptIds = new Set((receipt.agents || []).map((a: any) => a.id));
+
+    // Detect missing agents (in blueprint but not in receipt)
+    for (const id of blueprintIds) {
+      if (!receiptIds.has(id)) {
+        allAgentsPresent = false;
+        missingAgentIds.push(id);
       }
+    }
+
+    // Detect unexpected agents (in receipt but not in blueprint)
+    for (const id of receiptIds) {
+      if (!blueprintIds.has(id)) {
+        allAgentsPresent = false;
+        risk.reasons.push(`Unexpected agent id in receipt: '${id}'`);
+      }
+    }
+
+    if (!receipt.agents || receipt.agents.length !== blueprint.agents.length) {
+      risk.reasons.push(
+        `Agent count mismatch: expected ${blueprint.agents.length}, got ${receipt.agents?.length || 0}`,
+      );
+    }
+    if (missingAgentIds.length > 0) {
+      risk.reasons.push(`Missing agents: ${missingAgentIds.join(", ")}`);
     }
   } else {
     allAgentsPresent = Array.isArray(receipt.agents) && receipt.agents.length > 0;
   }
   checks.allAgentsPresent = allAgentsPresent;
+
+  // 2b. actualConcurrency 检查 (§4.3)
+  const expectedConcurrency = blueprint?.execution?.concurrency ?? (blueprint?.agents?.length || 0);
+  const actualConcurrency = receipt.execution?.actualConcurrency;
+  const concurrencyMismatch =
+    expectedConcurrency > 0 && typeof actualConcurrency === "number" && actualConcurrency !== expectedConcurrency;
+  if (concurrencyMismatch) {
+    checks.allAgentsPresent = false; // treat concurrency gap as incomplete
+    missingAgentIds.push(...blueprint!.agents!
+      .filter((a: any) => !new Set((receipt.agents || []).map((ra: any) => ra.id)).has(a.id))
+      .map((a: any) => a.id));
+    risk.reasons.push(
+      `Concurrency mismatch: blueprint declares ${expectedConcurrency}, but receipt reports actualConcurrency=${actualConcurrency}`,
+    );
+  }
 
   // 3. 聚合一致性检查
   let aggregationConsistent = true;
@@ -375,6 +409,7 @@ export function runAggregationValidation(
     status,
     checks,
     risk,
+    missingAgentIds: missingAgentIds.length > 0 ? missingAgentIds : undefined,
   };
 }
 
@@ -409,8 +444,24 @@ export function validateContinuationGate(
   const validationResult = runAggregationValidation(submission.receipt, currentState.blueprint);
 
   if (validationResult.status === "invalid") {
-    // 格式损坏、或发生不可逆的协议不匹配，清理 structured 残留，
-    // 安全地将协作策略下调至标准宿主单体编排 (Standard Orchestration)
+    // Track retries: increment on each invalid submission
+    if (!currentState.activeContinuation._receiptRetries) {
+      currentState.activeContinuation._receiptRetries = 0;
+    }
+    currentState.activeContinuation._receiptRetries += 1;
+
+    // If agents are simply missing (schema is otherwise valid), reject WITHOUT
+    // downgrading — let the host retry creating the missing agents. Only force
+    // downgrade when retries are exhausted or schema is genuinely broken.
+    const schemaValid = validationResult.checks.schemaValid;
+    const retriesExhausted = currentState.activeContinuation._receiptRetries > MAX_CONTINUATION_RETRIES;
+
+    if (schemaValid && !retriesExhausted) {
+      // Rejection: host tried to submit with missing agents, can still retry
+      return validationResult;
+    }
+
+    // Schema broken or retries exhausted → permanent downgrade
     fallbackToStandardOrchestration(currentState, "schema_mismatch");
   }
 

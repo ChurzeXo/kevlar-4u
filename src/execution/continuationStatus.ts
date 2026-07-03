@@ -36,6 +36,7 @@ export type ContinuationReasonCode =
   | "checkpoint_mismatch"
   | "gate_validation_failed"
   | "invalid_execution_receipt"
+  | "incomplete_execution_receipt"
   | "invalid_step"
   | "pro_only"
   | "invalid_agent_id_format"
