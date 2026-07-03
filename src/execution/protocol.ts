@@ -96,6 +96,32 @@ export interface Finding {
 
 // ── 3.2 Execution Receipt ────────────────────────────────────────────────────
 
+/**
+ * Aggregated audit report (kevlar.audit/v1).
+ * Embedded in ExecutionReceipt.aggregation.
+ */
+export interface AggregationReport {
+  dimensions: AggregationDimension[];
+  summary: string;
+}
+
+export interface AggregationDimension {
+  id: string;
+  level: string;
+  findings?: Finding[];
+  [key: string]: unknown;
+}
+
+/**
+ * Output structure expected from each agent.
+ * Must be a JSON object containing a `findings` array.
+ */
+export interface AgentOutput {
+  findings: Finding[];
+  reasoning?: string;
+  [key: string]: unknown;
+}
+
 export interface ExecutionReceipt {
   protocol: "kevlar.exec/v1";
 
@@ -120,14 +146,14 @@ export interface ExecutionReceipt {
   };
 
   agents: AgentExecutionResult[];
-  aggregation?: any;
+  aggregation?: AggregationReport;
 }
 
 export interface AgentExecutionResult {
   id: string;
   role: string;
   status: "completed" | "failed";
-  output: unknown;
+  output: AgentOutput;
   latencyMs?: number;
   tokenUsage?: number;
 }
@@ -286,10 +312,11 @@ export function runAggregationValidation(
   }
   checks.aggregationConsistent = aggregationConsistent;
 
-  // 4. 自适应分流兼容性：比较 blueprint 请求模式 vs receipt 实际执行模式
-  const requestedBlueMode = blueprint?.execution?.mode;
+  // 4. 自适应分流兼容性：检测执行降级
+  //    actualMode 为 "orchestration_fallback" 表示宿主未能执行 subagent，已降级为编排模式。
+  //    native_subagent 和 simulated_agent 都是正常的 subagent 执行方式，不算降级。
   const actualExecMode = receipt.execution?.actualMode;
-  const executionMismatch = !!(requestedBlueMode && actualExecMode && requestedBlueMode !== actualExecMode);
+  const executionMismatch = actualExecMode === "orchestration_fallback";
   checks.executionMismatch = executionMismatch;
 
   // 5. 隔离安全惩罚
@@ -494,20 +521,24 @@ export function validateReceipt(receipt: any): ReceiptValidation {
       if (!agent.output) {
         errors.push(`${prefix}: 缺少必填字段 "output"`);
       } else if (typeof agent.output === "string") {
-        warnings.push(`${prefix}: output 是字符串而非对象，解析可能失败`);
+        errors.push(`${prefix}: output 是字符串而非对象，必须为包含 findings 数组的 JSON 对象`);
+      } else if (typeof agent.output === "object" && agent.status === "completed") {
+        if (!Array.isArray(agent.output.findings)) {
+          errors.push(`${prefix}: output.findings 必须为数组（无发现时使用空数组 []）`);
+        }
       }
     }
   }
 
   // Aggregation check
   if (!receipt.aggregation || typeof receipt.aggregation !== "object") {
-    warnings.push('缺少聚合报告 "aggregation"，评审结果可能不完整');
+    errors.push('缺少聚合报告 "aggregation"，必须包含 dimensions 数组和 summary 字符串');
   } else {
     if (!Array.isArray(receipt.aggregation.dimensions)) {
-      warnings.push('aggregation.dimensions 不是数组，将使用默认值');
+      errors.push('aggregation.dimensions 必须为数组');
     }
     if (typeof receipt.aggregation.summary !== "string") {
-      warnings.push('aggregation.summary 不是字符串，总评可能缺失');
+      errors.push('aggregation.summary 必须为字符串');
     }
   }
 

@@ -1041,13 +1041,13 @@ describe("validateReceipt", () => {
     assert.ok(result.errors.some((e) => e.includes("output")));
   });
 
-  it("warns on string output", () => {
+  it("errors on string output", () => {
     const receipt = makeValidReceipt({
       agents: [{ id: "a", status: "completed", output: "plain text" }],
     });
     const result = validateReceipt(receipt);
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("字符串")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("字符串")));
   });
 
   it("warns on unknown status value", () => {
@@ -1059,29 +1059,29 @@ describe("validateReceipt", () => {
     assert.ok(result.warnings.some((w) => w.includes("未知的 status")));
   });
 
-  it("warns when aggregation is missing", () => {
+  it("errors when aggregation is missing", () => {
     const receipt = makeValidReceipt({ aggregation: undefined });
     const result = validateReceipt(receipt);
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("聚合报告")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("聚合报告")));
   });
 
-  it("warns when aggregation.dimensions is not an array", () => {
+  it("errors when aggregation.dimensions is not an array", () => {
     const receipt = makeValidReceipt({
       aggregation: { summary: "ok" },
     });
     const result = validateReceipt(receipt);
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("dimensions")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("dimensions")));
   });
 
-  it("warns when aggregation.summary is not a string", () => {
+  it("errors when aggregation.summary is not a string", () => {
     const receipt = makeValidReceipt({
       aggregation: { dimensions: [], summary: 123 },
     });
     const result = validateReceipt(receipt);
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("summary")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("summary")));
   });
 });
 

@@ -32,6 +32,12 @@ export const SERVER_INSTRUCTIONS = `
 1. 你必须使用 Task/Subagent 工具，为 Blueprint 中的每个 agent 创建独立的子代理并行执行。
 2. 每个子代理的上下文必须隔离——子代理只读自己的 instructions 字段，不共享推理状态。
 3. 所有子代理完成后，将结果聚合为一份 ExecutionReceipt JSON，调用 review_content_wizard_continue 提交。
+   ExecutionReceipt 必须包含以下关键字段：
+   - agents[]: 每个元素必须有 id、role、status、output
+   - agents[].output: 必须是 JSON 对象（不能是字符串），且包含 findings 数组
+   - aggregation.dimensions: 必须是数组，每个元素包含 id、level、findings
+   - aggregation.summary: 必须是字符串
+   缺少这些字段将导致 schema_mismatch 降级。
 4. **如果无法使用 Task/Subagent 工具**（工具不可用或不支持并行）→ 回复 review_content_wizard，内容为：SEQUENTIAL_FALLBACK
 5. **禁止自行总结**：不得在未提交 ExecutionReceipt 的情况下用自己的话概括子代理的审计结果。
 

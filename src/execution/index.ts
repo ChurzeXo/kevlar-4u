@@ -432,6 +432,10 @@ export {
   type ContinuationSpec,
   type ExecutionReceipt,
   type AgentExecutionResult,
+  type AggregationReport,
+  type AggregationDimension,
+  type AgentOutput,
+  type Finding,
   type AggregationValidation,
   type ReceiptValidation,
 } from "./protocol.js";
