@@ -676,6 +676,34 @@ async function handleSystemAudit(
 }
 
 /**
+ * Render platform-agnostic subagent creation instructions.
+ *
+ * Instead of hardcoding per-platform tool names (which silently breaks for
+ * new or unknown clients), we describe the abstract requirement: N independent
+ * execution contexts, parallel dispatch, isolated state.  The Host AI knows
+ * its own tools (Agent / Task / Subagent) better than we do and will
+ * self-map to the correct one.
+ */
+function renderSubagentCreationInstructions(agentCount: number): string {
+  return [
+    "**How to create subagents:**",
+    "",
+    `For each of the ${agentCount} agents in the AgentBlueprint, create one`,
+    "independent execution context. Each execution context:",
+    "",
+    "- Only sees its own `instructions` field — no shared state with other contexts",
+    "- Executes independently — one agent's audit must not influence another",
+    "",
+    "Launch ALL execution contexts in **one message** for parallel execution.",
+    "Use your platform's native subagent / task creation tool with each agent's",
+    "`instructions` field as the task input.",
+    "",
+    "Do NOT skip any agent. Do NOT merge multiple agents into a single context.",
+    "After ALL execution contexts complete, proceed to Phase 2 to aggregate results.",
+  ].join("\n");
+}
+
+/**
  * Render the blueprint dispatch text that instructs the Host AI to
  * spawn subagents for parallel dimension audits.
  *
@@ -732,28 +760,7 @@ function renderBlueprintDispatchText(
     "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
     "until EVERY agent has returned its result.**",
     "",
-    "**How to create subagents — pick YOUR platform:**",
-    "",
-    "**If you are WorkBuddy / QoderWork:**",
-    "→ Use the `Agent` tool, set `subagent_type=\"general-purpose\"`, pass the agent's",
-    "  `instructions` field as the prompt.",
-    "",
-    "**If you are OpenCode:**",
-    "→ Use the `Task` tool, set `subagent_type=\"General\"`, pass the agent's",
-    "  `instructions` field as the prompt.",
-    "",
-    "**If you are Claude Code / Cursor:**",
-    "→ Use the `Task` tool, pass the agent's `instructions` as the task description.",
-    "",
-    "**If none of the above:**",
-    "→ Use your platform's subagent/task creation tool with each agent's",
-    "  `instructions` field as the task description.",
-    "",
-    "**Regardless of platform:**",
-    "- Create exactly **one** subagent per agent ID listed above",
-    "- Launch ALL subagents in **one message** (parallel dispatch)",
-    "- Each subagent runs with isolated context — they do NOT share state",
-    "- Wait for ALL results before proceeding to Phase 2",
+    renderSubagentCreationInstructions(agentCount),
     "",
     `**Expected in receipt**: exactly ${agentCount} agents with these IDs:`,
     `  ${blueprint.agents.map((a: any) => a.id).join(", ")}`,
@@ -3039,12 +3046,7 @@ async function executeReview(
     "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
     "until EVERY agent has returned its result.**",
     "",
-    "**How to create subagents:**",
-    "1. Read each agent's full definition in the AgentBlueprint JSON below",
-    "2. Create one independent subagent per agent listed above",
-    "3. Launch all subagents in **one message** (parallel dispatch)",
-    "4. Each persona simulates a different audience perspective — isolate their context",
-    "5. Wait for ALL results before proceeding",
+    renderSubagentCreationInstructions(personaCount),
     "",
     `**Expected in receipt**: exactly ${personaCount} agents with these IDs:`,
     `  ${blueprint.agents.map((a: any) => a.id).join(", ")}`,
