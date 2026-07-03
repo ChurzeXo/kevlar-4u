@@ -645,175 +645,22 @@ async function handleSystemAudit(
   // ── Kevlar Execution Protocol v1 Blueprint Dispatch ────────────────────────
   const plan = state.executionPlan;
   if (plan?.backend === "host_orchestration" && plan.strategy === "structured") {
+    // ── Step 0b FIRST: host AI performs global decoding + web search ──
+    // In structured (mcp_subagent) mode, we send the Step 0b prompt
+    // BEFORE dispatching the 6 dimension subagents. The host AI must
+    // complete web search and global decoding first, then submit the
+    // result. handleOrchestrationStep0Result() will fork: when it
+    // detects structured strategy, it proceeds to build the AgentBlueprint
+    // with step0Result/webContextMap injected into each subagent.
     const stripped = stripContext(state.content);
     state.orchestrationPreAuditContext = { localFindings, stripped };
-    transitionState(state, "waitingForSubagentAudit", "structured_blueprint_dispatch");
-    setContinuation(state, "waitingForSubagentAudit", "preaudit_completed");
-
-    const prompts = await resolvePromptSegments();
-    const blueprint = buildAgentBlueprint(state, systemAuditors, prompts);
-    (state as any).blueprint = blueprint;
-
+    transitionState(state, "waitingForOrchestrationStep0", "structured_step0_web_search");
+    setContinuation(state, "waitingForOrchestrationStep0", "step0_completed");
     await saveState(tmpDir, state);
-
-    const isProTier = state.tier === "pro";
-
-    const perAgentGuidance = isProTier
-      ? [
-          "",
-          "### Pro option: submit per-agent results individually",
-          "If your environment can submit results as each agent completes:",
-          "1. Execute each agent independently",
-          "2. For each completed agent, call `review_content_wizard_continue` with:",
-          "   - The same sessionId, checkpoint, expectedRevision, continuationId",
-          `   - \`agentId\`: the agent's ID (e.g., \`${(blueprint.agents[0] as any)?.id || "legal_compliance"}\`)`,
-          "   - `result`: a JSON object with the agent's findings (agentId + status + output)",
-          "3. Kevlar will auto-aggregate when all agents have reported",
-          "",
-        ].join("\n")
-      : "";
-
-    // Build agent list for explicit enumeration in prompt
-    const agentListLines = blueprint.agents.map((a: any, i: number) =>
-      `  ${i + 1}. \`${a.id}\` — **${a.role}**`,
-    ).join("\n");
-    const agentCount = blueprint.agents.length;
-
-    const blueprintText = [
-      "## Kevlar-4u Subagent Dispatch Request",
-      "",
-      // ── §1: Explicit mandatory requirement ──────────────────────────
-      "### ⚠️ CRITICAL — You MUST create ALL subagents below",
-      "",
-      `This blueprint requires exactly **${agentCount} subagents**. You must create`,
-      `every single one of them. **Skipping any agent will cause the receipt to be`,
-      `REJECTED by Kevlar's validation gate.** The validation compares the receipt's`,
-      `agent IDs against the blueprint and will fail if any are missing.`,
-      "",
-      "**The REQUIRED agents are:**",
-      agentListLines,
-      "",
-      `**Total**: ${agentCount} subagents MUST be created and executed in parallel.`,
-      "",
-      "---",
-      // ── §2: Phase 1 — Create all subagents ──────────────────────────
-      "### Phase 1 — Create ALL subagents in parallel",
-      "",
-      "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
-      "until EVERY agent has returned its result.**",
-      "",
-      "**How to create subagents:**",
-      "1. Read each agent's full definition in the AgentBlueprint JSON below",
-      "2. Create one independent subagent per agent ID listed above",
-      "3. Launch all subagents in **one message** (parallel dispatch)",
-      "4. Each subagent runs with isolated context — they do NOT share state",
-      "5. Wait for ALL results before proceeding",
-      "",
-      `**Expected in receipt**: exactly ${agentCount} agents with these IDs:`,
-      `  ${blueprint.agents.map((a: any) => a.id).join(", ")}`,
-      "",
-      "**Reminder**: If you create fewer than all agents,",
-      "the receipt will be REJECTED and you will waste a round-trip.",
-      "",
-      "---",
-      // ── §3: Phase 2 — Aggregate and submit ──────────────────────────
-      "### Phase 2 — Aggregate results and submit receipt",
-      "",
-      "**Only after ALL subagents have completed**, construct the ExecutionReceipt:",
-      "",
-      "1. Collect every agent's output (their `findings` array)",
-      "2. Build the `agents` array with exactly one entry per agent — same ID and order",
-      "3. Build the `aggregation` with one `dimensions` entry per agent (same IDs)",
-      "4. Call `review_content_wizard_continue` with the complete receipt",
-      "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
-      "",
-      `The receipt MUST contain exactly ${agentCount} agent entries — no more, no less.`,
-      "",
-      "---",
-      // ── §4: Anti-fabrication warning ──────────────────────────────
-      "### ⛔ DO NOT FABRICATE OR INVENT AGENT OUTPUTS",
-      "",
-      "You MUST NOT fabricate, invent, or make up any agent's findings.",
-      "Every finding in the receipt MUST come from the actual subagent's output.",
-      "",
-      "**If an agent failed to execute or did not return results:**",
-      `- Set its \`status\` to \`"failed"\``,
-      `- Set its \`output.findings\` to \`[]\` (empty array)`,
-      `- In \`aggregation.dimensions\`, mark it as \`"⚠️ 未执行"\``,
-      "",
-      "**Falsifying agent results will corrupt the audit output** and may cause",
-      "Kevlar to produce incorrect risk assessments. Always report truthfully.",
-      "",
-      "---",
-      // ── §5: Receipt schema ──────────────────────────────────────────
-      "### ExecutionReceipt Structure (kevlar.exec/v1)",
-      "You MUST construct the receipt in EXACTLY this JSON shape:",
-      "",
-      "```",
-      '{',
-      '  "protocol": "kevlar.exec/v1",',
-      '  "execution": {',
-      '    "requestedMode": "ephemeral_agents",',
-      '    "actualMode": "native_subagent",',
-      `    "requestedConcurrency": ${agentCount},`,
-      `    "actualConcurrency": ${agentCount},`,
-      '    "contextIsolation": { "requested": true, "achieved": true },',
-      '    "parallelism": "parallel",',
-      '    "evidenceLevel": "host_attested"',
-      '  },',
-      '  "agents": [',
-      '    {',
-      '      "id": "<agent id from blueprint>",',
-      '      "role": "<agent role from blueprint>",',
-      '      "status": "completed",',
-      '      "output": {',
-      '        "findings": [',
-      '          {',
-      '            "keyword": "风险词汇",',
-      '            "trigger": "触发原因",',
-      '            "riskDescription": "风险说明",',
-      '            "suggestedLevel": "🔴 或 🟡",',
-      '            "propagationPath": "传播路径"',
-      '          }',
-      '        ]',
-      '      }',
-      '    }',
-      '  ],',
-      '  "aggregation": {',
-      '    "dimensions": [',
-      '      { "id": "<same agent id>", "level": "🟢/🟡/🔴", "findings": [] }',
-      '    ],',
-      '    "summary": "一句话总评"',
-      '  }',
-      '}',
-      "```",
-      "",
-      "**Critical requirements:**",
-      "- `agents[]` MUST contain exactly one entry per agent ID in the blueprint",
-      "- `agents[].output` MUST be a JSON **object** (not a string) containing a `findings` array",
-      "- `agents[].output.findings` MUST be an array (use `[]` if no findings)",
-      "- `aggregation.dimensions` MUST be an array with one entry per agent (use same `id`)",
-      "- `aggregation.summary` MUST be a string",
-      "- Each agent's `output.findings` should contain the raw findings from that subagent's audit",
-      "",
-      perAgentGuidance,
-      "### If you CANNOT execute subagent dispatch",
-      "(e.g., your environment doesn't support parallel subagents)",
-      "→ Call `review_content_wizard` again with the same sessionId:",
-      `  \`sessionId\`: "${state.sessionId}"`,
-      `  \`userMessage\`: "SEQUENTIAL_FALLBACK"`,
-      "",
-      "---",
-      "### AgentBlueprint",
-      "",
-      "```json",
-      JSON.stringify(blueprint, null, 2),
-      "```",
-    ].join("\n");
-
-    return {
-      content: [{ type: "text", text: blueprintText }],
-    };
+    return toolResponse(
+      state,
+      ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
+    );
   }
 
   // Standard Fallback: host AI performs Step 0b (decoding) + web search
@@ -826,6 +673,173 @@ async function handleSystemAudit(
     state,
     ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
   );
+}
+
+/**
+ * Render the blueprint dispatch text that instructs the Host AI to
+ * spawn subagents for parallel dimension audits.
+ *
+ * Extracted from handleSystemAudit() so it can be reused from
+ * handleOrchestrationStep0Result() in the structured (subagent) path
+ * after Step 0b web search has been completed.
+ */
+function renderBlueprintDispatchText(
+  state: ReviewWizardState,
+  blueprint: AgentBlueprint,
+): string {
+  const isProTier = state.tier === "pro";
+
+  const perAgentGuidance = isProTier
+    ? [
+        "",
+        "### Pro option: submit per-agent results individually",
+        "If your environment can submit results as each agent completes:",
+        "1. Execute each agent independently",
+        "2. For each completed agent, call `review_content_wizard_continue` with:",
+        "   - The same sessionId, checkpoint, expectedRevision, continuationId",
+        `   - \`agentId\`: the agent's ID (e.g., \`${(blueprint.agents[0] as any)?.id || "legal_compliance"}\`)`,
+        "   - `result`: a JSON object with the agent's findings (agentId + status + output)",
+        "3. Kevlar will auto-aggregate when all agents have reported",
+        "",
+      ].join("\n")
+    : "";
+
+  const agentListLines = blueprint.agents.map((a: any, i: number) =>
+    `  ${i + 1}. \`${a.id}\` — **${a.role}**`,
+  ).join("\n");
+  const agentCount = blueprint.agents.length;
+
+  return [
+    "## Kevlar-4u Subagent Dispatch Request",
+    "",
+    // ── §1: Explicit mandatory requirement ──────────────────────────
+    "### ⚠️ CRITICAL — You MUST create ALL subagents below",
+    "",
+    `This blueprint requires exactly **${agentCount} subagents**. You must create`,
+    `every single one of them. **Skipping any agent will cause the receipt to be`,
+    `REJECTED by Kevlar's validation gate.** The validation compares the receipt's`,
+    `agent IDs against the blueprint and will fail if any are missing.`,
+    "",
+    "**The REQUIRED agents are:**",
+    agentListLines,
+    "",
+    `**Total**: ${agentCount} subagents MUST be created and executed in parallel.`,
+    "",
+    "---",
+    // ── §2: Phase 1 — Create all subagents ──────────────────────────
+    "### Phase 1 — Create ALL subagents in parallel",
+    "",
+    "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
+    "until EVERY agent has returned its result.**",
+    "",
+    "**How to create subagents:**",
+    "1. Read each agent's full definition in the AgentBlueprint JSON below",
+    "2. Create one independent subagent per agent ID listed above",
+    "3. Launch all subagents in **one message** (parallel dispatch)",
+    "4. Each subagent runs with isolated context — they do NOT share state",
+    "5. Wait for ALL results before proceeding",
+    "",
+    `**Expected in receipt**: exactly ${agentCount} agents with these IDs:`,
+    `  ${blueprint.agents.map((a: any) => a.id).join(", ")}`,
+    "",
+    "**Reminder**: If you create fewer than all agents,",
+    "the receipt will be REJECTED and you will waste a round-trip.",
+    "",
+    "---",
+    // ── §3: Phase 2 — Aggregate and submit ──────────────────────────
+    "### Phase 2 — Aggregate results and submit receipt",
+    "",
+    "**Only after ALL subagents have completed**, construct the ExecutionReceipt:",
+    "",
+    "1. Collect every agent's output (their `findings` array)",
+    "2. Build the `agents` array with exactly one entry per agent — same ID and order",
+    "3. Build the `aggregation` with one `dimensions` entry per agent (same IDs)",
+    "4. Call `review_content_wizard_continue` with the complete receipt",
+    "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
+    "",
+    `The receipt MUST contain exactly ${agentCount} agent entries — no more, no less.`,
+    "",
+    "---",
+    // ── §4: Anti-fabrication warning ──────────────────────────────
+    "### ⛔ DO NOT FABRICATE OR INVENT AGENT OUTPUTS",
+    "",
+    "You MUST NOT fabricate, invent, or make up any agent's findings.",
+    "Every finding in the receipt MUST come from the actual subagent's output.",
+    "",
+    "**If an agent failed to execute or did not return results:**",
+    `- Set its \`status\` to \`"failed"\``,
+    `- Set its \`output.findings\` to \`[]\` (empty array)`,
+    `- In \`aggregation.dimensions\`, mark it as \`"⚠️ 未执行"\``,
+    "",
+    "**Falsifying agent results will corrupt the audit output** and may cause",
+    "Kevlar to produce incorrect risk assessments. Always report truthfully.",
+    "",
+    "---",
+    // ── §5: Receipt schema ──────────────────────────────────────────
+    "### ExecutionReceipt Structure (kevlar.exec/v1)",
+    "You MUST construct the receipt in EXACTLY this JSON shape:",
+    "",
+    "```",
+    '{',
+    '  "protocol": "kevlar.exec/v1",',
+    '  "execution": {',
+    '    "requestedMode": "ephemeral_agents",',
+    '    "actualMode": "native_subagent",',
+    `    "requestedConcurrency": ${agentCount},`,
+    `    "actualConcurrency": ${agentCount},`,
+    '    "contextIsolation": { "requested": true, "achieved": true },',
+    '    "parallelism": "parallel",',
+    '    "evidenceLevel": "host_attested"',
+    '  },',
+    '  "agents": [',
+    '    {',
+    '      "id": "<agent id from blueprint>",',
+    '      "role": "<agent role from blueprint>",',
+    '      "status": "completed",',
+    '      "output": {',
+    '        "findings": [',
+    '          {',
+    '            "keyword": "风险词汇",',
+    '            "trigger": "触发原因",',
+    '            "riskDescription": "风险说明",',
+    '            "suggestedLevel": "🔴 或 🟡",',
+    '            "propagationPath": "传播路径"',
+    '          }',
+    '        ]',
+    '      }',
+    '    }',
+    '  ],',
+    '  "aggregation": {',
+    '    "dimensions": [',
+    '      { "id": "<same agent id>", "level": "🟢/🟡/🔴", "findings": [] }',
+    '    ],',
+    '    "summary": "一句话总评"',
+    '  }',
+    '}',
+    "```",
+    "",
+    "**Critical requirements:**",
+    "- `agents[]` MUST contain exactly one entry per agent ID in the blueprint",
+    "- `agents[].output` MUST be a JSON **object** (not a string) containing a `findings` array",
+    "- `agents[].output.findings` MUST be an array (use `[]` if no findings)",
+    "- `aggregation.dimensions` MUST be an array with one entry per agent (use same `id`)",
+    "- `aggregation.summary` MUST be a string",
+    "- Each agent's `output.findings` should contain the raw findings from that subagent's audit",
+    "",
+    perAgentGuidance,
+    "### If you CANNOT execute subagent dispatch",
+    "(e.g., your environment doesn't support parallel subagents)",
+    "→ Call `review_content_wizard` again with the same sessionId:",
+    `  \`sessionId\`: "${state.sessionId}"`,
+    `  \`userMessage\`: "SEQUENTIAL_FALLBACK"`,
+    "",
+    "---",
+    "### AgentBlueprint",
+    "",
+    "```json",
+    JSON.stringify(blueprint, null, 2),
+    "```",
+  ].join("\n");
 }
 
 /**
@@ -849,6 +863,8 @@ function buildAgentBlueprint(
   const content = state.content;
   const bareText = stripContext(content).bare;
   const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+  const step0Result = state.orchestrationPreAuditContext?.step0Result;
+  const webContextMap = state.orchestrationPreAuditContext?.webContextMap;
   const segs = prompts ?? loadPromptSegments("free");
 
   const agents: AgentDefinition[] = systemAuditors.map((auditor) => {
@@ -859,7 +875,10 @@ function buildAgentBlueprint(
     return {
       id: auditor.meta.id,
       role,
-      instructions: buildIsolatedAgentInstructions(auditor, content, bareText, localFindings, segs),
+      instructions: buildIsolatedAgentInstructions(
+        auditor, content, bareText, localFindings, segs,
+        step0Result, webContextMap,
+      ),
       input: {
         contentRef: "content",
       },
@@ -1004,6 +1023,8 @@ function buildIsolatedAgentInstructions(
   bareText: string,
   localFindings: any[],
   segs: PromptSegments,
+  step0Result?: Step0Result,
+  webContextMap?: Record<string, string>,
 ): string {
   const parts: string[] = [];
 
@@ -1028,6 +1049,53 @@ function buildIsolatedAgentInstructions(
   if (auditor.systemPrompt) {
     parts.push("## 【审查员角色规则】");
     parts.push(auditor.systemPrompt);
+    parts.push("");
+  }
+
+  // ── 4.5. Step 0b global decoding results (when available) ──────────
+  // Inject Step 0b output as fact anchors so subagents don't work
+  // from pure reasoning alone. This includes: wild translations,
+  // black atoms, attack candidates, and web search context from
+  // the host AI's own web search tools.
+  if (step0Result) {
+    parts.push("## 【Step 0b 全局解码结果（职业黑粉逆向分析 + 联网搜索已完成）】");
+    parts.push("以下结果是前置步骤中 Host AI 对本文案执行的全局逆向解码和联网验证。");
+    parts.push("请将这些结果作为当前维度审计的**事实锚点**（而非凭空推理）：");
+    parts.push("");
+
+    if (step0Result.blackAtoms.length > 0) {
+      parts.push("### 黑料原子（已提取的武器化片段）");
+      parts.push("Host AI 从原文中提取的能被「恶意武器化」的片段：");
+      parts.push(JSON.stringify(step0Result.blackAtoms, null, 2));
+      parts.push("");
+    }
+
+    if (step0Result.attackCandidates.length > 0) {
+      parts.push("### 攻击候选（可推演的完整攻击链）");
+      parts.push("Host AI 对每个黑料原子推演的攻击传播路径：");
+      parts.push(JSON.stringify(step0Result.attackCandidates, null, 2));
+      parts.push("");
+    }
+
+    if (step0Result.wildTranslations.length > 0) {
+      parts.push("### 野生翻译（外文词组的恶意谐音/歧义翻译）");
+      parts.push(JSON.stringify(step0Result.wildTranslations, null, 2));
+      parts.push("");
+    }
+  }
+
+  if (webContextMap && Object.keys(webContextMap).length > 0) {
+    parts.push("### 联网搜索验证结果");
+    parts.push("Host AI 针对黑料原子关键词执行了联网搜索，以下为搜索结果参考：");
+    parts.push("");
+    for (const [keyword, context] of Object.entries(webContextMap)) {
+      if (context.length > 3000) {
+        parts.push(`🔍 搜索 "${keyword}" 结果摘要：${context.slice(0, 3000)}...（截断）`);
+      } else {
+        parts.push(`🔍 搜索 "${keyword}"：${context}`);
+      }
+      parts.push("");
+    }
     parts.push("");
   }
 
@@ -1185,6 +1253,27 @@ async function handleOrchestrationStep0Result(
       webContextMap,
       precedents,
     };
+
+    // ── Structured (mcp_subagent) path: Step 0b done, now dispatch subagents ──
+    // The structured path entered waitingForOrchestrationStep0 first to let
+    // the host AI complete web search. Now that we have step0Result +
+    // webContextMap + precedents, we fork into the subagent dispatch phase.
+    const plan = state.executionPlan;
+    if (plan?.backend === "host_orchestration" && plan.strategy === "structured") {
+      transitionState(state, "waitingForSubagentAudit", "structured_step0_completed");
+      setContinuation(state, "waitingForSubagentAudit", "preaudit_completed");
+
+      const prompts = await resolvePromptSegments();
+      const blueprint = buildAgentBlueprint(state, systemAuditors, prompts);
+      (state as any).blueprint = blueprint;
+
+      await saveState(tmpDir, state);
+
+      const blueprintText = renderBlueprintDispatchText(state, blueprint);
+      return {
+        content: [{ type: "text", text: blueprintText }],
+      };
+    }
 
     // Orchestration mode (Protocol v1): build context and emit Turn 2 audit prompt
     state.orchestrationPreAuditContext = buildOrchestrationPreAuditContext(

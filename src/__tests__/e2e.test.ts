@@ -417,20 +417,40 @@ describe("End-to-End integration test", () => {
       assert.ok(sessionIdMatch, "Should include sessionId");
       const sessionId = sessionIdMatch[1];
 
-      // Step 2: Select region → systemAudit → AgentBlueprint dispatch (waitingForSubagentAudit)
+      // Step 2: Select region → systemAudit → Step 0b web search prompt
+      // (structured path now requires Step 0b BEFORE subagent dispatch)
       const step2 = await client.callTool({
         name: "review_content_wizard",
         arguments: { sessionId, userMessage: "中国" },
       });
       const step2Text = (step2.content as any)[0].text;
 
+      // Verify Step 0b guidance was emitted (not AgentBlueprint yet)
+      assert.ok(step2Text.includes("Turn 1"), "Step 2 should emit Turn 1 Step 0 guidance");
+      assert.ok(step2Text.includes("blackAtoms"), "Should ask for blackAtoms in Step 0 JSON");
+      assert.ok(step2Text.includes("precedents"), "Should ask for precedents in Step 0 JSON");
+
+      // Step 2b: Submit Step 0 JSON → AgentBlueprint dispatch (waitingForSubagentAudit)
+      // handleOrchestrationStep0Result() forks into structured path when plan.strategy === "structured"
+      const mockStep0Result = {
+        blackAtoms: [{ phrase: "测试", reason: "可被恶意断章取义", targetDimension: "context_distortion" }],
+        attackCandidates: [{ atom: "测试", chain: "原始表达 → 断章取义 → 评论区发酵 → 舆情危机", severity: "🟡" }],
+        wildTranslations: [],
+        precedents: [{ event: "2023年某品牌翻车事件", date: "2023-05" }],
+      };
+      const step2b = await client.callTool({
+        name: "review_content_wizard",
+        arguments: { sessionId, userMessage: JSON.stringify(mockStep0Result) },
+      });
+      const step2bText = (step2b.content as any)[0].text;
+
       // Verify AgentBlueprint dispatch for subagent audit
-      assert.ok(step2Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol");
-      assert.ok(step2Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
-      assert.ok(step2Text.includes("host_merge"), "Should use host_merge aggregation strategy");
+      assert.ok(step2bText.includes("kevlar.exec/v1"), "Step 2b should contain AgentBlueprint protocol");
+      assert.ok(step2bText.includes("ephemeral_agents"), "Step 2b should use ephemeral agents mode");
+      assert.ok(step2bText.includes("host_merge"), "Step 2b should use host_merge aggregation strategy");
 
       // Parse blueprint to verify structure (extract from code block)
-      const jsonMatch = step2Text.match(/```json\n([\s\S]*?)\n```/);
+      const jsonMatch = step2bText.match(/```json\n([\s\S]*?)\n```/);
       assert.ok(jsonMatch, "Should contain JSON code block in blueprint");
       const blueprint = JSON.parse(jsonMatch[1]);
       assert.equal(blueprint.protocol, "kevlar.exec/v1");
