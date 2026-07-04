@@ -234,7 +234,7 @@ export function runAggregationValidation(
   }
 
   if (receipt.protocol !== "kevlar.blueprint/v1") {
-    risk.reasons.push(`Protocol mismatch: expected 'kevlar.exec/v1', got '${receipt.protocol}'`);
+    risk.reasons.push(`Protocol mismatch: expected 'kevlar.blueprint/v1', got '${receipt.protocol}'`);
   }
 
   // 1. Schema 一致性断言

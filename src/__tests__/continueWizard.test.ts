@@ -650,7 +650,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
         protocol: "kevlar.blueprint/v1",
         contexts: contextIds.map((id) => ({ id, role: "safety_reviewer" })),
         continuation: {
-          agentSlots: {
+          contextSlots: {
             total: 2,
             contextIds,
             allowPartialSubmit: true,
@@ -780,9 +780,9 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     // Verify state was updated: revision incremented, slot populated
     const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
     assert.ok(s.revision >= 2, "revision should be incremented");
-    assert.ok(s.agentSlots, "agentSlots should exist");
-    assert.ok(s.agentSlots.received["context-1"], "slot should contain agent-1 result");
-    assert.equal(s.agentSlots.received["context-1"].status, "completed");
+    assert.ok(s.contextSlots, "contextSlots should exist");
+    assert.ok(s.contextSlots.received["context-1"], "slot should contain agent-1 result");
+    assert.equal(s.contextSlots.received["context-1"].status, "completed");
   });
 
   it("allows overwrite on repeated slot submission", async () => {
@@ -790,7 +790,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     writeStateFile(tmpDir, sid, {
       ...proSlotState(sid),
       revision: 2,
-      agentSlots: {
+      contextSlots: {
         total: 2,
         received: {
           "context-1": {
@@ -834,14 +834,14 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
 
     assert.equal(result.isError, undefined);
     const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
-    assert.equal(s.agentSlots.received["context-1"].status, "failed");
+    assert.equal(s.contextSlots.received["context-1"].status, "failed");
   });
 
   it("returns error when all agents failed (zero completed)", async () => {
     const sid = makeSessionId();
     // Pre-populate agent-1 as failed, submit agent-2 as failed → zero completed
     writeStateFile(tmpDir, sid, proSlotState(sid, {
-      agentSlots: {
+      contextSlots: {
         total: 2,
         received: {
           "context-1": {
@@ -872,7 +872,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
   it("triggers partial auto-finalize when continuation expired with partial slots", async () => {
     const sid = makeSessionId();
     writeStateFile(tmpDir, sid, proSlotState(sid, {
-      agentSlots: {
+      contextSlots: {
         total: 2,
         received: {
           "context-1": {

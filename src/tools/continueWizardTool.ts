@@ -571,7 +571,7 @@ async function handleAgentSlot(
 
   // ── Agent ID validation ──────────────────────────────────────────────────
   const blueprint = (state as any).blueprint;
-  const expectedContextIds: string[] = blueprint?.continuation?.agentSlots?.contextIds ?? [];
+  const expectedContextIds: string[] = blueprint?.continuation?.contextSlots?.contextIds ?? [];
   if (expectedContextIds.length > 0 && !expectedContextIds.includes(contextId)) {
     return {
       content: [{
@@ -624,14 +624,14 @@ async function handleAgentSlot(
   }
 
   // ── Write to slot ────────────────────────────────────────────────────────
-  const total = blueprint?.continuation?.agentSlots?.total ?? expectedContextIds.length;
-  if (!state.agentSlots) {
-    state.agentSlots = { total, received: {} };
+  const total = blueprint?.continuation?.contextSlots?.total ?? expectedContextIds.length;
+  if (!state.contextSlots) {
+    state.contextSlots = { total, received: {} };
   }
 
   // Re-submission check — warn but allow overwrite
-  const isResubmit = !!state.agentSlots.received[contextId];
-  if (!isResubmit && Object.keys(state.agentSlots.received).length >= total) {
+  const isResubmit = !!state.contextSlots.received[contextId];
+  if (!isResubmit && Object.keys(state.contextSlots.received).length >= total) {
     // Edge case: slot already full
     return {
       content: [{
@@ -649,7 +649,7 @@ async function handleAgentSlot(
   const outputOutput = parsedResult.output || parsedResult.result || {};
   const status = parsedResult.status || "completed";
 
-  state.agentSlots.received[contextId] = {
+  state.contextSlots.received[contextId] = {
     contextId,
     status,
     submittedAt: Date.now(),
@@ -668,12 +668,12 @@ async function handleAgentSlot(
   }
 
   // ── Check if all slots filled ────────────────────────────────────────────
-  const receivedIds = new Set(Object.keys(state.agentSlots.received));
+  const receivedIds = new Set(Object.keys(state.contextSlots.received));
   const allFilled = expectedContextIds.length > 0
     && expectedContextIds.every((id: string) => receivedIds.has(id));
 
   // Compute completed vs failed counts
-  const receivedSlots = Object.values(state.agentSlots.received) as any[];
+  const receivedSlots = Object.values(state.contextSlots.received) as any[];
   const completedCount = receivedSlots.filter((s: any) => s.status === "completed").length;
   const failedCount = receivedSlots.filter((s: any) => s.status !== "completed").length;
 
@@ -775,7 +775,7 @@ async function finalizeSlots(
   let syntheticReceipt: any;
   try {
     syntheticReceipt = buildSyntheticReceipt(
-      state.agentSlots.received,
+      state.contextSlots.received,
       auditors,
     );
   } catch (err: any) {
