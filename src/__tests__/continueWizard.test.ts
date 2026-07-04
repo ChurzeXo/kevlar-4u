@@ -774,7 +774,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
 
     assert.equal(result.isError, undefined); // not an error
     const t = textOf(result);
-    assert.ok(t.includes("已收到 agent"), "should confirm receipt");
+    assert.ok(t.includes("已收到 context"), "should confirm receipt");
     assert.ok(t.includes("expectedRevision"), "should include expectedRevision for next call");
 
     // Verify state was updated: revision incremented, slot populated
@@ -866,7 +866,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     });
 
     assert.ok(result.isError);
-    assert.ok(textOf(result).includes("全部 agent 执行失败"), "should report all agents failed");
+    assert.ok(textOf(result).includes("全部 context 执行失败"), "should report all contexts failed");
   });
 
   it("triggers partial auto-finalize when continuation expired with partial slots", async () => {

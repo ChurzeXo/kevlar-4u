@@ -650,7 +650,7 @@ async function handleSystemAudit(
     // BEFORE dispatching the 6 dimension subagents. The host AI must
     // complete web search and global decoding first, then submit the
     // result. handleOrchestrationStep0Result() will fork: when it
-    // detects structured strategy, it proceeds to build the AgentBlueprint
+    // detects structured strategy, it proceeds to build the ExecutionBlueprint
     // with step0Result/webContextMap injected into each subagent.
     const stripped = stripContext(state.content);
     state.orchestrationPreAuditContext = { localFindings, stripped };
@@ -857,7 +857,7 @@ function renderBlueprintDispatchText(
     `  \`userMessage\`: "SEQUENTIAL_FALLBACK"`,
     "",
     "---",
-    "### AgentBlueprint",
+    "### ExecutionBlueprint",
     "",
     "```json",
     JSON.stringify(blueprint, null, 2),
@@ -866,17 +866,17 @@ function renderBlueprintDispatchText(
 }
 
 /**
- * Build a fully self-contained AgentBlueprint for parallel subagent dispatch.
+ * Build a fully self-contained ExecutionBlueprint for parallel subagent dispatch.
  *
  * Each subagent receives its complete audit context (content, bare text,
  * local findings, core reasoning framework, execution protocol) directly
  * in its `instructions` field. No shared dispatch prompt is needed — the
- * Host AI maps each AgentDefinition to an independent subagent session.
+ * Host AI maps each ContextDefinition to an independent subagent session.
  *
  * Phase 1 hardening:
  * - isolation.level changed from "best_effort" to "strict"
  * - PromptSegments (coreReasoningFramework, coreFrameworkSteps) inlined
- *   into each agent's instructions for true contextual isolation
+ *   into each context's instructions for true contextual isolation
  */
 function buildExecutionBlueprint(
   state: ReviewWizardState,
@@ -909,10 +909,10 @@ function buildExecutionBlueprint(
     };
   });
 
-  // §2.1: agents length must equal 6 (6 defensive system auditors)
+  // §2.1: contexts length must equal 6 (6 defensive system auditors)
   if (contexts.length !== 6) {
-    logger.warn("AgentBlueprint context count mismatch", {
-      event: "agent_count_mismatch",
+    logger.warn("ExecutionBlueprint context count mismatch", {
+      event: "context_count_mismatch",
       expected: 6,
       actual: contexts.length,
       contextIds: contexts.map((a) => a.id),
@@ -947,7 +947,7 @@ function buildExecutionBlueprint(
       checkpoint: activeCont?.checkpoint || "preaudit_completed",
       expectedRevision: state.revision ?? 1,
       idempotencyKey: activeCont?.continuationId,
-      // Pro: agent slot metadata for per-agent result submission
+      // Pro: context slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
             contextSlots: {
@@ -962,7 +962,7 @@ function buildExecutionBlueprint(
 }
 
 /**
- * Build a synthetic ExecutionReceipt from per-agent slot results for auto-aggregation.
+ * Build a synthetic ExecutionReceipt from per-context slot results for auto-aggregation.
  *
  * Maps each ContextSlotResult to a PreAuditDimensionResult using the
  * corresponding system auditor's identity. The output receipt conforms
@@ -978,11 +978,11 @@ export function buildSyntheticReceipt(
   const failedSlots = slots.filter((s) => s.status !== "completed");
 
   if (completedSlots.length === 0) {
-    throw internalError("All agents failed — no completed results to aggregate");
+    throw internalError("All contexts failed — no completed results to aggregate");
   }
 
   const isPartial = failedSlots.length > 0;
-  const contextsArr = completedSlots.map((s) => ({
+  const contextResults = completedSlots.map((s) => ({
     id: s.contextId,
     status: s.status,
     output: s.output,
@@ -1009,14 +1009,14 @@ export function buildSyntheticReceipt(
   const totalSlots = slots.length;
   return {
     protocol: "kevlar.blueprint/v1",
-    contexts: contextsArr,
-    ...(isPartial ? { _isPartial: true, _failedAgents: failedSlots.map((s) => s.contextId) } : {}),
+    contexts: contextResults,
+    ...(isPartial ? { _isPartial: true, _failedContexts: failedSlots.map((s) => s.contextId) } : {}),
     aggregation: {
       dimensions,
       summary: isPartial
         ? (reportCount > 0
-          ? `${reportCount}/${dimensions.length} 个维度存在风险发现 (partial: ${failedSlots.length}/${totalSlots} agents unavailable)`
-          : `全部维度通过 (partial: ${failedSlots.length}/${totalSlots} agents unavailable)`)
+          ? `${reportCount}/${dimensions.length} 个维度存在风险发现 (partial: ${failedSlots.length}/${totalSlots} contexts unavailable)`
+          : `全部维度通过 (partial: ${failedSlots.length}/${totalSlots} contexts unavailable)`)
         : (reportCount > 0
           ? `${reportCount}/${dimensions.length} 个维度存在风险发现 (auto-aggregated)`
           : "全部维度通过 (auto-aggregated)"),
@@ -2648,7 +2648,7 @@ function buildIsolatedPersonaPrompt(
 }
 
 /**
- * Build the Persona AgentBlueprint for Stage 2: parallel isolated persona reviews.
+ * Build the Persona ExecutionBlueprint for Stage 2: parallel isolated persona reviews.
  */
 function buildPersonaExecutionBlueprint(
   state: ReviewWizardState,
@@ -2705,7 +2705,7 @@ function buildPersonaExecutionBlueprint(
       checkpoint: "persona_audit_started",
       expectedRevision: state.revision ?? 1,
       idempotencyKey: state.activeContinuation?.continuationId,
-      // Pro: agent slot metadata for per-agent result submission
+      // Pro: context slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
             contextSlots: {
@@ -2795,8 +2795,8 @@ async function handlePersonaAuditResult(
     // ── Extract individual agent results from the aggregated receipt ──────
     const agentResults: Record<string, any> = {};
 
-    if (parsed.agents && Array.isArray(parsed.agents)) {
-      for (const agent of parsed.agents) {
+    if (parsed.contexts && Array.isArray(parsed.contexts)) {
+      for (const agent of parsed.contexts) {
         let output = agent.output;
         // Try to parse string output as JSON
         if (typeof output === "string") {
@@ -2996,7 +2996,7 @@ async function executeReview(
   transitionState(state, "waitingForPersonaAudit", "persona_review_dispatched");
   setContinuation(state, "waitingForPersonaAudit", "persona_audit_started");
 
-  // Build AgentBlueprint AFTER setContinuation so it reads the correct revision and continuationId
+  // Build ExecutionBlueprint AFTER setContinuation so it reads the correct revision and continuationId
   const blueprint = buildPersonaExecutionBlueprint(state, selectedPersonas);
   (state as any).blueprint = blueprint;
 
@@ -3144,7 +3144,7 @@ async function executeReview(
     `  \`userMessage\`: "SEQUENTIAL_FALLBACK"`,
     "",
     "---",
-    "### AgentBlueprint",
+    "### ExecutionBlueprint",
     "",
     "```json",
     JSON.stringify(blueprint, null, 2),

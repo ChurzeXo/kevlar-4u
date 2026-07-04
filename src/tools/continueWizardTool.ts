@@ -35,7 +35,7 @@ export const reviewContentWizardContinueDefinition: Tool = {
     "提交宿主编排执行结果并继续审计流程。" +
     "与 review_content_wizard 不同，此工具使用 session checkpoint + revision 协议确保结果一致性，" +
     "防止旧回合覆盖新状态。当 Kevlar 返回 continuation contract 时，必须使用此工具提交结果。" +
-    "Pro 用户可通过 contextId 逐 agent 提交结果，Kevlar 自动聚合。",
+    "Pro 用户可通过 contextId 逐 context 提交结果，Kevlar 自动聚合。",
 
   inputSchema: {
     type: "object",
@@ -75,9 +75,9 @@ export const reviewContentWizardContinueDefinition: Tool = {
       contextId: {
         type: "string",
         description:
-          "Pro only: context ID for per-agent slot submission. " +
+          "Pro only: context ID for per-context slot submission. " +
           "When present, Kevlar saves the result to the agent slot and auto-aggregates when all slots filled. " +
-          "Must match an contextId from the blueprint's agentSlots.contextIds.",
+          "Must match an contextId from the blueprint's contextSlots.contextIds.",
       },
     },
     required: ["sessionId", "checkpoint", "expectedRevision", "continuationId"],
@@ -139,7 +139,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
 
     // ── Pro: Slot-based per-agent submission ─────────────────────────────
     if (contextId) {
-      return await handleAgentSlot(
+      return await handleContextSlot(
         deps, state, statePath, sessionId, expectedRevision, continuationId, contextId, receipt, result,
       );
     }
@@ -177,7 +177,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
             const currentCount = (receipt?.agents || []).length;
 
             const errMsg = [
-              "⛔ **Receipt 被拒绝** — 你提交的 ExecutionReceipt 缺少必需的 agent。",
+              "⛔ **Receipt 被拒绝** — 你提交的 ExecutionReceipt 缺少必需的 context。",
               "",
               `**蓝图要求**：${totalExpected} 个 subagent`,
               `**实际提交**：${currentCount} 个 agent（缺少 ${missingIds.length} 个）`,
@@ -475,7 +475,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
 
 // ── Slot-Based Per-Agent Submission Handler (Pro) ───────────────────────────
 
-async function handleAgentSlot(
+async function handleContextSlot(
   deps: ToolDependencies,
   state: any,
   statePath: string,
@@ -493,7 +493,7 @@ async function handleAgentSlot(
         type: "text",
         text: formatStatusMessage(
           rejected("invalid_step", { currentStep: state.step }),
-          `❌ 当前步骤不支持逐 agent 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 或 waitingForPersonaAudit 步骤可用。`,
+          `❌ 当前步骤不支持逐 context 提交（当前步骤: ${state.step}）。仅在 waitingForSubagentAudit 或 waitingForPersonaAudit 步骤可用。`,
         ),
       }],
       isError: true,
@@ -503,7 +503,7 @@ async function handleAgentSlot(
   // ── Tier check (Pro only) ───────────────────────────────────────────────
   if (state.tier !== "pro") {
     return {
-      content: [{ type: "text", text: formatStatusMessage(rejected("pro_only"), "❌ 逐 agent 提交仅限 Pro 用户。请使用 batch 方式（全量 receipt）提交。") }],
+      content: [{ type: "text", text: formatStatusMessage(rejected("pro_only"), "❌ 逐 context 提交仅限 Pro 用户。请使用 batch 方式（全量 receipt）提交。") }],
       isError: true,
     };
   }
@@ -561,7 +561,7 @@ async function handleAgentSlot(
       content: [{
         type: "text",
         text: formatStatusMessage(
-          rejected("invalid_agent_id_format", { contextId }),
+          rejected("invalid_context_id_format", { contextId }),
           `❌ contextId 格式不合法: "${contextId}"。仅允许 [a-zA-Z0-9_-]+`,
         ),
       }],
@@ -577,7 +577,7 @@ async function handleAgentSlot(
       content: [{
         type: "text",
         text: formatStatusMessage(
-          rejected("unknown_agent_id", { contextId, expectedContextIds }),
+          rejected("unknown_context_id", { contextId, expectedContextIds }),
           `❌ 未知的 contextId "${contextId}"。期望: ${expectedContextIds.join(", ")}`,
         ),
       }],
@@ -595,7 +595,7 @@ async function handleAgentSlot(
 
   if (!parsedResult || typeof parsedResult !== "object") {
     return {
-      content: [{ type: "text", text: formatStatusMessage(rejected("invalid_json"), "❌ Agent 结果必须是有效的 JSON 对象（通过 receipt 或 result 字段）。") }],
+      content: [{ type: "text", text: formatStatusMessage(rejected("invalid_json"), "❌ Context 结果必须是有效的 JSON 对象（通过 receipt 或 result 字段）。") }],
       isError: true,
     };
   }
@@ -608,9 +608,9 @@ async function handleAgentSlot(
         {
           type: "text",
           text: formatStatusMessage(
-            rejected("agent_result_format_error", { contextId, errors: validation.errors, warnings: validation.warnings }),
+            rejected("context_result_format_error", { contextId, errors: validation.errors, warnings: validation.warnings }),
             [
-              "❌ **Agent 结果格式错误**",
+              "❌ **Context 结果格式错误**",
               "",
               ...validation.errors.map((e: string) => `- ${e}`),
               ...(validation.warnings.length > 0 ? ["", "⚠️ 警告:"] : []),
@@ -636,7 +636,7 @@ async function handleAgentSlot(
     return {
       content: [{
         type: "text",
-        text: formatStatusMessage(rejected("slots_full", { total }), `⚠️ 所有 ${total} 个 agent 槽位已满，无法提交更多结果。`),
+        text: formatStatusMessage(rejected("slots_full", { total }), `⚠️ 所有 ${total} 个 context 槽位已满，无法提交更多结果。`),
       }],
       isError: true,
     };
@@ -692,13 +692,13 @@ async function handleAgentSlot(
   if (!allFilled) {
     const remaining = expectedContextIds.filter((id: string) => !receivedIds.has(id));
     const progressParts: string[] = [
-      `✅ 已收到 agent **"${contextId}"** 的审计结果。`,
+      `✅ 已收到 context **"${contextId}"** 的审计结果。`,
     ];
     if (isResubmit) progressParts.push("（覆盖先前提交的结果）");
     if (failedCount > 0) {
       progressParts.push(`完成: ${completedCount}/${total}, 失败: ${failedCount}/${total}`);
     } else {
-      progressParts.push(`进度: ${receivedIds.size}/${total} 个 agent 已提交。`);
+      progressParts.push(`进度: ${receivedIds.size}/${total} 个 context 已提交。`);
     }
     if (remaining.length > 0) {
       progressParts.push(`等待: ${remaining.join(", ")}`);
@@ -720,11 +720,11 @@ async function handleAgentSlot(
       content: [{
         type: "text",
         text: formatStatusMessage(
-          rejected("all_agents_failed", { total }),
+          rejected("all_contexts_failed", { total }),
           [
-            "❌ **全部 agent 执行失败，无法聚合。**",
+            "❌ **全部 context 执行失败，无法聚合。**",
             "",
-            `共 ${total} 个 agent，全部返回 status: "failed"。`,
+            `共 ${total} 个 context，全部返回 status: "failed"。`,
             "请检查内容或宿主环境后重试。",
           ].join("\n"),
         ),
@@ -754,11 +754,11 @@ async function finalizeSlots(
       content: [{
         type: "text",
         text: formatStatusMessage(
-          rejected("all_agents_failed", { total }),
+          rejected("all_contexts_failed", { total }),
           [
-            "❌ **没有可用的 agent 结果，无法聚合。**",
+            "❌ **没有可用的 context 结果，无法聚合。**",
             "",
-            `共 ${total} 个 agent，全部返回 status: "failed" 或未提交。`,
+            `共 ${total} 个 context，全部返回 status: "failed" 或未提交。`,
             "请检查内容或宿主环境后重试。",
           ].join("\n"),
         ),
@@ -780,7 +780,7 @@ async function finalizeSlots(
     );
   } catch (err: any) {
     const msg = formatStatusMessage(
-      rejected("agent_result_format_error", { error: err.message }),
+      rejected("context_result_format_error", { error: err.message }),
       `❌ 自动聚合失败：${err.message}`,
     );
     return {

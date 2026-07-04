@@ -29,12 +29,12 @@ export const SERVER_INSTRUCTIONS = `
 
 ## Subagent 并行调度约定（仅当工具返回 ExecutionBlueprint 时生效）
 当 review_content_wizard 或 review_content_wizard_continue 返回的文本中包含 ExecutionBlueprint（kevlar.blueprint/v1 协议 JSON）时：
-1. 你必须使用平台原生的子代理/任务创建工具（如 Agent、Task 等），为 Blueprint 中的每个 agent 创建独立的执行上下文并行执行。
+1. 你必须使用平台原生的子代理/任务创建工具（如 Agent、Task 等），为 Blueprint 中的每个执行上下文创建独立的执行上下文并行执行。
 2. 每个执行上下文必须隔离——只读自己的 instructions 字段，不共享推理状态。
 3. 所有执行上下文完成后，将结果聚合为一份 ExecutionReceipt JSON，调用 review_content_wizard_continue 提交。
    ExecutionReceipt 必须包含以下关键字段：
-   - agents[]: 每个元素必须有 id、role、status、output
-   - agents[].output: 必须是 JSON 对象（不能是字符串），且包含 findings 数组
+   - contexts[]: 每个元素必须有 id、role、status、output
+   - contexts[].output: 必须是 JSON 对象（不能是字符串），且包含 findings 数组
    - aggregation.dimensions: 必须是数组，每个元素包含 id、level、findings
    - aggregation.summary: 必须是字符串
    缺少这些字段将导致 schema_mismatch 降级。
