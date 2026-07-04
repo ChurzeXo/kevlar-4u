@@ -477,7 +477,7 @@ describe("End-to-End integration test", () => {
       assert.ok(typeof revision === "number", "Should have revision number");
 
       // Step 3: Submit subagent audit ExecutionReceipt via continue tool
-      // This should trigger handleSubagentAuditResult → rstConfirmation
+      // This should trigger handleContextAuditResult → rstConfirmation
       const auditorId = blueprint.contexts[0].id;
       const mockReceipt = {
         protocol: "kevlar.blueprint/v1",

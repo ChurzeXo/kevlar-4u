@@ -473,7 +473,7 @@ async function advanceWizard(
       );
 
     case "waitingForSubagentAudit":
-      return handleSubagentAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, strategyProvider);
+      return handleContextAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, strategyProvider);
 
     case "waitingForOrchestrationAudit":
       return handleOrchestrationAuditResult(tmpDir, state, personas, systemAuditors, userMessage, samplingFn, strategyProvider);
@@ -898,7 +898,7 @@ function buildExecutionBlueprint(
     return {
       id: auditor.meta.id,
       role,
-      instructions: buildIsolatedAgentInstructions(
+      instructions: buildIsolatedContextInstructions(
         auditor, content, bareText, localFindings, segs,
         step0Result, webContextMap,
       ),
@@ -966,7 +966,7 @@ function buildExecutionBlueprint(
  *
  * Maps each ContextSlotResult to a PreAuditDimensionResult using the
  * corresponding system auditor's identity. The output receipt conforms
- * to kevlar.blueprint/v1 and can be routed through handleSubagentAuditResult
+ * to kevlar.blueprint/v1 and can be routed through handleContextAuditResult
  * which runs mergeLocalFindingsIntoAudits + calculateSynergy (Phase 1).
  */
 export function buildSyntheticReceipt(
@@ -1040,7 +1040,7 @@ function guessLevelFromFindings(findings: any[]): string | undefined {
  * (original + decontextualized), local rule findings, and the full audit
  * execution protocol (Steps 1-3). No shared context required.
  */
-function buildIsolatedAgentInstructions(
+function buildIsolatedContextInstructions(
   auditor: Persona,
   content: string,
   bareText: string,
@@ -1445,7 +1445,7 @@ async function handleOrchestrationAuditResult(
  * to rstConfirmation or checkPersonaInventory because the subagent dispatch
  * prompt already asks the host AI to do the cross-validation and final arbitration.
  */
-async function handleSubagentAuditResult(
+async function handleContextAuditResult(
   tmpDir: string,
   state: ReviewWizardState,
   userPersonas: Persona[],
