@@ -377,7 +377,7 @@ describe("reviewContentWizardContinue — validateContinuationGate integration",
       step: "waitingForSubagentAudit",
       revision: 1,
       blueprint: {
-        agents: [{ id: "agent-1", description: "test agent" }],
+        contexts: [{ id: "context-1", description: "test agent" }],
         aggregation: "union",
         outputSchema: {},
       },
@@ -414,7 +414,7 @@ describe("reviewContentWizardContinue — validateContinuationGate integration",
       step: "waitingForPersonaAudit",
       revision: 1,
       blueprint: {
-        agents: [{ id: "agent-1", description: "test agent" }],
+        contexts: [{ id: "context-1", description: "test agent" }],
         aggregation: "union",
         outputSchema: {},
       },
@@ -453,7 +453,7 @@ describe("reviewContentWizardContinue — validateContinuationGate integration",
       step: "waitingForSubagentAudit",
       revision: 1,
       blueprint: {
-        agents: [{ id: "agent-1", description: "test agent" }],
+        contexts: [{ id: "context-1", description: "test agent" }],
         aggregation: "union",
         outputSchema: {
           type: "object",
@@ -468,7 +468,7 @@ describe("reviewContentWizardContinue — validateContinuationGate integration",
       },
     }));
 
-    // Pass a receipt conforming to kevlar.exec/v1 protocol
+    // Pass a receipt conforming to kevlar.blueprint/v1 protocol
     const handler = reviewContentWizardContinueModule.handler(makeDeps());
     const result = await handler({
       sessionId: sid,
@@ -476,10 +476,10 @@ describe("reviewContentWizardContinue — validateContinuationGate integration",
       expectedRevision: 1,
       continuationId: "cont-accept",
       receipt: {
-        protocol: "kevlar.exec/v1",
-        agents: [
+        protocol: "kevlar.blueprint/v1",
+        contexts: [
           {
-            id: "agent-1",
+            id: "context-1",
             status: "completed",
             output: {
               findings: [
@@ -489,7 +489,7 @@ describe("reviewContentWizardContinue — validateContinuationGate integration",
           },
         ],
         aggregation: {
-          dimensions: [{ id: "agent-1", level: "🟡", description: "test" }],
+          dimensions: [{ id: "context-1", level: "🟡", description: "test" }],
           summary: "All agents completed",
         },
       },
@@ -550,7 +550,7 @@ describe("reviewContentWizardContinue — edge cases", () => {
       step: "waitingForSubagentAudit",
       revision: 1,
       blueprint: {
-        agents: [{ id: "agent-1", description: "test agent" }],
+        contexts: [{ id: "context-1", description: "test agent" }],
         aggregation: "union",
         outputSchema: {
           type: "object",
@@ -572,10 +572,10 @@ describe("reviewContentWizardContinue — edge cases", () => {
       expectedRevision: 1,
       continuationId: "cont-result-parse",
       result: JSON.stringify({
-        protocol: "kevlar.exec/v1",
-        agents: [
+        protocol: "kevlar.blueprint/v1",
+        contexts: [
           {
-            id: "agent-1",
+            id: "context-1",
             status: "completed",
             output: {
               findings: [
@@ -585,7 +585,7 @@ describe("reviewContentWizardContinue — edge cases", () => {
           },
         ],
         aggregation: {
-          dimensions: [{ id: "agent-1", level: "🔴", description: "danger" }],
+          dimensions: [{ id: "context-1", level: "🔴", description: "danger" }],
           summary: "parsed from result",
         },
       }),
@@ -606,7 +606,7 @@ describe("reviewContentWizardContinue — edge cases", () => {
       step: "waitingForSubagentAudit",
       revision: 1,
       blueprint: {
-        agents: [{ id: "agent-1", description: "test agent" }],
+        contexts: [{ id: "context-1", description: "test agent" }],
         aggregation: "union",
         outputSchema: {},
       },
@@ -640,19 +640,19 @@ describe("reviewContentWizardContinue — edge cases", () => {
 
 describe("reviewContentWizardContinue — slot-based agent submission", () => {
   function proSlotState(sessionId: string, overrides: Record<string, unknown> = {}) {
-    const agentIds = ["agent-1", "agent-2"];
+    const contextIds = ["context-1", "agent-2"];
     return baseState({
       sessionId,
       step: "waitingForSubagentAudit",
       revision: 1,
       tier: "pro",
       blueprint: {
-        protocol: "kevlar.exec/v1",
-        agents: agentIds.map((id) => ({ id, role: "safety_reviewer" })),
+        protocol: "kevlar.blueprint/v1",
+        contexts: contextIds.map((id) => ({ id, role: "safety_reviewer" })),
         continuation: {
           agentSlots: {
             total: 2,
-            agentIds,
+            contextIds,
             allowPartialSubmit: true,
           },
         },
@@ -686,7 +686,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     });
   }
 
-  it("rejects agentId for Free tier", async () => {
+  it("rejects contextId for Free tier", async () => {
     const sid = makeSessionId();
     writeStateFile(tmpDir, sid, proSlotState(sid, { tier: "free" }));
 
@@ -696,8 +696,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 1,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-1",
-      receipt: { agentId: "agent-1", status: "completed", output: { findings: [{ keyword: "risky" }] } },
+      contextId: "context-1",
+      receipt: { contextId: "context-1", status: "completed", output: { findings: [{ keyword: "risky" }] } },
     });
 
     assert.ok(result.isError);
@@ -714,15 +714,15 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 1,
       continuationId: "BAD!ID",
-      agentId: "agent-1",
-      receipt: { agentId: "agent-1", status: "completed", output: { findings: [] } },
+      contextId: "context-1",
+      receipt: { contextId: "context-1", status: "completed", output: { findings: [] } },
     });
 
     assert.ok(result.isError);
     assert.ok(textOf(result).includes("格式不合法"));
   });
 
-  it("rejects invalid agentId format", async () => {
+  it("rejects invalid contextId format", async () => {
     const sid = makeSessionId();
     writeStateFile(tmpDir, sid, proSlotState(sid));
 
@@ -732,15 +732,15 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 1,
       continuationId: `cont-slot-${sid}`,
-      agentId: "bad agent!",
-      receipt: { agentId: "bad agent!", status: "completed", output: { findings: [] } },
+      contextId: "bad agent!",
+      receipt: { contextId: "bad agent!", status: "completed", output: { findings: [] } },
     });
 
     assert.ok(result.isError);
-    assert.ok(textOf(result).includes("agentId 格式不合法"));
+    assert.ok(textOf(result).includes("contextId 格式不合法"));
   });
 
-  it("rejects unknown agentId not in blueprint", async () => {
+  it("rejects unknown contextId not in blueprint", async () => {
     const sid = makeSessionId();
     writeStateFile(tmpDir, sid, proSlotState(sid));
 
@@ -750,12 +750,12 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 1,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-99",
-      receipt: { agentId: "agent-99", status: "completed", output: { findings: [] } },
+      contextId: "agent-99",
+      receipt: { contextId: "agent-99", status: "completed", output: { findings: [] } },
     });
 
     assert.ok(result.isError);
-    assert.ok(textOf(result).includes("未知的 agentId"));
+    assert.ok(textOf(result).includes("未知的 contextId"));
   });
 
   it("accepts first slot and returns progress with expectedRevision", async () => {
@@ -768,8 +768,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 1,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-1",
-      receipt: { agentId: "agent-1", status: "completed", output: { findings: [{ keyword: "risky" }] } },
+      contextId: "context-1",
+      receipt: { contextId: "context-1", status: "completed", output: { findings: [{ keyword: "risky" }] } },
     });
 
     assert.equal(result.isError, undefined); // not an error
@@ -781,8 +781,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
     assert.ok(s.revision >= 2, "revision should be incremented");
     assert.ok(s.agentSlots, "agentSlots should exist");
-    assert.ok(s.agentSlots.received["agent-1"], "slot should contain agent-1 result");
-    assert.equal(s.agentSlots.received["agent-1"].status, "completed");
+    assert.ok(s.agentSlots.received["context-1"], "slot should contain agent-1 result");
+    assert.equal(s.agentSlots.received["context-1"].status, "completed");
   });
 
   it("allows overwrite on repeated slot submission", async () => {
@@ -793,8 +793,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       agentSlots: {
         total: 2,
         received: {
-          "agent-1": {
-            agentId: "agent-1",
+          "context-1": {
+            contextId: "context-1",
             status: "completed",
             submittedAt: Date.now() - 10000,
             output: { findings: [{ keyword: "old" }] },
@@ -809,8 +809,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 2,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-1",
-      receipt: { agentId: "agent-1", status: "completed", output: { findings: [{ keyword: "new" }] },
+      contextId: "context-1",
+      receipt: { contextId: "context-1", status: "completed", output: { findings: [{ keyword: "new" }] },
       },
     });
 
@@ -828,13 +828,13 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 1,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-1",
-      receipt: { agentId: "agent-1", status: "failed", output: { findings: [] } },
+      contextId: "context-1",
+      receipt: { contextId: "context-1", status: "failed", output: { findings: [] } },
     });
 
     assert.equal(result.isError, undefined);
     const s = JSON.parse(fs.readFileSync(statePath(tmpDir, sid), "utf-8"));
-    assert.equal(s.agentSlots.received["agent-1"].status, "failed");
+    assert.equal(s.agentSlots.received["context-1"].status, "failed");
   });
 
   it("returns error when all agents failed (zero completed)", async () => {
@@ -844,8 +844,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       agentSlots: {
         total: 2,
         received: {
-          "agent-1": {
-            agentId: "agent-1",
+          "context-1": {
+            contextId: "context-1",
             status: "failed",
             submittedAt: Date.now() - 10000,
             output: { findings: [] },
@@ -861,8 +861,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 2,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-2",
-      receipt: { agentId: "agent-2", status: "failed", output: { findings: [] } },
+      contextId: "agent-2",
+      receipt: { contextId: "agent-2", status: "failed", output: { findings: [] } },
     });
 
     assert.ok(result.isError);
@@ -875,8 +875,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       agentSlots: {
         total: 2,
         received: {
-          "agent-1": {
-            agentId: "agent-1",
+          "context-1": {
+            contextId: "context-1",
             status: "completed",
             submittedAt: Date.now() - 10000,
             output: { findings: [{ keyword: "risky" }] },
@@ -898,8 +898,8 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
       checkpoint: "preaudit_completed",
       expectedRevision: 2,
       continuationId: `cont-slot-${sid}`,
-      agentId: "agent-2",
-      receipt: { agentId: "agent-2", status: "completed", output: { findings: [] } },
+      contextId: "agent-2",
+      receipt: { contextId: "agent-2", status: "completed", output: { findings: [] } },
     });
 
     // Should auto-finalize with partial results (not error)
@@ -943,7 +943,7 @@ describe("ContinuationStatus — structured status protocol", () => {
   });
 
   it("progress status includes retry: true", () => {
-    const s = progress("slot_received", { agentId: "a1", remaining: 2 });
+    const s = progress("slot_received", { contextId: "a1", remaining: 2 });
     assert.equal(s.status, "progress");
     assert.equal(s.retry, true);
   });

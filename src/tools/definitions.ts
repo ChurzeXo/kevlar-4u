@@ -136,7 +136,7 @@ export const TOOL_DEFINITIONS: Record<string, Tool> = {
         },
         receipt: {
           type: "object",
-          description: "符合 kevlar.exec/v1 协议的 ExecutionReceipt 结构体",
+          description: "符合 kevlar.blueprint/v1 协议的 ExecutionReceipt 结构体",
         },
       },
       required: ["sessionId", "checkpoint", "expectedRevision", "continuationId"],

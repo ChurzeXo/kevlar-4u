@@ -35,7 +35,7 @@ export const reviewContentWizardContinueDefinition: Tool = {
     "提交宿主编排执行结果并继续审计流程。" +
     "与 review_content_wizard 不同，此工具使用 session checkpoint + revision 协议确保结果一致性，" +
     "防止旧回合覆盖新状态。当 Kevlar 返回 continuation contract 时，必须使用此工具提交结果。" +
-    "Pro 用户可通过 agentId 逐 agent 提交结果，Kevlar 自动聚合。",
+    "Pro 用户可通过 contextId 逐 agent 提交结果，Kevlar 自动聚合。",
 
   inputSchema: {
     type: "object",
@@ -70,14 +70,14 @@ export const reviewContentWizardContinueDefinition: Tool = {
       },
       receipt: {
         type: "object",
-        description: "符合 kevlar.exec/v1 协议的 ExecutionReceipt 结构体",
+        description: "符合 kevlar.blueprint/v1 协议的 ExecutionReceipt 结构体",
       },
-      agentId: {
+      contextId: {
         type: "string",
         description:
-          "Pro only: agent ID for per-agent slot submission. " +
+          "Pro only: context ID for per-agent slot submission. " +
           "When present, Kevlar saves the result to the agent slot and auto-aggregates when all slots filled. " +
-          "Must match an agentId from the blueprint's agentSlots.agentIds.",
+          "Must match an contextId from the blueprint's agentSlots.contextIds.",
       },
     },
     required: ["sessionId", "checkpoint", "expectedRevision", "continuationId"],
@@ -97,7 +97,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
     const continuationId = args.continuationId as string;
     const result = args.result as string | undefined;
     const receiptInput = args.receipt as any;
-    const agentId = args.agentId as string | undefined;
+    const contextId = args.contextId as string | undefined;
 
     if (!sessionId || typeof sessionId !== "string") {
       return {
@@ -138,9 +138,9 @@ export const reviewContentWizardContinueModule: ToolModule = {
     }
 
     // ── Pro: Slot-based per-agent submission ─────────────────────────────
-    if (agentId) {
+    if (contextId) {
       return await handleAgentSlot(
-        deps, state, statePath, sessionId, expectedRevision, continuationId, agentId, receipt, result,
+        deps, state, statePath, sessionId, expectedRevision, continuationId, contextId, receipt, result,
       );
     }
 
@@ -165,9 +165,9 @@ export const reviewContentWizardContinueModule: ToolModule = {
 
           // §4.3: If agents are simply missing (schema is otherwise valid),
           // reject with clear instructions — do NOT auto-downgrade yet.
-          const missingIds = validationResult.missingAgentIds;
+          const missingIds = validationResult.missingContextIds;
           if (missingIds && missingIds.length > 0 && validationResult.checks.schemaValid) {
-            const blueprintAgents = (state as any).blueprint?.agents || [];
+            const blueprintAgents = (state as any).blueprint?.contexts || [];
             // Build a clear rejection telling the host EXACTLY which agents are missing
             const missingList = missingIds.map((id: string) => {
               const agentDef = blueprintAgents.find((a: any) => a.id === id);
@@ -215,7 +215,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
               "",
               "可能的原因：",
               "- 宿主 AI 不支持 Subagent 并行调度",
-              "- 返回的 JSON 格式不符合 kevlar.exec/v1 协议",
+              "- 返回的 JSON 格式不符合 kevlar.blueprint/v1 协议",
               detailedReasons,
               "",
               "如果你的环境不支持并行 Subagent 调度，",
@@ -482,7 +482,7 @@ async function handleAgentSlot(
   sessionId: string,
   expectedRevision: number,
   continuationId: string,
-  agentId: string,
+  contextId: string,
   receipt: any,
   result: string | undefined,
 ): Promise<ToolResult> {
@@ -556,13 +556,13 @@ async function handleAgentSlot(
 
   // ── Agent ID format validation (§7.1) ─────────────────────────────────────
   const AGENT_ID_RE = /^[a-zA-Z0-9_-]+$/;
-  if (!AGENT_ID_RE.test(agentId)) {
+  if (!AGENT_ID_RE.test(contextId)) {
     return {
       content: [{
         type: "text",
         text: formatStatusMessage(
-          rejected("invalid_agent_id_format", { agentId }),
-          `❌ agentId 格式不合法: "${agentId}"。仅允许 [a-zA-Z0-9_-]+`,
+          rejected("invalid_agent_id_format", { contextId }),
+          `❌ contextId 格式不合法: "${contextId}"。仅允许 [a-zA-Z0-9_-]+`,
         ),
       }],
       isError: true,
@@ -571,14 +571,14 @@ async function handleAgentSlot(
 
   // ── Agent ID validation ──────────────────────────────────────────────────
   const blueprint = (state as any).blueprint;
-  const expectedAgentIds: string[] = blueprint?.continuation?.agentSlots?.agentIds ?? [];
-  if (expectedAgentIds.length > 0 && !expectedAgentIds.includes(agentId)) {
+  const expectedContextIds: string[] = blueprint?.continuation?.agentSlots?.contextIds ?? [];
+  if (expectedContextIds.length > 0 && !expectedContextIds.includes(contextId)) {
     return {
       content: [{
         type: "text",
         text: formatStatusMessage(
-          rejected("unknown_agent_id", { agentId, expectedAgentIds }),
-          `❌ 未知的 agentId "${agentId}"。期望: ${expectedAgentIds.join(", ")}`,
+          rejected("unknown_agent_id", { contextId, expectedContextIds }),
+          `❌ 未知的 contextId "${contextId}"。期望: ${expectedContextIds.join(", ")}`,
         ),
       }],
       isError: true,
@@ -601,14 +601,14 @@ async function handleAgentSlot(
   }
 
   // ── Validate single agent result ─────────────────────────────────────────
-  const validation = validateSingleAgentResult(agentId, parsedResult);
+  const validation = validateSingleAgentResult(contextId, parsedResult);
   if (!validation.valid) {
     return {
       content: [
         {
           type: "text",
           text: formatStatusMessage(
-            rejected("agent_result_format_error", { agentId, errors: validation.errors, warnings: validation.warnings }),
+            rejected("agent_result_format_error", { contextId, errors: validation.errors, warnings: validation.warnings }),
             [
               "❌ **Agent 结果格式错误**",
               "",
@@ -624,13 +624,13 @@ async function handleAgentSlot(
   }
 
   // ── Write to slot ────────────────────────────────────────────────────────
-  const total = blueprint?.continuation?.agentSlots?.total ?? expectedAgentIds.length;
+  const total = blueprint?.continuation?.agentSlots?.total ?? expectedContextIds.length;
   if (!state.agentSlots) {
     state.agentSlots = { total, received: {} };
   }
 
   // Re-submission check — warn but allow overwrite
-  const isResubmit = !!state.agentSlots.received[agentId];
+  const isResubmit = !!state.agentSlots.received[contextId];
   if (!isResubmit && Object.keys(state.agentSlots.received).length >= total) {
     // Edge case: slot already full
     return {
@@ -649,8 +649,8 @@ async function handleAgentSlot(
   const outputOutput = parsedResult.output || parsedResult.result || {};
   const status = parsedResult.status || "completed";
 
-  state.agentSlots.received[agentId] = {
-    agentId,
+  state.agentSlots.received[contextId] = {
+    contextId,
     status,
     submittedAt: Date.now(),
     output: {
@@ -669,8 +669,8 @@ async function handleAgentSlot(
 
   // ── Check if all slots filled ────────────────────────────────────────────
   const receivedIds = new Set(Object.keys(state.agentSlots.received));
-  const allFilled = expectedAgentIds.length > 0
-    && expectedAgentIds.every((id: string) => receivedIds.has(id));
+  const allFilled = expectedContextIds.length > 0
+    && expectedContextIds.every((id: string) => receivedIds.has(id));
 
   // Compute completed vs failed counts
   const receivedSlots = Object.values(state.agentSlots.received) as any[];
@@ -686,13 +686,13 @@ async function handleAgentSlot(
   // If the continuation has expired, force partial aggregation with
   // whatever results are available (accepted agents only).
   if (isExpired && !allFilled) {
-    return await finalizeSlots(deps, state, statePath, sessionId, total, completedCount, agentId);
+    return await finalizeSlots(deps, state, statePath, sessionId, total, completedCount, contextId);
   }
 
   if (!allFilled) {
-    const remaining = expectedAgentIds.filter((id: string) => !receivedIds.has(id));
+    const remaining = expectedContextIds.filter((id: string) => !receivedIds.has(id));
     const progressParts: string[] = [
-      `✅ 已收到 agent **"${agentId}"** 的审计结果。`,
+      `✅ 已收到 agent **"${contextId}"** 的审计结果。`,
     ];
     if (isResubmit) progressParts.push("（覆盖先前提交的结果）");
     if (failedCount > 0) {
@@ -734,7 +734,7 @@ async function handleAgentSlot(
   }
 
   // ── All slots filled (or expired + partial) — auto-aggregate ─────────────
-  return await finalizeSlots(deps, state, statePath, sessionId, total, completedCount, agentId);
+  return await finalizeSlots(deps, state, statePath, sessionId, total, completedCount, contextId);
 }
 
 /**
@@ -747,7 +747,7 @@ async function finalizeSlots(
   sessionId: string,
   total: number,
   completedCount: number,
-  lastAgentId: string,
+  lastContextId: string,
 ): Promise<ToolResult> {
   if (completedCount === 0) {
     return {

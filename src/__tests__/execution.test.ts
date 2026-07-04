@@ -23,7 +23,7 @@ import {
   validateReceipt,
   validateSingleAgentResult,
   fallbackToStandardOrchestration,
-  type AgentBlueprint,
+  type ExecutionBlueprint,
   type ExecutionReceipt,
 } from "../execution/protocol.js";
 import { writePersonaFile } from "../utils/parser.js";
@@ -635,9 +635,9 @@ describe("executePersonasInParallel", () => {
 /** Helper: create a minimal valid ExecutionReceipt */
 function makeValidReceipt(overrides: Record<string, any> = {}): ExecutionReceipt {
   return {
-    protocol: "kevlar.exec/v1",
+    protocol: "kevlar.blueprint/v1",
     execution: {
-      requestedMode: "ephemeral_agents",
+      requestedMode: "isolated_contexts",
       actualMode: "native_subagent",
       requestedConcurrency: 2,
       actualConcurrency: 2,
@@ -645,7 +645,7 @@ function makeValidReceipt(overrides: Record<string, any> = {}): ExecutionReceipt
       parallelism: "parallel",
       evidenceLevel: "host_attested",
     },
-    agents: [
+    contexts: [
       {
         id: "agent-1",
         role: "safety_reviewer",
@@ -661,17 +661,17 @@ function makeValidReceipt(overrides: Record<string, any> = {}): ExecutionReceipt
   } as unknown as ExecutionReceipt;
 }
 
-/** Helper: create a minimal AgentBlueprint */
-function makeBlueprint(agentIds: string[]): AgentBlueprint {
+/** Helper: create a minimal ExecutionBlueprint */
+function makeBlueprint(contextIds: string[]): ExecutionBlueprint {
   return {
-    protocol: "kevlar.exec/v1",
+    protocol: "kevlar.blueprint/v1",
     execution: {
-      mode: "ephemeral_agents",
+      mode: "isolated_contexts",
       allowedModes: ["native_subagent", "simulated_agent"],
-      concurrency: agentIds.length,
+      concurrency: contextIds.length,
       isolation: { required: true, level: "best_effort" },
     },
-    agents: agentIds.map((id) => ({
+    contexts: contextIds.map((id) => ({
       id,
       role: "safety_reviewer",
       instructions: "Review the content.",
@@ -680,7 +680,7 @@ function makeBlueprint(agentIds: string[]): AgentBlueprint {
     })),
     aggregation: {
       strategy: "host_merge",
-      rules: { requireAllAgents: true, conflictResolution: "risk_maximization", outputSchema: "kevlar.audit/v1" },
+      rules: { requireAllContexts: true, conflictResolution: "risk_maximization", outputSchema: "kevlar.audit/v1" },
     },
     continuation: {
       tool: "review_content_wizard_continue",
@@ -694,10 +694,10 @@ function makeBlueprint(agentIds: string[]): AgentBlueprint {
 describe("runAggregationValidation", () => {
   it("returns valid for a conforming receipt with no blueprint", () => {
     const result = runAggregationValidation(makeValidReceipt());
-    assert.equal(result.protocol, "kevlar.exec/v1");
+    assert.equal(result.protocol, "kevlar.blueprint/v1");
     assert.equal(result.status, "valid");
     assert.ok(result.checks.schemaValid);
-    assert.ok(result.checks.allAgentsPresent);
+    assert.ok(result.checks.allContextsPresent);
   });
 
   it("returns invalid for null receipt", () => {
@@ -712,7 +712,7 @@ describe("runAggregationValidation", () => {
   });
 
   it("returns invalid when agents array is missing", () => {
-    const receipt = makeValidReceipt({ agents: undefined });
+    const receipt = makeValidReceipt({ contexts: undefined });
     const result = runAggregationValidation(receipt);
     assert.equal(result.status, "invalid");
     assert.ok(!result.checks.schemaValid);
@@ -720,7 +720,7 @@ describe("runAggregationValidation", () => {
 
   it("returns invalid when agent output is missing findings", () => {
     const receipt = makeValidReceipt({
-      agents: [{ id: "a1", role: "safety_reviewer", status: "completed", output: { noFindings: true } }],
+      contexts: [{ id: "a1", role: "safety_reviewer", status: "completed", output: { noFindings: true } }],
     });
     const result = runAggregationValidation(receipt);
     assert.equal(result.status, "invalid");
@@ -746,7 +746,7 @@ describe("runAggregationValidation", () => {
     const receipt = makeValidReceipt(); // Only has agent-1
     const result = runAggregationValidation(receipt, blueprint);
     assert.equal(result.status, "invalid");
-    assert.ok(!result.checks.allAgentsPresent);
+    assert.ok(!result.checks.allContextsPresent);
     assert.ok(result.risk.reasons.some((r) => r.includes("count mismatch")));
   });
 
@@ -754,7 +754,7 @@ describe("runAggregationValidation", () => {
     const blueprint = makeBlueprint(["agent-1"]);
     const receipt = makeValidReceipt({
       execution: {
-        requestedMode: "ephemeral_agents",
+        requestedMode: "isolated_contexts",
         actualMode: "native_subagent",
         requestedConcurrency: 1,
         actualConcurrency: 1,
@@ -765,13 +765,13 @@ describe("runAggregationValidation", () => {
     });
     const result = runAggregationValidation(receipt, blueprint);
     assert.equal(result.status, "valid");
-    assert.ok(result.checks.allAgentsPresent);
+    assert.ok(result.checks.allContextsPresent);
   });
 
   it("returns fallback_used when actualMode is orchestration_fallback", () => {
     const receipt = makeValidReceipt({
       execution: {
-        requestedMode: "ephemeral_agents",
+        requestedMode: "isolated_contexts",
         actualMode: "orchestration_fallback",
         requestedConcurrency: 2,
         actualConcurrency: 1,
@@ -787,7 +787,7 @@ describe("runAggregationValidation", () => {
 
   it("returns partial when some agents failed", () => {
     const receipt = makeValidReceipt({
-      agents: [
+      contexts: [
         { id: "agent-1", role: "safety_reviewer", status: "completed", output: { findings: [] } },
         { id: "agent-2", role: "policy_reviewer", status: "failed" },
       ],
@@ -808,7 +808,7 @@ describe("runAggregationValidation", () => {
     blueprint.execution.isolation.required = true;
     const receipt = makeValidReceipt({
       execution: {
-        requestedMode: "ephemeral_agents",
+        requestedMode: "isolated_contexts",
         actualMode: "native_subagent",
         requestedConcurrency: 1,
         actualConcurrency: 1,
@@ -825,7 +825,7 @@ describe("runAggregationValidation", () => {
 
   it("computes high risk level from findings", () => {
     const receipt = makeValidReceipt({
-      agents: [
+      contexts: [
         {
           id: "agent-1",
           role: "safety_reviewer",
@@ -1011,14 +1011,14 @@ describe("validateReceipt", () => {
   });
 
   it("errors when agents array is missing", () => {
-    const receipt = makeValidReceipt({ agents: undefined });
+    const receipt = makeValidReceipt({ contexts: undefined });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some((e) => e.includes("agents")));
+    assert.ok(result.errors.some((e) => e.includes("contexts")));
   });
 
   it("errors when agents array is empty", () => {
-    const receipt = makeValidReceipt({ agents: [] });
+    const receipt = makeValidReceipt({ contexts: [] });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, false);
     assert.ok(result.errors.some((e) => e.includes("为空")));
@@ -1026,7 +1026,7 @@ describe("validateReceipt", () => {
 
   it("errors when agent is missing id", () => {
     const receipt = makeValidReceipt({
-      agents: [{ status: "completed", output: { findings: [] } }],
+      contexts: [{ status: "completed", output: { findings: [] } }],
     });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, false);
@@ -1035,7 +1035,7 @@ describe("validateReceipt", () => {
 
   it("errors when agent is missing status", () => {
     const receipt = makeValidReceipt({
-      agents: [{ id: "a", output: { findings: [] } }],
+      contexts: [{ id: "a", output: { findings: [] } }],
     });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, false);
@@ -1044,7 +1044,7 @@ describe("validateReceipt", () => {
 
   it("errors when agent is missing output", () => {
     const receipt = makeValidReceipt({
-      agents: [{ id: "a", status: "completed" }],
+      contexts: [{ id: "a", status: "completed" }],
     });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, false);
@@ -1053,7 +1053,7 @@ describe("validateReceipt", () => {
 
   it("errors on string output", () => {
     const receipt = makeValidReceipt({
-      agents: [{ id: "a", status: "completed", output: "plain text" }],
+      contexts: [{ id: "a", status: "completed", output: "plain text" }],
     });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, false);
@@ -1062,7 +1062,7 @@ describe("validateReceipt", () => {
 
   it("warns on unknown status value", () => {
     const receipt = makeValidReceipt({
-      agents: [{ id: "a", status: "invalid_status", output: { findings: [] } }],
+      contexts: [{ id: "a", status: "invalid_status", output: { findings: [] } }],
     });
     const result = validateReceipt(receipt);
     assert.equal(result.valid, true);
@@ -1102,7 +1102,7 @@ describe("validateReceipt", () => {
 describe("validateSingleAgentResult", () => {
   it("validates a well-formed agent result", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-1",
+      contextId: "agent-1",
       status: "completed",
       output: { findings: [{ keyword: "risky" }] },
     });
@@ -1116,18 +1116,18 @@ describe("validateSingleAgentResult", () => {
     assert.ok(result.errors.some((e) => e.includes("不是有效")));
   });
 
-  it("errors when agentId is missing", () => {
+  it("errors when contextId is missing", () => {
     const result = validateSingleAgentResult("agent-1", {
       status: "completed",
       output: { findings: [] },
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some((e) => e.includes("agentId")));
+    assert.ok(result.errors.some((e) => e.includes("contextId")));
   });
 
-  it("errors when agentId does not match expected", () => {
+  it("errors when contextId does not match expected", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-2",
+      contextId: "agent-2",
       status: "completed",
       output: { findings: [] },
     });
@@ -1137,7 +1137,7 @@ describe("validateSingleAgentResult", () => {
 
   it("errors when status is missing", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-1",
+      contextId: "agent-1",
       output: { findings: [] },
     });
     assert.equal(result.valid, false);
@@ -1146,7 +1146,7 @@ describe("validateSingleAgentResult", () => {
 
   it("errors on unknown status value", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-1",
+      contextId: "agent-1",
       status: "unknown",
       output: { findings: [] },
     });
@@ -1156,7 +1156,7 @@ describe("validateSingleAgentResult", () => {
 
   it("accepts status: failed", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-1",
+      contextId: "agent-1",
       status: "failed",
       output: { findings: [] },
     });
@@ -1165,7 +1165,7 @@ describe("validateSingleAgentResult", () => {
 
   it("errors when findings is not an array", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-1",
+      contextId: "agent-1",
       status: "completed",
       output: { findings: "not-array" },
     });
@@ -1175,7 +1175,7 @@ describe("validateSingleAgentResult", () => {
 
   it("warns when output.findings is not an array", () => {
     const result = validateSingleAgentResult("agent-1", {
-      agentId: "agent-1",
+      contextId: "agent-1",
       status: "completed",
       output: { findings: "not-array" },
     });

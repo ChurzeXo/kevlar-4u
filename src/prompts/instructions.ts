@@ -27,8 +27,8 @@ export const SERVER_INSTRUCTIONS = `
 3. **保持冷酷**：你只是一个检测器和协议搬运工，不是内容创作者
 4. **严格遵守工具契约**：调用 review_content_wizard 后，必须严格按照工具返回的 JSON 契约或排版指令执行，不得擅自偏离
 
-## Subagent 并行调度约定（仅当工具返回 AgentBlueprint 时生效）
-当 review_content_wizard 或 review_content_wizard_continue 返回的文本中包含 AgentBlueprint（kevlar.exec/v1 协议 JSON）时：
+## Subagent 并行调度约定（仅当工具返回 ExecutionBlueprint 时生效）
+当 review_content_wizard 或 review_content_wizard_continue 返回的文本中包含 ExecutionBlueprint（kevlar.blueprint/v1 协议 JSON）时：
 1. 你必须使用平台原生的子代理/任务创建工具（如 Agent、Task 等），为 Blueprint 中的每个 agent 创建独立的执行上下文并行执行。
 2. 每个执行上下文必须隔离——只读自己的 instructions 字段，不共享推理状态。
 3. 所有执行上下文完成后，将结果聚合为一份 ExecutionReceipt JSON，调用 review_content_wizard_continue 提交。

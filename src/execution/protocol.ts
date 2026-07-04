@@ -1,7 +1,7 @@
 /**
  * Kevlar Execution Protocol v1 (Final Unified Spec)
  *
- * Implements AgentBlueprint, ExecutionReceipt, and AggregationValidation schemas,
+ * Implements ExecutionBlueprint, ExecutionReceipt, and AggregationValidation schemas,
  * along with the validation gates and continuation guard optimistic lock checks.
  */
 
@@ -10,13 +10,13 @@ import { logger } from "../utils/logger.js";
 import { normalizeRiskLevel } from "./riskLevel.js";
 import { validationError } from "../utils/errors.js";
 
-// ── 3.1 Agent Blueprint ──────────────────────────────────────────────────────
+// ── 3.1 Execution Blueprint ──────────────────────────────────────────────────────
 
-export interface AgentBlueprint {
-  protocol: "kevlar.exec/v1";
+export interface ExecutionBlueprint {
+  protocol: "kevlar.blueprint/v1";
 
   execution: {
-    mode: "ephemeral_agents";
+    mode: "isolated_contexts";
     allowedModes: ("native_subagent" | "simulated_agent")[];
     concurrency: number;
     isolation: {
@@ -25,12 +25,12 @@ export interface AgentBlueprint {
     };
   };
 
-  agents: AgentDefinition[];
+  contexts: ContextDefinition[];
   aggregation: AggregationSpec;
   continuation: ContinuationSpec;
 }
 
-export interface AgentDefinition {
+export interface ContextDefinition {
   id: string; // Globally unique tracking ID
   role: "safety_reviewer" | "policy_reviewer" | "context_reviewer" | string;
   instructions: string; // Focused domain instructions
@@ -44,7 +44,7 @@ export interface AgentDefinition {
 export interface AggregationSpec {
   strategy: "host_merge";
   rules: {
-    requireAllAgents: boolean;
+    requireAllContexts: boolean;
     conflictResolution: "host_decide" | "majority_vote" | "risk_maximization";
     outputSchema: "kevlar.audit/v1"; // Final aggregated report schema
   };
@@ -57,19 +57,19 @@ export interface ContinuationSpec {
   expectedRevision: number;
   idempotencyKey?: string;
   // Pro: slot-based per-agent result submission metadata
-  agentSlots?: {
+  contextSlots?: {
     total: number;
-    agentIds: string[];
+    contextIds: string[];
     allowPartialSubmit: true;
   };
 }
 
 /**
  * Single agent result submitted independently via slot-based protocol.
- * Used when ContinuationSpec.agentSlots is present.
+ * Used when ContinuationSpec.contextSlots is present.
  */
-export interface AgentSlotResult {
-  agentId: string;
+export interface ContextSlotResult {
+  contextId: string;
   status: "completed" | "failed";
   submittedAt: number;
   output: {
@@ -116,17 +116,17 @@ export interface AggregationDimension {
  * Output structure expected from each agent.
  * Must be a JSON object containing a `findings` array.
  */
-export interface AgentOutput {
+export interface ContextOutput {
   findings: Finding[];
   reasoning?: string;
   [key: string]: unknown;
 }
 
 export interface ExecutionReceipt {
-  protocol: "kevlar.exec/v1";
+  protocol: "kevlar.blueprint/v1";
 
   execution: {
-    requestedMode: "ephemeral_agents";
+    requestedMode: "isolated_contexts";
     actualMode:
       | "native_subagent"
       | "simulated_agent"
@@ -145,15 +145,15 @@ export interface ExecutionReceipt {
     evidenceLevel: "host_attested" | "best_effort" | "unknown";
   };
 
-  agents: AgentExecutionResult[];
+  contexts: ContextExecutionResult[];
   aggregation?: AggregationReport;
 }
 
-export interface AgentExecutionResult {
+export interface ContextExecutionResult {
   id: string;
   role: string;
   status: "completed" | "failed";
-  output: AgentOutput;
+  output: ContextOutput;
   latencyMs?: number;
   tokenUsage?: number;
 }
@@ -161,7 +161,7 @@ export interface AgentExecutionResult {
 // ── 3.3 Aggregation Validation ───────────────────────────────────────────────
 
 export interface AggregationValidation {
-  protocol: "kevlar.exec/v1";
+  protocol: "kevlar.blueprint/v1";
 
   status:
     | "valid"          // Perfectly compliant, advance state machine
@@ -171,7 +171,7 @@ export interface AggregationValidation {
 
   checks: {
     schemaValid: boolean;           // output matches outputSchema
-    allAgentsPresent: boolean;      // receipt agents count & IDs match blueprint
+    allContextsPresent: boolean;      // receipt agents count & IDs match blueprint
     aggregationConsistent: boolean; // aggregation matches outputSchema and doesn't conflict
     executionMismatch?: boolean;    // requestedMode !== actualMode
     isolationViolation?: boolean;   // isolation.required but achieved is false
@@ -183,7 +183,7 @@ export interface AggregationValidation {
   };
 
   /** IDs of agents declared in the blueprint but missing from the receipt. */
-  missingAgentIds?: string[];
+  missingContextIds?: string[];
 }
 
 // ── 4. Validation Gates ──────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ export interface AggregationValidation {
  * completes its task-agent execution.  It runs 4 full validation gates:
  *
  *   Gate 1 — Schema consistency (agents have valid output.findings)
- *   Gate 2 — Agent count alignment with blueprint
+ *   Gate 2 — Context count alignment with blueprint
  *   Gate 3 — Aggregation consistency (dimensions match agents)
  *   Gate 4 — Execution mismatch + isolation safety violation detection
  *
@@ -208,11 +208,11 @@ export interface AggregationValidation {
  */
 export function runAggregationValidation(
   receipt: any,
-  blueprint?: AgentBlueprint
+  blueprint?: ExecutionBlueprint
 ): AggregationValidation {
   const checks = {
     schemaValid: false,
-    allAgentsPresent: false,
+    allContextsPresent: false,
     aggregationConsistent: false,
     executionMismatch: false,
     isolationViolation: false,
@@ -226,24 +226,24 @@ export function runAggregationValidation(
   if (!receipt || typeof receipt !== "object") {
     risk.reasons.push("Execution receipt is missing or not a valid object");
     return {
-      protocol: "kevlar.exec/v1",
+      protocol: "kevlar.blueprint/v1",
       status: "invalid",
       checks,
       risk,
     };
   }
 
-  if (receipt.protocol !== "kevlar.exec/v1") {
+  if (receipt.protocol !== "kevlar.blueprint/v1") {
     risk.reasons.push(`Protocol mismatch: expected 'kevlar.exec/v1', got '${receipt.protocol}'`);
   }
 
   // 1. Schema 一致性断言
   let schemaValid = true;
-  if (!Array.isArray(receipt.agents)) {
+  if (!Array.isArray(receipt.contexts)) {
     schemaValid = false;
-    risk.reasons.push("receipt.agents must be an array");
+    risk.reasons.push("receipt.contexts must be an array");
   } else {
-    for (const agent of receipt.agents) {
+    for (const agent of receipt.contexts) {
       if (!agent || typeof agent !== "object" || !agent.id || !agent.status) {
         schemaValid = false;
         risk.reasons.push(`Agent result has invalid structure: ${JSON.stringify(agent)}`);
@@ -282,50 +282,50 @@ export function runAggregationValidation(
   checks.schemaValid = schemaValid;
 
   // 2. 智能体数量对齐
-  let allAgentsPresent = true;
-  const missingAgentIds: string[] = [];
-  if (blueprint && blueprint.agents && Array.isArray(blueprint.agents)) {
-    const blueprintIds = new Set(blueprint.agents.map((a: any) => a.id));
-    const receiptIds = new Set((receipt.agents || []).map((a: any) => a.id));
+  let allContextsPresent = true;
+  const missingContextIds: string[] = [];
+  if (blueprint && blueprint.contexts && Array.isArray(blueprint.contexts)) {
+    const blueprintIds = new Set(blueprint.contexts.map((a: any) => a.id));
+    const receiptIds = new Set((receipt.contexts || []).map((a: any) => a.id));
 
     // Detect missing agents (in blueprint but not in receipt)
     for (const id of blueprintIds) {
       if (!receiptIds.has(id)) {
-        allAgentsPresent = false;
-        missingAgentIds.push(id);
+        allContextsPresent = false;
+        missingContextIds.push(id);
       }
     }
 
     // Detect unexpected agents (in receipt but not in blueprint)
     for (const id of receiptIds) {
       if (!blueprintIds.has(id)) {
-        allAgentsPresent = false;
+        allContextsPresent = false;
         risk.reasons.push(`Unexpected agent id in receipt: '${id}'`);
       }
     }
 
-    if (!receipt.agents || receipt.agents.length !== blueprint.agents.length) {
+    if (!receipt.contexts || receipt.contexts.length !== blueprint.contexts.length) {
       risk.reasons.push(
-        `Agent count mismatch: expected ${blueprint.agents.length}, got ${receipt.agents?.length || 0}`,
+        `Context count mismatch: expected ${blueprint.contexts.length}, got ${receipt.contexts?.length || 0}`,
       );
     }
-    if (missingAgentIds.length > 0) {
-      risk.reasons.push(`Missing agents: ${missingAgentIds.join(", ")}`);
+    if (missingContextIds.length > 0) {
+      risk.reasons.push(`Missing agents: ${missingContextIds.join(", ")}`);
     }
   } else {
-    allAgentsPresent = Array.isArray(receipt.agents) && receipt.agents.length > 0;
+    allContextsPresent = Array.isArray(receipt.contexts) && receipt.contexts.length > 0;
   }
-  checks.allAgentsPresent = allAgentsPresent;
+  checks.allContextsPresent = allContextsPresent;
 
   // 2b. actualConcurrency 检查 (§4.3)
-  const expectedConcurrency = blueprint?.execution?.concurrency ?? (blueprint?.agents?.length || 0);
+  const expectedConcurrency = blueprint?.execution?.concurrency ?? (blueprint?.contexts?.length || 0);
   const actualConcurrency = receipt.execution?.actualConcurrency;
   const concurrencyMismatch =
     expectedConcurrency > 0 && typeof actualConcurrency === "number" && actualConcurrency !== expectedConcurrency;
   if (concurrencyMismatch) {
-    checks.allAgentsPresent = false; // treat concurrency gap as incomplete
-    missingAgentIds.push(...blueprint!.agents!
-      .filter((a: any) => !new Set((receipt.agents || []).map((ra: any) => ra.id)).has(a.id))
+    checks.allContextsPresent = false; // treat concurrency gap as incomplete
+    missingContextIds.push(...blueprint!.contexts!
+      .filter((a: any) => !new Set((receipt.contexts || []).map((ra: any) => ra.id)).has(a.id))
       .map((a: any) => a.id));
     risk.reasons.push(
       `Concurrency mismatch: blueprint declares ${expectedConcurrency}, but receipt reports actualConcurrency=${actualConcurrency}`,
@@ -335,9 +335,9 @@ export function runAggregationValidation(
   // 3. 聚合一致性检查
   let aggregationConsistent = true;
   if (schemaValid && aggregation) {
-    const agentIds = new Set((receipt.agents || []).map((a: any) => a.id));
+    const contextIds = new Set((receipt.contexts || []).map((a: any) => a.id));
     const dimIds = new Set((aggregation.dimensions || []).map((d: any) => d.id));
-    for (const id of agentIds) {
+    for (const id of contextIds) {
       if (!dimIds.has(id)) {
         aggregationConsistent = false;
         risk.reasons.push(`Aggregation is missing dimension for agent '${id}'`);
@@ -361,18 +361,18 @@ export function runAggregationValidation(
 
   // Determine overall status
   let status: AggregationValidation["status"] = "valid";
-  if (!schemaValid || !allAgentsPresent) {
+  if (!schemaValid || !allContextsPresent) {
     status = "invalid";
   } else if (executionMismatch) {
     status = "fallback_used";
-  } else if (receipt.agents.some((a: any) => a.status === "failed")) {
+  } else if (receipt.contexts.some((a: any) => a.status === "failed")) {
     status = "partial";
   }
 
   // Determine risk level based on findings
   let highestLevel: "low" | "medium" | "high" | "unknown" = "low";
   if (schemaValid) {
-    for (const agent of receipt.agents) {
+    for (const agent of receipt.contexts) {
       if (agent.status === "completed" && agent.output && Array.isArray(agent.output.findings)) {
         for (const finding of agent.output.findings) {
           const normalized = normalizeRiskLevel(finding.suggestedLevel || finding.level);
@@ -405,11 +405,11 @@ export function runAggregationValidation(
   risk.level = highestLevel;
 
   return {
-    protocol: "kevlar.exec/v1",
+    protocol: "kevlar.blueprint/v1",
     status,
     checks,
     risk,
-    missingAgentIds: missingAgentIds.length > 0 ? missingAgentIds : undefined,
+    missingContextIds: missingContextIds.length > 0 ? missingContextIds : undefined,
   };
 }
 
@@ -457,7 +457,7 @@ export function validateContinuationGate(
     const retriesExhausted = currentState.activeContinuation._receiptRetries > MAX_CONTINUATION_RETRIES;
 
     if (schemaValid && !retriesExhausted) {
-      // Rejection: host tried to submit with missing agents, can still retry
+      // Rejection: host tried to submit with missing contexts, can still retry
       return validationResult;
     }
 
@@ -548,18 +548,18 @@ export function validateReceipt(receipt: any): ReceiptValidation {
     return { valid: false, errors, warnings };
   }
 
-  if (receipt.protocol !== "kevlar.exec/v1") {
-    warnings.push(`协议版本不匹配: 期望 "kevlar.exec/v1", 收到 "${receipt.protocol || "缺失"}"`);
+  if (receipt.protocol !== "kevlar.blueprint/v1") {
+    warnings.push(`协议版本不匹配: 期望 "kevlar.blueprint/v1", 收到 "${receipt.protocol || "缺失"}"`);
   }
 
   // Agents must be present
-  if (!receipt.agents || !Array.isArray(receipt.agents)) {
-    errors.push('缺少必填字段 "agents"，必须为数组');
-  } else if (receipt.agents.length === 0) {
-    errors.push('"agents" 数组为空，至少需要一个 agent 结果');
+  if (!receipt.contexts || !Array.isArray(receipt.contexts)) {
+    errors.push('缺少必填字段 "contexts"，必须为数组');
+  } else if (receipt.contexts.length === 0) {
+    errors.push('"contexts" 数组为空，至少需要一个 agent 结果');
   } else {
-    for (let i = 0; i < receipt.agents.length; i++) {
-      const agent = receipt.agents[i];
+    for (let i = 0; i < receipt.contexts.length; i++) {
+      const agent = receipt.contexts[i];
       const prefix = `agents[${i}]`;
       if (!agent.id) {
         errors.push(`${prefix}: 缺少必填字段 "id"`);
@@ -607,10 +607,10 @@ export function validateReceipt(receipt: any): ReceiptValidation {
 
 /**
  * Validate a single agent result submitted via slot-based protocol.
- * Checks agentId, status, and output.findings structure.
+ * Checks contextId, status, and output.findings structure.
  */
 export function validateSingleAgentResult(
-  expectedAgentId: string,
+  expectedContextId: string,
   result: any,
 ): ReceiptValidation {
   const errors: string[] = [];
@@ -621,11 +621,11 @@ export function validateSingleAgentResult(
     return { valid: false, errors, warnings };
   }
 
-  const agentId = result.agentId || result.id || result.agent_id;
-  if (!agentId) {
-    errors.push('缺少必填字段 "agentId"');
-  } else if (agentId !== expectedAgentId) {
-    errors.push(`agentId 不匹配: 期望 "${expectedAgentId}", 收到 "${agentId}"`);
+  const contextId = result.contextId || result.id || result.agent_id;
+  if (!contextId) {
+    errors.push('缺少必填字段 "contextId"');
+  } else if (contextId !== expectedContextId) {
+    errors.push(`contextId 不匹配: 期望 "${expectedContextId}", 收到 "${contextId}"`);
   }
 
   const status = result.status;

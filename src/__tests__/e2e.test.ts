@@ -102,7 +102,7 @@ describe("End-to-End integration test", () => {
       assert.ok(step2Text.includes("输入编号选择"), "Should ask for persona number selection");
       assert.ok(step2Text.includes("currentStep: waitingForReviewDecision"), "Should be in review decision step");
 
-      // Step 3: select persona by number → directly dispatches AgentBlueprint
+      // Step 3: select persona by number → directly dispatches ExecutionBlueprint
       const step3 = await client.callTool({
         name: "review_content_wizard",
         arguments: {
@@ -116,9 +116,9 @@ describe("End-to-End integration test", () => {
       assert.equal(step3.content[0].type, "text");
       const step3Text = step3.content[0].text;
 
-      // Verify AgentBlueprint structure in the response
-      assert.ok(step3Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol marker");
-      assert.ok(step3Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
+      // Verify ExecutionBlueprint structure in the response
+      assert.ok(step3Text.includes("kevlar.blueprint/v1"), "Should contain ExecutionBlueprint protocol marker");
+      assert.ok(step3Text.includes("isolated_contexts"), "Should use ephemeral agents mode");
       assert.ok(step3Text.includes("Persona Review — Subagent Dispatch Request"), "Should contain dispatch request");
 
       // Extract the JSON blueprint from the ```json code block
@@ -128,17 +128,17 @@ describe("End-to-End integration test", () => {
       const jsonText = jsonBlockEnd >= 0 ? step3Text.substring(contentStart, jsonBlockEnd).trim() : step3Text;
       const blueprint = JSON.parse(jsonText);
 
-      assert.equal(blueprint.protocol, "kevlar.exec/v1");
+      assert.equal(blueprint.protocol, "kevlar.blueprint/v1");
       assert.equal(blueprint.execution.isolation.level, "strict");
-      assert.equal(blueprint.agents.length, 1);
-      assert.equal(blueprint.agents[0].id, "e2e_persona");
+      assert.equal(blueprint.contexts.length, 1);
+      assert.equal(blueprint.contexts[0].id, "e2e_persona");
       assert.equal(blueprint.continuation.tool, "review_content_wizard_continue");
       assert.equal(blueprint.continuation.checkpoint, "persona_audit_started");
 
       // Read continuation context from state file
       const stateFileDir = path.join(tmpDir, "tmp");
       const statePath = path.join(stateFileDir, `${sessionId}_review_wizard.json`);
-      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath} after AgentBlueprint dispatch`);
+      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath} after ExecutionBlueprint dispatch`);
       const stateContent = fs.readFileSync(statePath, "utf-8");
       const state = JSON.parse(stateContent);
       assert.ok(state.activeContinuation, "Should have active continuation in state");
@@ -149,8 +149,8 @@ describe("End-to-End integration test", () => {
 
       // Step 4: Submit persona audit ExecutionReceipt via continue tool
       const mockReceipt = {
-        protocol: "kevlar.exec/v1",
-        agents: [
+        protocol: "kevlar.blueprint/v1",
+        contexts: [
           {
             id: "e2e_persona",
             status: "completed",
@@ -199,10 +199,10 @@ describe("End-to-End integration test", () => {
     }
   });
 
-  it("Pro tier: systemAudit → rstConfirmation → personaAudit AgentBlueprint (multi-turn)", async () => {
+  it("Pro tier: systemAudit → rstConfirmation → personaAudit ExecutionBlueprint (multi-turn)", async () => {
     // Enable Pro tier path
     process.env.KEVLAR_TIER = "pro";
-    // Use local fallback to avoid needing strategyProvider for AgentBlueprint dispatch
+    // Use local fallback to avoid needing strategyProvider for ExecutionBlueprint dispatch
     process.env.KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK = "1";
 
     const server = await createKevlarServer();
@@ -285,16 +285,16 @@ describe("End-to-End integration test", () => {
       assert.ok(step4Text.includes("当前共有 1 位评审员"), "Should show persona count");
       assert.ok(step4Text.includes("waitingForReviewerConfirmation"), "Should be in reviewer confirmation");
 
-      // Step 5: "开始舆论仿真推演" → AgentBlueprint dispatch (waitingForPersonaAudit)
+      // Step 5: "开始舆论仿真推演" → ExecutionBlueprint dispatch (waitingForPersonaAudit)
       const step5 = await client.callTool({
         name: "review_content_wizard",
         arguments: { sessionId, userMessage: "开始舆论仿真推演" },
       });
       const step5Text = (step5.content as any)[0].text;
 
-      // Verify AgentBlueprint dispatch
-      assert.ok(step5Text.includes("kevlar.exec/v1"), "Should contain AgentBlueprint protocol");
-      assert.ok(step5Text.includes("ephemeral_agents"), "Should use ephemeral agents mode");
+      // Verify ExecutionBlueprint dispatch
+      assert.ok(step5Text.includes("kevlar.blueprint/v1"), "Should contain ExecutionBlueprint protocol");
+      assert.ok(step5Text.includes("isolated_contexts"), "Should use ephemeral agents mode");
       assert.ok(step5Text.includes("Persona Review — Subagent Dispatch Request"), "Should contain dispatch request");
 
       // Parse blueprint from ```json block
@@ -303,10 +303,10 @@ describe("End-to-End integration test", () => {
       const jsonBlockEnd = step5Text.indexOf("\n```", contentStart);
       const jsonText = jsonBlockEnd >= 0 ? step5Text.substring(contentStart, jsonBlockEnd).trim() : step5Text;
       const blueprint = JSON.parse(jsonText);
-      assert.equal(blueprint.protocol, "kevlar.exec/v1");
+      assert.equal(blueprint.protocol, "kevlar.blueprint/v1");
       assert.equal(blueprint.execution.isolation.level, "strict");
-      assert.equal(blueprint.agents.length, 1);
-      assert.ok(blueprint.agents[0].id === "e2e_persona_pro" || blueprint.agents[0].id === "e2e_persona");
+      assert.equal(blueprint.contexts.length, 1);
+      assert.ok(blueprint.contexts[0].id === "e2e_persona_pro" || blueprint.contexts[0].id === "e2e_persona");
 
       // Read continuation context
       const stateFileDir = path.join(tmpDir, "tmp");
@@ -318,9 +318,9 @@ describe("End-to-End integration test", () => {
 
       // Step 6: Submit persona audit receipt → completed
       const mockReceipt = {
-        protocol: "kevlar.exec/v1",
-        agents: [{
-          id: blueprint.agents[0].id,
+        protocol: "kevlar.blueprint/v1",
+        contexts: [{
+          id: blueprint.contexts[0].id,
           status: "completed",
           output: {
             findings: [{
@@ -361,15 +361,15 @@ describe("End-to-End integration test", () => {
     }
   });
 
-  it("Pro tier: subagentAudit AgentBlueprint dispatch → receipt → rstConfirmation (multi-turn)", async () => {
+  it("Pro tier: subagentAudit ExecutionBlueprint dispatch → receipt → rstConfirmation (multi-turn)", async () => {
     // Enable Pro tier — no local fallback so it enters host_orchestration + structured path
     process.env.KEVLAR_TIER = "pro";
     // Explicitly NOT setting KEVLAR_SYSTEM_AUDIT_LOCAL_FALLBACK so it goes through
-    // the AgentBlueprint dispatch → waitingForSubagentAudit path
+    // the ExecutionBlueprint dispatch → waitingForSubagentAudit path
 
     const server = await createKevlarServer();
 
-    // Seed a system_auditor persona (required to trigger AgentBlueprint dispatch)
+    // Seed a system_auditor persona (required to trigger ExecutionBlueprint dispatch)
     const auditorMeta: PersonaMeta = {
       id: "e2e_subagent_auditor",
       name: "合规审查员",
@@ -425,12 +425,12 @@ describe("End-to-End integration test", () => {
       });
       const step2Text = (step2.content as any)[0].text;
 
-      // Verify Step 0b guidance was emitted (not AgentBlueprint yet)
+      // Verify Step 0b guidance was emitted (not ExecutionBlueprint yet)
       assert.ok(step2Text.includes("Turn 1"), "Step 2 should emit Turn 1 Step 0 guidance");
       assert.ok(step2Text.includes("blackAtoms"), "Should ask for blackAtoms in Step 0 JSON");
       assert.ok(step2Text.includes("precedents"), "Should ask for precedents in Step 0 JSON");
 
-      // Step 2b: Submit Step 0 JSON → AgentBlueprint dispatch (waitingForSubagentAudit)
+      // Step 2b: Submit Step 0 JSON → ExecutionBlueprint dispatch (waitingForSubagentAudit)
       // handleOrchestrationStep0Result() forks into structured path when plan.strategy === "structured"
       const mockStep0Result = {
         blackAtoms: [{ phrase: "测试", reason: "可被恶意断章取义", targetDimension: "context_distortion" }],
@@ -444,20 +444,20 @@ describe("End-to-End integration test", () => {
       });
       const step2bText = (step2b.content as any)[0].text;
 
-      // Verify AgentBlueprint dispatch for subagent audit
-      assert.ok(step2bText.includes("kevlar.exec/v1"), "Step 2b should contain AgentBlueprint protocol");
-      assert.ok(step2bText.includes("ephemeral_agents"), "Step 2b should use ephemeral agents mode");
+      // Verify ExecutionBlueprint dispatch for subagent audit
+      assert.ok(step2bText.includes("kevlar.blueprint/v1"), "Step 2b should contain ExecutionBlueprint protocol");
+      assert.ok(step2bText.includes("isolated_contexts"), "Step 2b should use ephemeral agents mode");
       assert.ok(step2bText.includes("host_merge"), "Step 2b should use host_merge aggregation strategy");
 
       // Parse blueprint to verify structure (extract from code block)
       const jsonMatch = step2bText.match(/```json\n([\s\S]*?)\n```/);
       assert.ok(jsonMatch, "Should contain JSON code block in blueprint");
       const blueprint = JSON.parse(jsonMatch[1]);
-      assert.equal(blueprint.protocol, "kevlar.exec/v1");
-      assert.equal(blueprint.execution.mode, "ephemeral_agents");
+      assert.equal(blueprint.protocol, "kevlar.blueprint/v1");
+      assert.equal(blueprint.execution.mode, "isolated_contexts");
       assert.equal(blueprint.execution.isolation.level, "strict");
-      assert.ok(blueprint.agents.length >= 1, "Should have at least one auditor agent");
-      assert.equal(blueprint.agents[0].id, "e2e_subagent_auditor");
+      assert.ok(blueprint.contexts.length >= 1, "Should have at least one auditor agent");
+      assert.equal(blueprint.contexts[0].id, "e2e_subagent_auditor");
       assert.equal(blueprint.continuation.tool, "review_content_wizard_continue");
       assert.equal(blueprint.continuation.checkpoint, "preaudit_completed");
 
@@ -465,7 +465,7 @@ describe("End-to-End integration test", () => {
       // state.step = "waitingForSubagentAudit" and saved
       const stateFileDir = path.join(tmpDir, "tmp");
       const statePath = path.join(stateFileDir, `${sessionId}_review_wizard.json`);
-      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath} after AgentBlueprint dispatch`);
+      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath} after ExecutionBlueprint dispatch`);
       const stateContent = fs.readFileSync(statePath, "utf-8");
       const state = JSON.parse(stateContent);
       assert.equal(state.step, "waitingForSubagentAudit", "State should be waitingForSubagentAudit");
@@ -478,10 +478,10 @@ describe("End-to-End integration test", () => {
 
       // Step 3: Submit subagent audit ExecutionReceipt via continue tool
       // This should trigger handleSubagentAuditResult → rstConfirmation
-      const auditorId = blueprint.agents[0].id;
+      const auditorId = blueprint.contexts[0].id;
       const mockReceipt = {
-        protocol: "kevlar.exec/v1",
-        agents: [
+        protocol: "kevlar.blueprint/v1",
+        contexts: [
           {
             id: auditorId,
             status: "completed",
@@ -547,13 +547,13 @@ describe("End-to-End integration test", () => {
       assert.ok(step5Text.includes("当前共有 1 位评审员"), "Should show persona count");
       assert.ok(step5Text.includes("waitingForReviewerConfirmation"), "Should be in reviewer confirmation");
 
-      // Step 6: "开始舆论仿真推演" → AgentBlueprint dispatch (waitingForPersonaAudit)
+      // Step 6: "开始舆论仿真推演" → ExecutionBlueprint dispatch (waitingForPersonaAudit)
       const step6 = await client.callTool({
         name: "review_content_wizard",
         arguments: { sessionId, userMessage: "开始舆论仿真推演" },
       });
       const step6Text = (step6.content as any)[0].text;
-      assert.ok(step6Text.includes("kevlar.exec/v1"), "Should have AgentBlueprint for persona audit");
+      assert.ok(step6Text.includes("kevlar.blueprint/v1"), "Should have ExecutionBlueprint for persona audit");
       assert.ok(step6Text.includes("Persona Review — Subagent Dispatch Request"), "Should contain dispatch request");
 
       // Extract JSON from ```json block
@@ -571,10 +571,10 @@ describe("End-to-End integration test", () => {
 
       // Step 7: Submit persona audit receipt → completed
       const personaReceipt = {
-        protocol: "kevlar.exec/v1",
-        agents: [
+        protocol: "kevlar.blueprint/v1",
+        contexts: [
           {
-            id: personaBlueprint.agents[0].id,
+            id: personaBlueprint.contexts[0].id,
             status: "completed",
             output: {
               findings: [

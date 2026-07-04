@@ -58,7 +58,7 @@ describe("Refactoring: Instructions & Prompt Decoupling", () => {
 
     it("SERVER_INSTRUCTIONS contains subagent dispatch conventions", () => {
       assert.ok(SERVER_INSTRUCTIONS.includes("Subagent 并行调度约定"), "Should contain subagent dispatch conventions header");
-      assert.ok(SERVER_INSTRUCTIONS.includes("AgentBlueprint"), "Should mention AgentBlueprint");
+      assert.ok(SERVER_INSTRUCTIONS.includes("ExecutionBlueprint"), "Should mention ExecutionBlueprint");
       assert.ok(SERVER_INSTRUCTIONS.includes("SEQUENTIAL_FALLBACK"), "Should explain SEQUENTIAL_FALLBACK");
       assert.ok(SERVER_INSTRUCTIONS.includes("禁止自行总结"), "Should forbid summarizing agent results");
     });

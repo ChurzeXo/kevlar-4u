@@ -50,8 +50,8 @@ import {
   type AuditCheckpoint,
   type DispatchFailureReason,
   type ExecutionTransition,
-  type AgentBlueprint,
-  type AgentDefinition,
+  type ExecutionBlueprint,
+  type ContextDefinition,
 } from "../execution/index.js";
 import { classifyHostStructuredResult, isKevlarHostGuidedResult, getClientFingerprint } from "../execution/client.js";
 import type { ClientFingerprint } from "../execution/plan.js";
@@ -240,9 +240,9 @@ interface ReviewWizardState {
   strategySessionId?: string;
   strategyHash?: string;
   // Pro: slot-based per-agent result tracking (003)
-  agentSlots?: {
+  contextSlots?: {
     total: number;
-    received: Record<string, import("../execution/protocol.js").AgentSlotResult>;
+    received: Record<string, import("../execution/protocol.js").ContextSlotResult>;
   };
   orchestrationPreAuditContext?: OrchestrationPreAuditContext;
   orchestrationTurn2Results?: {
@@ -684,11 +684,11 @@ async function handleSystemAudit(
  * its own tools (Agent / Task / Subagent) better than we do and will
  * self-map to the correct one.
  */
-function renderSubagentCreationInstructions(agentCount: number): string {
+function renderSubagentCreationInstructions(contextCount: number): string {
   return [
     "**How to create subagents:**",
     "",
-    `For each of the ${agentCount} agents in the AgentBlueprint, create one`,
+    `For each of the ${contextCount} agents in the AgentBlueprint, create one`,
     "independent execution context. Each execution context:",
     "",
     "- Only sees its own `instructions` field — no shared state with other contexts",
@@ -713,7 +713,7 @@ function renderSubagentCreationInstructions(agentCount: number): string {
  */
 function renderBlueprintDispatchText(
   state: ReviewWizardState,
-  blueprint: AgentBlueprint,
+  blueprint: ExecutionBlueprint,
 ): string {
   const isProTier = state.tier === "pro";
 
@@ -725,17 +725,17 @@ function renderBlueprintDispatchText(
         "1. Execute each agent independently",
         "2. For each completed agent, call `review_content_wizard_continue` with:",
         "   - The same sessionId, checkpoint, expectedRevision, continuationId",
-        `   - \`agentId\`: the agent's ID (e.g., \`${(blueprint.agents[0] as any)?.id || "legal_compliance"}\`)`,
-        "   - `result`: a JSON object with the agent's findings (agentId + status + output)",
+        `   - \`contextId\`: the agent's ID (e.g., \`${(blueprint.contexts[0] as any)?.id || "legal_compliance"}\`)`,
+        "   - `result`: a JSON object with the agent's findings (contextId + status + output)",
         "3. Kevlar will auto-aggregate when all agents have reported",
         "",
       ].join("\n")
     : "";
 
-  const agentListLines = blueprint.agents.map((a: any, i: number) =>
+  const contextListLines = blueprint.contexts.map((a: any, i: number) =>
     `  ${i + 1}. \`${a.id}\` — **${a.role}**`,
   ).join("\n");
-  const agentCount = blueprint.agents.length;
+  const contextCount = blueprint.contexts.length;
 
   return [
     "## Kevlar-4u Subagent Dispatch Request",
@@ -743,15 +743,15 @@ function renderBlueprintDispatchText(
     // ── §1: Explicit mandatory requirement ──────────────────────────
     "### ⚠️ CRITICAL — You MUST create ALL subagents below",
     "",
-    `This blueprint requires exactly **${agentCount} subagents**. You must create`,
+    `This blueprint requires exactly **${contextCount} subagents**. You must create`,
     `every single one of them. **Skipping any agent will cause the receipt to be`,
     `REJECTED by Kevlar's validation gate.** The validation compares the receipt's`,
-    `agent IDs against the blueprint and will fail if any are missing.`,
+    `context IDs against the blueprint and will fail if any are missing.`,
     "",
     "**The REQUIRED agents are:**",
-    agentListLines,
+    contextListLines,
     "",
-    `**Total**: ${agentCount} subagents MUST be created and executed in parallel.`,
+    `**Total**: ${contextCount} subagents MUST be created and executed in parallel.`,
     "",
     "---",
     // ── §2: Phase 1 — Create all subagents ──────────────────────────
@@ -760,12 +760,12 @@ function renderBlueprintDispatchText(
     "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
     "until EVERY agent has returned its result.**",
     "",
-    renderSubagentCreationInstructions(agentCount),
+    renderSubagentCreationInstructions(contextCount),
     "",
-    `**Expected in receipt**: exactly ${agentCount} agents with these IDs:`,
-    `  ${blueprint.agents.map((a: any) => a.id).join(", ")}`,
+    `**Expected in receipt**: exactly ${contextCount} agents with these IDs:`,
+    `  ${blueprint.contexts.map((a: any) => a.id).join(", ")}`,
     "",
-    "**Reminder**: If you create fewer than all agents,",
+    "**Reminder**: If you create fewer than all contexts,",
     "the receipt will be REJECTED and you will waste a round-trip.",
     "",
     "---",
@@ -775,12 +775,12 @@ function renderBlueprintDispatchText(
     "**Only after ALL subagents have completed**, construct the ExecutionReceipt:",
     "",
     "1. Collect every agent's output (their `findings` array)",
-    "2. Build the `agents` array with exactly one entry per agent — same ID and order",
+    "2. Build the `contexts` array with exactly one entry per agent — same ID and order",
     "3. Build the `aggregation` with one `dimensions` entry per agent (same IDs)",
     "4. Call `review_content_wizard_continue` with the complete receipt",
     "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
     "",
-    `The receipt MUST contain exactly ${agentCount} agent entries — no more, no less.`,
+    `The receipt MUST contain exactly ${contextCount} agent entries — no more, no less.`,
     "",
     "---",
     // ── §4: Anti-fabrication warning ──────────────────────────────
@@ -799,22 +799,22 @@ function renderBlueprintDispatchText(
     "",
     "---",
     // ── §5: Receipt schema ──────────────────────────────────────────
-    "### ExecutionReceipt Structure (kevlar.exec/v1)",
+    "### ExecutionReceipt Structure (kevlar.blueprint/v1)",
     "You MUST construct the receipt in EXACTLY this JSON shape:",
     "",
     "```",
     '{',
-    '  "protocol": "kevlar.exec/v1",',
+    '  "protocol": "kevlar.blueprint/v1",',
     '  "execution": {',
-    '    "requestedMode": "ephemeral_agents",',
+    '    "requestedMode": "isolated_contexts",',
     '    "actualMode": "native_subagent",',
-    `    "requestedConcurrency": ${agentCount},`,
-    `    "actualConcurrency": ${agentCount},`,
+    `    "requestedConcurrency": ${contextCount},`,
+    `    "actualConcurrency": ${contextCount},`,
     '    "contextIsolation": { "requested": true, "achieved": true },',
     '    "parallelism": "parallel",',
     '    "evidenceLevel": "host_attested"',
     '  },',
-    '  "agents": [',
+    '  "contexts": [',
     '    {',
     '      "id": "<agent id from blueprint>",',
     '      "role": "<agent role from blueprint>",',
@@ -842,7 +842,7 @@ function renderBlueprintDispatchText(
     "```",
     "",
     "**Critical requirements:**",
-    "- `agents[]` MUST contain exactly one entry per agent ID in the blueprint",
+    "- `agents[]` MUST contain exactly one entry per context ID in the blueprint",
     "- `agents[].output` MUST be a JSON **object** (not a string) containing a `findings` array",
     "- `agents[].output.findings` MUST be an array (use `[]` if no findings)",
     "- `aggregation.dimensions` MUST be an array with one entry per agent (use same `id`)",
@@ -878,11 +878,11 @@ function renderBlueprintDispatchText(
  * - PromptSegments (coreReasoningFramework, coreFrameworkSteps) inlined
  *   into each agent's instructions for true contextual isolation
  */
-function buildAgentBlueprint(
+function buildExecutionBlueprint(
   state: ReviewWizardState,
   systemAuditors: Persona[],
   prompts?: PromptSegments,
-): AgentBlueprint {
+): ExecutionBlueprint {
   const content = state.content;
   const bareText = stripContext(content).bare;
   const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
@@ -890,7 +890,7 @@ function buildAgentBlueprint(
   const webContextMap = state.orchestrationPreAuditContext?.webContextMap;
   const segs = prompts ?? loadPromptSegments("free");
 
-  const agents: AgentDefinition[] = systemAuditors.map((auditor) => {
+  const contexts: ContextDefinition[] = systemAuditors.map((auditor) => {
     let role = "safety_reviewer";
     if (auditor.meta.id === "legal_compliance") role = "policy_reviewer";
     else if (auditor.meta.id === "context_distortion") role = "context_reviewer";
@@ -910,21 +910,21 @@ function buildAgentBlueprint(
   });
 
   // §2.1: agents length must equal 6 (6 defensive system auditors)
-  if (agents.length !== 6) {
-    logger.warn("AgentBlueprint agent count mismatch", {
+  if (contexts.length !== 6) {
+    logger.warn("AgentBlueprint context count mismatch", {
       event: "agent_count_mismatch",
       expected: 6,
-      actual: agents.length,
-      agentIds: agents.map((a) => a.id),
+      actual: contexts.length,
+      contextIds: contexts.map((a) => a.id),
     });
   }
 
   const activeCont = state.activeContinuation;
 
   return {
-    protocol: "kevlar.exec/v1",
+    protocol: "kevlar.blueprint/v1",
     execution: {
-      mode: "ephemeral_agents",
+      mode: "isolated_contexts",
       allowedModes: ["native_subagent", "simulated_agent"],
       concurrency: systemAuditors.length,
       isolation: {
@@ -932,11 +932,11 @@ function buildAgentBlueprint(
         level: "strict",
       },
     },
-    agents,
+    contexts: contexts,
     aggregation: {
       strategy: "host_merge",
       rules: {
-        requireAllAgents: true,
+        requireAllContexts: true,
         conflictResolution: "risk_maximization",
         outputSchema: "kevlar.audit/v1",
       },
@@ -950,11 +950,11 @@ function buildAgentBlueprint(
       // Pro: agent slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
-            agentSlots: {
-              total: agents.length,
-              agentIds: agents.map((a) => a.id),
+            contextSlots: {
+              total: contexts.length,
+              contextIds: contexts.map((a) => a.id),
               allowPartialSubmit: true,
-            } satisfies import("../execution/protocol.js").ContinuationSpec["agentSlots"],
+            } satisfies import("../execution/protocol.js").ContinuationSpec["contextSlots"],
           }
         : {}),
     },
@@ -964,16 +964,16 @@ function buildAgentBlueprint(
 /**
  * Build a synthetic ExecutionReceipt from per-agent slot results for auto-aggregation.
  *
- * Maps each AgentSlotResult to a PreAuditDimensionResult using the
+ * Maps each ContextSlotResult to a PreAuditDimensionResult using the
  * corresponding system auditor's identity. The output receipt conforms
- * to kevlar.exec/v1 and can be routed through handleSubagentAuditResult
+ * to kevlar.blueprint/v1 and can be routed through handleSubagentAuditResult
  * which runs mergeLocalFindingsIntoAudits + calculateSynergy (Phase 1).
  */
 export function buildSyntheticReceipt(
-  agentSlots: Record<string, import("../execution/protocol.js").AgentSlotResult>,
+  contextSlots: Record<string, import("../execution/protocol.js").ContextSlotResult>,
   systemAuditors: Persona[],
 ): any {
-  const slots = Object.values(agentSlots);
+  const slots = Object.values(contextSlots);
   const completedSlots = slots.filter((s) => s.status === "completed");
   const failedSlots = slots.filter((s) => s.status !== "completed");
 
@@ -982,24 +982,24 @@ export function buildSyntheticReceipt(
   }
 
   const isPartial = failedSlots.length > 0;
-  const agents = completedSlots.map((s) => ({
-    id: s.agentId,
+  const contextsArr = completedSlots.map((s) => ({
+    id: s.contextId,
     status: s.status,
     output: s.output,
   }));
 
   const dimensions = completedSlots.map((s) => {
-    const auditor = systemAuditors.find((a) => a.meta.id === s.agentId);
+    const auditor = systemAuditors.find((a) => a.meta.id === s.contextId);
     const findings = (s.output?.findings ?? []).map((f: any) => ({
       ...f,
-      _slotAgentId: s.agentId,
+      _slotContextId: s.contextId,
     }));
     const level = (s.output as any)?.overallLevel
       || guessLevelFromFindings(findings)
       || "🟢";
     return {
-      id: s.agentId,
-      name: auditor?.meta?.name || s.agentId,
+      id: s.contextId,
+      name: auditor?.meta?.name || s.contextId,
       findings,
       level,
     };
@@ -1008,9 +1008,9 @@ export function buildSyntheticReceipt(
   const reportCount = dimensions.filter((d) => d.findings.length > 0).length;
   const totalSlots = slots.length;
   return {
-    protocol: "kevlar.exec/v1",
-    agents,
-    ...(isPartial ? { _isPartial: true, _failedAgents: failedSlots.map((s) => s.agentId) } : {}),
+    protocol: "kevlar.blueprint/v1",
+    contexts: contextsArr,
+    ...(isPartial ? { _isPartial: true, _failedAgents: failedSlots.map((s) => s.contextId) } : {}),
     aggregation: {
       dimensions,
       summary: isPartial
@@ -1287,7 +1287,7 @@ async function handleOrchestrationStep0Result(
       setContinuation(state, "waitingForSubagentAudit", "preaudit_completed");
 
       const prompts = await resolvePromptSegments();
-      const blueprint = buildAgentBlueprint(state, systemAuditors, prompts);
+      const blueprint = buildExecutionBlueprint(state, systemAuditors, prompts);
       (state as any).blueprint = blueprint;
 
       await saveState(tmpDir, state);
@@ -1477,7 +1477,7 @@ async function handleSubagentAuditResult(
         "❌ **无法解析 Host AI 返回的 Subagent ExecutionReceipt**",
         "",
         `解析错误：${jsonErr?.message || "未知错误"}`,
-        "请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
+        "请确保 receipt 符合 `kevlar.blueprint/v1` 协议格式。",
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
       ].join("\n"),
       "review_content_wizard",
@@ -1536,8 +1536,8 @@ async function handleSubagentAuditResult(
 
     // ── Phase 2: LLM cross-validation (Step 6) for auto-aggregated slot results ──
     let dimensionsForSynergy = mergedDimensions;
-    const isAutoAggregated = state.agentSlots
-      && Object.keys(state.agentSlots.received).length > 0;
+    const isAutoAggregated = state.contextSlots
+      && Object.keys(state.contextSlots.received).length > 0;
     if (isAutoAggregated && samplingFn) {
       try {
         dimensionsForSynergy = await crossValidateRiskyDimensions(
@@ -2559,7 +2559,7 @@ async function handleRstConfirmation(
   );
 }
 
-// ── Persona Agent Blueprint (Stage 2 Subagent Dispatch) ──────────────────────
+// ── Persona Execution Blueprint (Stage 2 Subagent Dispatch) ──────────────────────
 
 /**
  * Build fully isolated prompt instructions for a single persona agent.
@@ -2650,16 +2650,16 @@ function buildIsolatedPersonaPrompt(
 /**
  * Build the Persona AgentBlueprint for Stage 2: parallel isolated persona reviews.
  */
-function buildPersonaAgentBlueprint(
+function buildPersonaExecutionBlueprint(
   state: ReviewWizardState,
   personas: Persona[],
-): AgentBlueprint {
+): ExecutionBlueprint {
   const dimensions = state.dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
   const contextNote = state.context;
   const content = state.content;
   const preAuditReport = state.preAuditReport;
 
-  const agents: AgentDefinition[] = personas.map((p) => {
+  const contexts: ContextDefinition[] = personas.map((p) => {
     const instructions = buildIsolatedPersonaPrompt(
       p,
       content,
@@ -2680,9 +2680,9 @@ function buildPersonaAgentBlueprint(
   });
 
   return {
-    protocol: "kevlar.exec/v1",
+    protocol: "kevlar.blueprint/v1",
     execution: {
-      mode: "ephemeral_agents",
+      mode: "isolated_contexts",
       allowedModes: ["native_subagent", "simulated_agent"],
       concurrency: personas.length,
       isolation: {
@@ -2690,11 +2690,11 @@ function buildPersonaAgentBlueprint(
         level: "strict",
       },
     },
-    agents,
+    contexts: contexts,
     aggregation: {
       strategy: "host_merge",
       rules: {
-        requireAllAgents: true,
+        requireAllContexts: true,
         conflictResolution: "host_decide",
         outputSchema: "kevlar.audit/v1",
       },
@@ -2708,11 +2708,11 @@ function buildPersonaAgentBlueprint(
       // Pro: agent slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
-            agentSlots: {
-              total: agents.length,
-              agentIds: agents.map((a) => a.id),
+            contextSlots: {
+              total: contexts.length,
+              contextIds: contexts.map((a) => a.id),
               allowPartialSubmit: true,
-            } satisfies import("../execution/protocol.js").ContinuationSpec["agentSlots"],
+            } satisfies import("../execution/protocol.js").ContinuationSpec["contextSlots"],
           }
         : {}),
     },
@@ -2765,7 +2765,7 @@ async function handlePersonaAuditResult(
         "❌ **无法解析宿主 AI 返回的 Persona ExecutionReceipt**",
         "",
         `解析错误：${jsonErr?.message || "未知错误"}`,
-        "请确保 receipt 符合 `kevlar.exec/v1` 协议格式。",
+        "请确保 receipt 符合 `kevlar.blueprint/v1` 协议格式。",
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
         "",
         '如果你的环境不支持并行 Subagent，请发送：`SEQUENTIAL_FALLBACK`',
@@ -2997,7 +2997,7 @@ async function executeReview(
   setContinuation(state, "waitingForPersonaAudit", "persona_audit_started");
 
   // Build AgentBlueprint AFTER setContinuation so it reads the correct revision and continuationId
-  const blueprint = buildPersonaAgentBlueprint(state, selectedPersonas);
+  const blueprint = buildPersonaExecutionBlueprint(state, selectedPersonas);
   (state as any).blueprint = blueprint;
 
   await saveState(tmpDir, state);
@@ -3011,17 +3011,17 @@ async function executeReview(
     "1. Execute each persona agent independently",
     "2. For each completed agent, call `review_content_wizard_continue` with:",
     "   - The same sessionId, checkpoint, expectedRevision, continuationId",
-    `   - \`agentId\`: the agent's ID (e.g., \`${blueprint.agents[0]?.id || "persona_1"}\`)`,
-    "   - `result`: a JSON object with the agent's findings (agentId + status + output)",
+    `   - \`contextId\`: the agent's ID (e.g., \`${blueprint.contexts[0]?.id || "persona_1"}\`)`,
+    "   - `result`: a JSON object with the agent's findings (contextId + status + output)",
     "3. Kevlar will auto-aggregate when all agents have reported",
     "",
   ].join("\n") : "";
 
   // Build agent list for explicit enumeration in prompt
-  const personaListLines = blueprint.agents.map((a: any, i: number) =>
+  const personaListLines = blueprint.contexts.map((a: any, i: number) =>
     `  ${i + 1}. \`${a.id}\``
   ).join("\n");
-  const personaCount = blueprint.agents.length;
+  const personaCount = blueprint.contexts.length;
 
   const blueprintText = [
     "## Kevlar-4u Persona Review — Subagent Dispatch Request",
@@ -3032,7 +3032,7 @@ async function executeReview(
     `This blueprint requires exactly **${personaCount} subagents**. You must create`,
     `every single one of them. **Skipping any agent will cause the receipt to be`,
     `REJECTED by Kevlar's validation gate.** The validation compares the receipt's`,
-    `agent IDs against the blueprint and will fail if any are missing.`,
+    `context IDs against the blueprint and will fail if any are missing.`,
     "",
     "**The REQUIRED agents are:**",
     personaListLines,
@@ -3049,9 +3049,9 @@ async function executeReview(
     renderSubagentCreationInstructions(personaCount),
     "",
     `**Expected in receipt**: exactly ${personaCount} agents with these IDs:`,
-    `  ${blueprint.agents.map((a: any) => a.id).join(", ")}`,
+    `  ${blueprint.contexts.map((a: any) => a.id).join(", ")}`,
     "",
-    "**Reminder**: If you create fewer than all agents,",
+    "**Reminder**: If you create fewer than all contexts,",
     "the receipt will be REJECTED and you will waste a round-trip.",
     "",
     "---",
@@ -3061,7 +3061,7 @@ async function executeReview(
     "**Only after ALL subagents have completed**, construct the ExecutionReceipt:",
     "",
     "1. Collect every agent's output (their `findings` array)",
-    "2. Build the `agents` array with exactly one entry per agent — same ID",
+    "2. Build the `contexts` array with exactly one entry per agent — same ID",
     "3. Build the `aggregation` with one `dimensions` entry per agent (same IDs)",
     "4. Call `review_content_wizard_continue` with the complete receipt",
     "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
@@ -3085,14 +3085,14 @@ async function executeReview(
     "",
     "---",
     // ── §5: Receipt schema ──────────────────────────────────────────
-    "### ExecutionReceipt Structure (kevlar.exec/v1)",
+    "### ExecutionReceipt Structure (kevlar.blueprint/v1)",
     "You MUST construct the receipt in EXACTLY this JSON shape:",
     "",
     "```",
     '{',
-    '  "protocol": "kevlar.exec/v1",',
+    '  "protocol": "kevlar.blueprint/v1",',
     '  "execution": {',
-    '    "requestedMode": "ephemeral_agents",',
+    '    "requestedMode": "isolated_contexts",',
     '    "actualMode": "native_subagent",',
     `    "requestedConcurrency": ${personaCount},`,
     `    "actualConcurrency": ${personaCount},`,
@@ -3100,7 +3100,7 @@ async function executeReview(
     '    "parallelism": "parallel",',
     '    "evidenceLevel": "host_attested"',
     '  },',
-    '  "agents": [',
+    '  "contexts": [',
     '    {',
     '      "id": "<persona id from blueprint>",',
     '      "role": "persona_reviewer",',

@@ -59,10 +59,10 @@ function extractSessionId(text: string): string {
 }
 
 /**
- * Extract just the AgentBlueprint JSON from a wizard response that includes
+ * Extract just the ExecutionBlueprint JSON from a wizard response that includes
  * a kevlar-state block or markdown json code block.
  */
-function extractAgentBlueprintJson(text: string): string {
+function extractExecutionBlueprintJson(text: string): string {
   // New format: text inside ```json ... ``` block
   const jsonBlockStart = text.indexOf("```json");
   if (jsonBlockStart >= 0) {
@@ -174,15 +174,15 @@ const startText = textOf(started);
     assert.ok(confirmText.includes("请回复「开始舆论仿真推演」确认执行"));
     assert.ok(confirmText.includes("currentStep: waitingForReviewerConfirmation"));
 
-    // Step 3: "开始舆论仿真推演" → dispatches AgentBlueprint for parallel persona review
+    // Step 3: "开始舆论仿真推演" → dispatches ExecutionBlueprint for parallel persona review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始舆论仿真推演",
     });
     const reviewerText = textOf(reviewerDone);
-    // Review execution dispatches an AgentBlueprint with wrapper instructions
+    // Review execution dispatches an ExecutionBlueprint with wrapper instructions
     assert.ok(reviewerText.includes("Persona Review — Subagent Dispatch Request"));
-    assert.ok(reviewerText.includes("kevlar.exec/v1"));
+    assert.ok(reviewerText.includes("kevlar.blueprint/v1"));
     assert.ok(reviewerText.includes("persona_reviewer"));
     assert.ok(reviewerText.includes("review_content_wizard_continue"));
   });
@@ -237,15 +237,15 @@ const startText = textOf(started);
       confirmText.includes("学生党")
     );
 
-    // Step 3: "开始舆论仿真推演" → dispatches AgentBlueprint for parallel persona review
+    // Step 3: "开始舆论仿真推演" → dispatches ExecutionBlueprint for parallel persona review
     const reviewerDone = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始舆论仿真推演",
     });
     const reviewerText = textOf(reviewerDone);
-    // Review execution dispatches an AgentBlueprint with wrapper instructions
+    // Review execution dispatches an ExecutionBlueprint with wrapper instructions
     assert.ok(reviewerText.includes("Persona Review — Subagent Dispatch Request"));
-    assert.ok(reviewerText.includes("kevlar.exec/v1"));
+    assert.ok(reviewerText.includes("kevlar.blueprint/v1"));
     assert.ok(reviewerText.includes("persona_reviewer"));
     assert.ok(reviewerText.includes("review_content_wizard_continue"));
   });
@@ -554,10 +554,10 @@ const sessionId = extractSessionId(textOf(started));
   });
 });
 
-// ── AgentBlueprint Structure Validation ─────────────────────────────────────
+// ── ExecutionBlueprint Structure Validation ─────────────────────────────────────
 
-describe("AgentBlueprint structure validation", () => {
-  it("generates valid kevlar.exec/v1 blueprint with strict isolation for persona review", async () => {
+describe("ExecutionBlueprint structure validation", () => {
+  it("generates valid kevlar.blueprint/v1 blueprint with strict isolation for persona review", async () => {
     await writePersona("visual_reader", "视觉读者", ["小红书", "视觉"]);
     await writePersona("logic_reader", "逻辑读者", ["知乎", "逻辑"]);
 
@@ -572,7 +572,7 @@ describe("AgentBlueprint structure validation", () => {
     });
     assert.ok(textOf(confirmed).includes("currentStep: waitingForReviewerConfirmation"));
 
-    // Execute review → dispatches AgentBlueprint with wrapper instructions
+    // Execute review → dispatches ExecutionBlueprint with wrapper instructions
     const dispatch = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: "开始舆论仿真推演",
@@ -580,12 +580,12 @@ describe("AgentBlueprint structure validation", () => {
     const dispatchText = textOf(dispatch);
     assert.ok(dispatchText.includes("Persona Review — Subagent Dispatch Request"));
 
-    // Parse the AgentBlueprint JSON from response
-    const blueprint = JSON.parse(extractAgentBlueprintJson(dispatchText));
+    // Parse the ExecutionBlueprint JSON from response
+    const blueprint = JSON.parse(extractExecutionBlueprintJson(dispatchText));
 
     // ── Top-level structure ──────────────────────────────────────────
-    assert.equal(blueprint.protocol, "kevlar.exec/v1");
-    assert.equal(blueprint.execution.mode, "ephemeral_agents");
+    assert.equal(blueprint.protocol, "kevlar.blueprint/v1");
+    assert.equal(blueprint.execution.mode, "isolated_contexts");
     assert.ok(blueprint.execution.allowedModes.includes("native_subagent"));
     assert.ok(blueprint.execution.allowedModes.includes("simulated_agent"));
 
@@ -597,14 +597,14 @@ describe("AgentBlueprint structure validation", () => {
     assert.equal(blueprint.execution.concurrency, 2);
 
     // ── Agents: each has persona_reviewer role ────────────────────────
-    assert.ok(Array.isArray(blueprint.agents));
-    assert.equal(blueprint.agents.length, 2);
+    assert.ok(Array.isArray(blueprint.contexts));
+    assert.equal(blueprint.contexts.length, 2);
 
-    const agentIds = new Set(blueprint.agents.map((a: any) => a.id));
-    assert.ok(agentIds.has("visual_reader"));
-    assert.ok(agentIds.has("logic_reader"));
+    const contextIds = new Set(blueprint.contexts.map((a: any) => a.id));
+    assert.ok(contextIds.has("visual_reader"));
+    assert.ok(contextIds.has("logic_reader"));
 
-    for (const agent of blueprint.agents) {
+    for (const agent of blueprint.contexts) {
       assert.equal(agent.role, "persona_reviewer");
       assert.equal(agent.outputSchema, "kevlar.reviewer/v1");
       // instructions must be self-contained (not just an empty string)
@@ -616,7 +616,7 @@ describe("AgentBlueprint structure validation", () => {
 
     // ── Aggregation rules ────────────────────────────────────────────
     assert.equal(blueprint.aggregation.strategy, "host_merge");
-    assert.equal(blueprint.aggregation.rules.requireAllAgents, true);
+    assert.equal(blueprint.aggregation.rules.requireAllContexts, true);
     assert.equal(blueprint.aggregation.rules.conflictResolution, "host_decide");
     assert.equal(blueprint.aggregation.rules.outputSchema, "kevlar.audit/v1");
 
@@ -629,7 +629,7 @@ describe("AgentBlueprint structure validation", () => {
     assert.ok(blueprint.continuation.idempotencyKey.includes(sessionId));
   });
 
-  it("persona AgentBlueprint instructions include defensive dimension context", async () => {
+  it("persona ExecutionBlueprint instructions include defensive dimension context", async () => {
     await writePersona("foodie", "美食达人", ["小红书", "美食"]);
 
     const started = await startWizardWithRegion("请评测这篇内容：这是一篇新品发布文案，产品有潜在的过度宣传风险。");
@@ -645,9 +645,9 @@ describe("AgentBlueprint structure validation", () => {
       sessionId,
       userMessage: "开始舆论仿真推演",
     });
-    const blueprint = JSON.parse(extractAgentBlueprintJson(textOf(dispatch)));
+    const blueprint = JSON.parse(extractExecutionBlueprintJson(textOf(dispatch)));
 
-    const instructions = blueprint.agents[0].instructions;
+    const instructions = blueprint.contexts[0].instructions;
     assert.ok(typeof instructions === "string" && instructions.length > 0);
 
     // Must contain the 6 defensive dimensions for the persona to evaluate against
@@ -656,7 +656,7 @@ describe("AgentBlueprint structure validation", () => {
       `Persona instructions should reference defensive dimensions for evaluation, got: ${instructions.substring(0, 200)}`);
   });
 
-  it("Free tier does NOT generate system audit AgentBlueprint", async () => {
+  it("Free tier does NOT generate system audit ExecutionBlueprint", async () => {
     // System auditors exist but Free tier should skip system audit entirely
     await writePersona("legal_compliance", "合规哨兵", ["system_auditor", "合规"]);
     await writePersona("foodie", "美食达人", ["小红书", "美食"]);
@@ -666,7 +666,7 @@ describe("AgentBlueprint structure validation", () => {
 
     // Free tier should go to persona inventory, NOT system audit
     assert.ok(!startText.includes("waitingForSubagentAudit"));
-    assert.ok(!startText.includes("kevlar.exec/v1"));
+    assert.ok(!startText.includes("kevlar.blueprint/v1"));
     // Should go to either persona check or review decision
     assert.ok(
       startText.includes("waitingForReviewDecision") ||
@@ -676,7 +676,7 @@ describe("AgentBlueprint structure validation", () => {
     );
   });
 
-  it("single persona: AgentBlueprint concurrency is 1, isolation.strict maintained", async () => {
+  it("single persona: ExecutionBlueprint concurrency is 1, isolation.strict maintained", async () => {
     await writePersona("solo_reviewer", "单人评审", ["知乎", "逻辑"]);
 
     const started = await startWizardWithRegion("请评测这篇内容：测试文案。");
@@ -692,12 +692,12 @@ describe("AgentBlueprint structure validation", () => {
       sessionId,
       userMessage: "开始舆论仿真推演",
     });
-    const blueprint = JSON.parse(extractAgentBlueprintJson(textOf(dispatch)));
+    const blueprint = JSON.parse(extractExecutionBlueprintJson(textOf(dispatch)));
 
     assert.equal(blueprint.execution.concurrency, 1);
-    assert.equal(blueprint.agents.length, 1);
+    assert.equal(blueprint.contexts.length, 1);
     assert.equal(blueprint.execution.isolation.level, "strict");
-    assert.equal(blueprint.agents[0].role, "persona_reviewer");
+    assert.equal(blueprint.contexts[0].role, "persona_reviewer");
   });
 
   // ── Phase 5: Receipt Error Handling Tests ─────────────────────────────────
@@ -714,7 +714,7 @@ describe("AgentBlueprint structure validation", () => {
     });
     assert.ok(textOf(confirmed).includes("waitingForReviewerConfirmation"));
 
-    // Step to persona audit AgentBlueprint dispatch
+    // Step to persona audit ExecutionBlueprint dispatch
     await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId, userMessage: "开始舆论仿真推演",
     });
@@ -774,18 +774,18 @@ describe("AgentBlueprint structure validation", () => {
       sessionId, userMessage: "开始舆论仿真推演",
     });
 
-    // Valid JSON but missing the required "agents" field
+    // Valid JSON but missing the required "contexts" field
     const result = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: JSON.stringify({
-        protocol: "kevlar.exec/v1",
+        protocol: "kevlar.blueprint/v1",
         aggregation: { dimensions: [], summary: "no agents" },
       }),
     });
 
     const resultText = textOf(result);
     assert.ok(
-      resultText.includes("格式错误") || resultText.includes('"agents"'),
+      resultText.includes("格式错误") || resultText.includes('"contexts"'),
       `Expected missing agents error, got: ${resultText.substring(0, 300)}`
     );
   });
@@ -809,8 +809,8 @@ describe("AgentBlueprint structure validation", () => {
     const result = await handleReviewContentWizard(skillsDir, tmpDir, {
       sessionId,
       userMessage: JSON.stringify({
-        protocol: "kevlar.exec/v1",
-        agents: [{}],
+        protocol: "kevlar.blueprint/v1",
+        contexts: [{}],
         aggregation: { dimensions: [], summary: "bad agent" },
       }),
     });
