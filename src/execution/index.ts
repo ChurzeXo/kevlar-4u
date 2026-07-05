@@ -16,6 +16,7 @@ import {
 } from "./observations.js";
 import type { ClientFingerprint, HostOrchestrationStrategy } from "./plan.js";
 import { orchestrationHandler } from "./modes/orchestration.js";
+import { subagentHandler } from "./modes/subagent.js";
 import { executeSamplingReview } from "./samplingExecution.js";
 import { generateTraceId, generateSpanId, withTraceContext } from "../utils/observability.js";
 import { toFrame } from "./base.js";
@@ -35,7 +36,8 @@ import type {
 // ── Handler Registry ──────────────────────────────────────────────────────────
 
 const handlers: ExecutionHandler[] = [
-  orchestrationHandler, // priority: 30 (fallback)
+  subagentHandler,       // priority: 15 (structured parallel, zero cost)
+  orchestrationHandler,  // priority: 30 (fallback)
 ];
 
 // ── Limits ────────────────────────────────────────────────────────────────────
@@ -107,9 +109,13 @@ export async function executeReview(
       result = await orchestrationHandler.execute(tracedCtx);
     }
   } else {
-    // Kevlar does not call LLMs or sampling function.
-    // It always delegates to orchestrationHandler.
-    result = await orchestrationHandler.execute(tracedCtx);
+    // Explicit orchestration request → always use orchestration handler
+    // Auto / mcp_subagent → route by plan strategy
+    const strategy = planResult.plan.strategy as HostOrchestrationStrategy | undefined;
+    const useStructured = resolved === "mcp_subagent"
+      || (resolved === "auto" && strategy === "structured");
+    const handler = useStructured ? subagentHandler : orchestrationHandler;
+    result = await handler.execute(tracedCtx);
   }
 
   const durationMs = Date.now() - startTime;
@@ -424,6 +430,7 @@ export {
   runAggregationValidation,
   validateContinuationGate,
   validateReceipt,
+  isRefusalSemantics,
   fallbackToStandardOrchestration,
   MAX_CONTINUATION_RETRIES,
   type ExecutionBlueprint,

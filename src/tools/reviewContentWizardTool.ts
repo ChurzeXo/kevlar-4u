@@ -1,6 +1,7 @@
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as path from "path";
 import * as fs from "fs";
+import * as crypto from "crypto";
 import { ToolResult } from "../utils/types.js";
 import { MultiTurnSamplingFunction, ExecutionMode } from "../execution/base.js";
 import { loadAllPersonas, Persona } from "../utils/parser.js";
@@ -43,7 +44,7 @@ import {
   type Step0Result,
 } from "../prompts/reviewWizard.js";
 import { isSamplingSupported } from "../execution/client.js";
-import { validateReceipt, fallbackToStandardOrchestration } from "../execution/protocol.js";
+import { validateReceipt, isRefusalSemantics, fallbackToStandardOrchestration } from "../execution/protocol.js";
 import {
   resolveExecutionPlan,
   type ExecutionPlan,
@@ -684,23 +685,139 @@ async function handleSystemAudit(
  * its own tools (Agent / Task / Subagent) better than we do and will
  * self-map to the correct one.
  */
-function renderSubagentCreationInstructions(contextCount: number): string {
+/**
+ * Render abstract execution instructions for the Host AI.
+ *
+ * Describes what the Host AI needs to do (create isolated execution contexts
+ * in parallel) without hardcoding platform-specific tool names. Also includes
+ * tool visibility constraints and background execution guidance.
+ *
+ * Exported for reuse by other dispatch paths and external consumers.
+ */
+export function renderExecutionInstructions(contextCount: number): string {
   return [
     "**How to create subagents:**",
     "",
-    `For each of the ${contextCount} agents in the AgentBlueprint, create one`,
+    `For each of the ${contextCount} contexts in the ExecutionBlueprint, create one`,
     "independent execution context. Each execution context:",
     "",
     "- Only sees its own `instructions` field — no shared state with other contexts",
-    "- Executes independently — one agent's audit must not influence another",
+    "- Executes independently — one context's audit must not influence another",
+    "- If the context defines `requiredTools`, restrict its tool visibility to ONLY",
+    "  those tools — do NOT expose the full tool registry (this prevents context",
+    "  explosion from tool metadata bloat)",
+    "  - `requiredTools: []` means the context needs NO tools at all",
     "",
     "Launch ALL execution contexts in **one message** for parallel execution.",
-    "Use your platform's native subagent / task creation tool with each agent's",
+    "Use your platform's native subagent / task creation tool with each context's",
     "`instructions` field as the task input.",
     "",
-    "Do NOT skip any agent. Do NOT merge multiple agents into a single context.",
+    "Do NOT skip any context. Do NOT merge multiple contexts into a single one.",
     "After ALL execution contexts complete, proceed to Phase 2 to aggregate results.",
   ].join("\n");
+}
+
+/**
+ * Render a dependency topology diagram for the ExecutionBlueprint.
+ * Shows which contexts depend on which, and the parallelism structure.
+ * Supports both flat fan-out and staged DAG with dependencies.
+ */
+function renderDependencyGraph(contexts: ContextDefinition[]): string {
+  if (!contexts || !Array.isArray(contexts)) return "";
+
+  const hasDeps = contexts.some((c) => c.dependencies && c.dependencies.length > 0);
+
+  if (!hasDeps) {
+    const ids = contexts.map((c) => c.id);
+    return [
+      "**Dependency Graph** — all contexts are independent (flat fan-out):",
+      "",
+      ...ids.map((id, i) => {
+        const isLast = i === ids.length - 1;
+        const prefix = isLast ? "└──" : "├──";
+        return `  ${prefix} \`${id}\`` + (isLast ? " → aggregation" : "");
+      }),
+      "",
+      `Total: ${ids.length} contexts, 0 dependencies. All run in parallel.`,
+    ].join("\n");
+  }
+
+  const lines: string[] = ["**Dependency Graph** — staged DAG:", ""];
+
+  const grouped = new Map<string, string[]>();
+  for (const ctx of contexts) {
+    const deps = ctx.dependencies?.length ? ctx.dependencies.join(",") : "__root__";
+    if (!grouped.has(deps)) grouped.set(deps, []);
+    grouped.get(deps)!.push(ctx.id);
+  }
+
+  // Phase 0: independent contexts
+  const root = grouped.get("__root__") ?? [];
+  if (root.length > 0) {
+    lines.push("Phase 0 (parallel, no dependencies):");
+    for (const id of root) lines.push(`  ├── \`${id}\``);
+    lines.push("");
+  }
+
+  // Phase N: dependent contexts
+  let phase = 1;
+  for (const [depStr, ids] of grouped) {
+    if (depStr === "__root__") continue;
+    lines.push(`Phase ${phase} (after ${depStr}):`);
+    for (const id of ids) lines.push(`  ├── \`${id}\``);
+    lines.push("");
+    phase++;
+  }
+
+  lines.push("→ aggregation");
+  return lines.join("\n");
+}
+
+/**
+ * Render Glossary + Workspace State Pin sections from the blueprint
+ * into prose instructions for the Host AI. These are injected into the
+ * dispatch text so subagents see the terminology baseline and can
+ * verify content integrity before starting.
+ */
+function renderBlueprintMetaSections(blueprint: ExecutionBlueprint): string {
+  const sections: string[] = [];
+
+  // ── Glossary (Unified Terminology Baseline) ──────────────────────
+  const glossary = blueprint.convention?.ubiquitousLanguageBaseline;
+  if (glossary && Object.keys(glossary).length > 0) {
+    sections.push(
+      "### 📋 Unified Terminology Baseline (Glossary)",
+      "",
+      "All execution contexts MUST use the following standard terminology when",
+      "constructing their output. Do NOT substitute synonyms — this prevents",
+      '"dialect drift" that would cause aggregation failures.',
+      "",
+      "| Standard Term | Meaning |",
+      "|--------------|---------|",
+      ...Object.entries(glossary).map(([term, meaning]) =>
+        `| \`${term}\` | ${meaning} |`,
+      ),
+      "",
+    );
+  }
+
+  // ── Workspace State Pin ──────────────────────────────────────────
+  const fingerprint = blueprint.continuation?.contentFingerprint;
+  if (fingerprint) {
+    sections.push(
+      "### 🧷 Workspace State Pin (Fast-failure guard)",
+      "",
+      `**Content fingerprint**: \`${fingerprint}\``,
+      "",
+      "Each execution context should verify that the content it receives",
+      "matches this fingerprint. If the content has been modified externally",
+      `during execution, set \`status\` to \`"failed"\` and include a finding with`,
+      `\`keyword: "content_drift"\` and \`riskDescription: "state drift detected at checkpoint: ${fingerprint}"\`.`,
+      "",
+    );
+  }
+
+  return sections.join("\n");
 }
 
 /**
@@ -748,21 +865,24 @@ function renderBlueprintDispatchText(
     `REJECTED by Kevlar's validation gate.** The validation compares the receipt's`,
     `context IDs against the blueprint and will fail if any are missing.`,
     "",
-    "**The REQUIRED agents are:**",
+    "**The REQUIRED contexts are:**",
     contextListLines,
     "",
     `**Total**: ${contextCount} subagents MUST be created and executed in parallel.`,
     "",
+    renderDependencyGraph(blueprint.contexts),
+    "",
+    renderBlueprintMetaSections(blueprint),
     "---",
     // ── §2: Phase 1 — Create all subagents ──────────────────────────
     "### Phase 1 — Create ALL subagents in parallel",
     "",
     "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
-    "until EVERY agent has returned its result.**",
+    "until EVERY context has returned its result.**",
     "",
-    renderSubagentCreationInstructions(contextCount),
+    renderExecutionInstructions(contextCount),
     "",
-    `**Expected in receipt**: exactly ${contextCount} agents with these IDs:`,
+    `**Expected in receipt**: exactly ${contextCount} contexts with these IDs:`,
     `  ${blueprint.contexts.map((a: any) => a.id).join(", ")}`,
     "",
     "**Reminder**: If you create fewer than all contexts,",
@@ -774,27 +894,27 @@ function renderBlueprintDispatchText(
     "",
     "**Only after ALL subagents have completed**, construct the ExecutionReceipt:",
     "",
-    "1. Collect every agent's output (their `findings` array)",
-    "2. Build the `contexts` array with exactly one entry per agent — same ID and order",
-    "3. Build the `aggregation` with one `dimensions` entry per agent (same IDs)",
+    "1. Collect every context's output (their `findings` array)",
+    "2. Build the `contexts` array with exactly one entry per context — same ID and order",
+    "3. Build the `aggregation` with one `dimensions` entry per context (same IDs)",
     "4. Call `review_content_wizard_continue` with the complete receipt",
     "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
     "",
-    `The receipt MUST contain exactly ${contextCount} agent entries — no more, no less.`,
+    `The receipt MUST contain exactly ${contextCount} context entries — no more, no less.`,
     "",
     "---",
     // ── §4: Anti-fabrication warning ──────────────────────────────
-    "### ⛔ DO NOT FABRICATE OR INVENT AGENT OUTPUTS",
+    "### ⛔ DO NOT FABRICATE OR INVENT CONTEXT OUTPUTS",
     "",
-    "You MUST NOT fabricate, invent, or make up any agent's findings.",
+    "You MUST NOT fabricate, invent, or make up any context's findings.",
     "Every finding in the receipt MUST come from the actual subagent's output.",
     "",
-    "**If an agent failed to execute or did not return results:**",
+    "**If a context failed to execute or did not return results:**",
     `- Set its \`status\` to \`"failed"\``,
     `- Set its \`output.findings\` to \`[]\` (empty array)`,
     `- In \`aggregation.dimensions\`, mark it as \`"⚠️ 未执行"\``,
     "",
-    "**Falsifying agent results will corrupt the audit output** and may cause",
+    "**Falsifying context results will corrupt the audit output** and may cause",
     "Kevlar to produce incorrect risk assessments. Always report truthfully.",
     "",
     "---",
@@ -816,8 +936,8 @@ function renderBlueprintDispatchText(
     '  },',
     '  "contexts": [',
     '    {',
-    '      "id": "<agent id from blueprint>",',
-    '      "role": "<agent role from blueprint>",',
+    '      "id": "<context id from blueprint>",',
+    '      "role": "<context role from blueprint>",',
     '      "status": "completed",',
     '      "output": {',
     '        "findings": [',
@@ -842,12 +962,12 @@ function renderBlueprintDispatchText(
     "```",
     "",
     "**Critical requirements:**",
-    "- `agents[]` MUST contain exactly one entry per context ID in the blueprint",
-    "- `agents[].output` MUST be a JSON **object** (not a string) containing a `findings` array",
-    "- `agents[].output.findings` MUST be an array (use `[]` if no findings)",
-    "- `aggregation.dimensions` MUST be an array with one entry per agent (use same `id`)",
+    "- `contexts[]` MUST contain exactly one entry per context ID in the blueprint",
+    "- `contexts[].output` MUST be a JSON **object** (not a string) containing a `findings` array",
+    "- `contexts[].output.findings` MUST be an array (use `[]` if no findings)",
+    "- `aggregation.dimensions` MUST be an array with one entry per context (use same `id`)",
     "- `aggregation.summary` MUST be a string",
-    "- Each agent's `output.findings` should contain the raw findings from that subagent's audit",
+    "- Each context's `output.findings` should contain the raw findings from that subagent's audit",
     "",
     perAgentGuidance,
     "### If you CANNOT execute subagent dispatch",
@@ -906,6 +1026,7 @@ function buildExecutionBlueprint(
         contentRef: "content",
       },
       outputSchema: "kevlar.reviewer/v1",
+      requiredTools: [], // All content is inlined — no external tools needed
     };
   });
 
@@ -933,6 +1054,20 @@ function buildExecutionBlueprint(
       },
     },
     contexts: contexts,
+    convention: {
+      executionMode: "background_silent",
+      ubiquitousLanguageBaseline: {
+        "🟢": "低风险 — 内容安全，无显著风险发现",
+        "🟡": "中风险 — 存在潜在风险，建议审慎评估",
+        "🔴": "高风险 — 存在明确风险，可能引发舆情危机",
+        "finding": "风险发现 — 审计员发现的具体风险点",
+        "findings": "风险发现列表 — 审计员输出的风险发现数组",
+        "riskDescription": "风险描述 — 风险现象的具体说明",
+        "suggestedLevel": "建议风险等级 — 审计员对风险定级的建议值(🟢/🟡/🔴)",
+        "dimension": "审计维度 — 系统审计的6个防御维度之一",
+        "level": "风险等级 — 最终风险定级(🟢/🟡/🔴)",
+      },
+    },
     aggregation: {
       strategy: "host_merge",
       rules: {
@@ -947,6 +1082,7 @@ function buildExecutionBlueprint(
       checkpoint: activeCont?.checkpoint || "preaudit_completed",
       expectedRevision: state.revision ?? 1,
       idempotencyKey: activeCont?.continuationId,
+      contentFingerprint: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
       // Pro: context slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
@@ -1466,6 +1602,22 @@ async function handleContextAuditResult(
     );
   }
 
+  // ── §0: Fuzzy refusal detection → immediate L3 fallback, no retries ──
+  if (isRefusalSemantics(userMessage)) {
+    logger.warn("Host AI verbally refused parallel execution", {
+      event: "verbal_refusal_detected",
+      sessionId: state.sessionId,
+    });
+    fallbackToStandardOrchestration(state, "verbal_refusal");
+    const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+    const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
+    );
+  }
+
   // ── Early schema validation ─────────────────────────────────────────────
   let parsed: any;
   try {
@@ -1501,6 +1653,33 @@ async function handleContextAuditResult(
     );
   }
 
+  // ── Content fingerprint drift check ───────────────────────────────────
+  const blueprintFingerprint = (state as any).blueprint?.continuation?.contentFingerprint;
+  if (blueprintFingerprint) {
+    const currentFingerprint = crypto.createHash("sha256").update(state.content).digest("hex").slice(0, 16);
+    if (blueprintFingerprint !== currentFingerprint) {
+      logger.warn("Content fingerprint mismatch — content was modified during subagent execution", {
+        event: "content_drift_detected",
+        sessionId: state.sessionId,
+        expectedFingerprint: blueprintFingerprint,
+        actualFingerprint: currentFingerprint,
+      });
+      fallbackToStandardOrchestration(state, "content_drift");
+      const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
+      const stripped = state.orchestrationPreAuditContext?.stripped ?? stripContext(state.content);
+      await saveState(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          "⚠️ **内容被修改 — 检测到工作区漂移**",
+          "",
+          "在 Subagent 并行执行期间，待评测内容发生了变更。",
+          "之前生成的审计结果已失效，已自动降级为标准宿主编排模式重新执行。",
+        ].join("\n") + "\n\n" + ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
+      );
+    }
+  }
+
   try {
     // Record positive observation: Host successfully returned structured JSON
     recordCapabilityObservation(
@@ -1534,11 +1713,9 @@ async function handleContextAuditResult(
       systemAuditors,
     );
 
-    // ── Phase 2: LLM cross-validation (Step 6) for auto-aggregated slot results ──
+    // ── Phase 2: LLM cross-validation (Step 6) ──
     let dimensionsForSynergy = mergedDimensions;
-    const isAutoAggregated = state.contextSlots
-      && Object.keys(state.contextSlots.received).length > 0;
-    if (isAutoAggregated && samplingFn) {
+    if (samplingFn) {
       try {
         dimensionsForSynergy = await crossValidateRiskyDimensions(
           content,
@@ -1547,8 +1724,8 @@ async function handleContextAuditResult(
           samplingFn,
         );
       } catch (err) {
-        logger.warn("Auto-aggregation cross-validation failed, using merged dimensions", {
-          event: "slot_cross_validation_failed",
+        logger.warn("Cross-validation failed, using merged dimensions", {
+          event: "cross_validation_failed",
           error: getErrorInfo(err).message,
         });
       }
@@ -1572,9 +1749,9 @@ async function handleContextAuditResult(
       }
     }
 
-    // ── Phase 5: Step 8 — LLM final arbitration for auto-aggregated slot results ──
+    // ── Phase 5: Step 8 — LLM final arbitration ──
     let finalReport: PreAuditReport | null = null;
-    if (isAutoAggregated && samplingFn) {
+    if (samplingFn) {
       try {
         const step8Prompts = await resolvePromptSegments();
         finalReport = await finalizePreAuditReport(
@@ -1590,8 +1767,8 @@ async function handleContextAuditResult(
           step8Prompts,
         );
       } catch (err) {
-        logger.warn("Auto-aggregation final arbitration failed, using synergy result", {
-          event: "slot_final_arbitration_failed",
+        logger.warn("Final arbitration failed, using synergy result", {
+          event: "final_arbitration_failed",
           error: getErrorInfo(err).message,
         });
       }
@@ -1954,8 +2131,8 @@ function summarizePreAuditResults(
       "| 维度 | 等级 | 关键发现 |",
       "| --- | --- | --- |",
       ...results.map((r) => `| ${escapeMarkdownTableCell(r.name)} | 🟢 | 无 |`),
-    ].join("\n");
-  }
+  ].join("\n");
+}
 
   // 有风险维度
   const riskSummaryLines = results.map((r) => {
@@ -2676,6 +2853,7 @@ function buildPersonaExecutionBlueprint(
         contentRef: "_inline_",
       },
       outputSchema: "kevlar.reviewer/v1",
+      requiredTools: [], // Persona reviewers reason with inlined content only
     };
   });
 
@@ -2691,6 +2869,19 @@ function buildPersonaExecutionBlueprint(
       },
     },
     contexts: contexts,
+    convention: {
+      executionMode: "background_silent",
+      ubiquitousLanguageBaseline: {
+        "🟢": "低风险 — 内容安全",
+        "🟡": "中风险 — 存在潜在风险",
+        "🔴": "高风险 — 可能引发舆情危机",
+        "finding": "风险发现 — 具体风险点",
+        "findings": "风险发现列表",
+        "riskDescription": "风险描述 — 风险现象说明",
+        "suggestedLevel": "建议风险等级 (🟢/🟡/🔴)",
+        "level": "风险等级 — 最终定级",
+      },
+    },
     aggregation: {
       strategy: "host_merge",
       rules: {
@@ -2705,6 +2896,7 @@ function buildPersonaExecutionBlueprint(
       checkpoint: "persona_audit_started",
       expectedRevision: state.revision ?? 1,
       idempotencyKey: state.activeContinuation?.continuationId,
+      contentFingerprint: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
       // Pro: context slot metadata for per-agent result submission
       ...(state.tier === "pro"
         ? {
@@ -2754,6 +2946,28 @@ async function handlePersonaAuditResult(
     );
   }
 
+  // ── §0: Fuzzy refusal detection → immediate retry prompt, no wasted rounds ──
+  if (isRefusalSemantics(userMessage)) {
+    transitionState(state, "waitingForReviewDecision", "verbal_refusal");
+    const allPersonas = personas.length > 0 ? personas : await loadAllPersonas(tmpDir.replace("/tmp/", ""));
+    await saveState(tmpDir, state);
+    return toolResponse(
+      state,
+      [
+        "⚠️ **宿主 AI 无法执行并行 Subagent 调度**",
+        "",
+        "检测到你的环境不支持并行子代理创建。",
+        "请切换至支持 Task/Subagent 工具的 MCP 客户端（如 Claude Code、opencode），",
+        "或使用 standard 编排模式重新开始评测。",
+        "",
+        "你仍然可以在此会话中重新选择评审员：",
+        ...allPersonas.map((p, i) => `  ${i + 1}. ${p.meta.name}`),
+        "",
+        "输入编号重新选择，或回复「结束」退出评测。",
+      ].join("\n"),
+    );
+  }
+
   // ── Early schema validation ─────────────────────────────────────────────
   let parsed: any;
   try {
@@ -2789,6 +3003,29 @@ async function handlePersonaAuditResult(
         `当前重试次数：${(state.activeContinuation?.retryCount ?? 0) + 1}`,
       ].join("\n"),
     );
+  }
+
+  // ── Content fingerprint drift check ───────────────────────────────────
+  const personaBlueprintFingerprint = (state as any).blueprint?.continuation?.contentFingerprint;
+  if (personaBlueprintFingerprint) {
+    const currentFingerprint = crypto.createHash("sha256").update(state.content).digest("hex").slice(0, 16);
+    if (personaBlueprintFingerprint !== currentFingerprint) {
+      transitionState(state, "waitingForReviewDecision", "content_drift");
+      await saveState(tmpDir, state);
+      return toolResponse(
+        state,
+        [
+          "⚠️ **内容被修改 — 检测到工作区漂移**",
+          "",
+          "在 Persona 并行评审期间，待评测内容发生了变更。",
+          "之前生成的评审结果已失效，请重新选择评审员。",
+          "",
+          ...personas.map((p, i) => `  ${i + 1}. ${p.meta.name}`),
+          "",
+          "输入编号重新选择，或回复「结束」退出评测。",
+        ].join("\n"),
+      );
+    }
   }
 
   try {
@@ -3030,25 +3267,28 @@ async function executeReview(
     "### ⚠️ CRITICAL — You MUST create ALL subagents below",
     "",
     `This blueprint requires exactly **${personaCount} subagents**. You must create`,
-    `every single one of them. **Skipping any agent will cause the receipt to be`,
+    `every single one of them. **Skipping any context will cause the receipt to be`,
     `REJECTED by Kevlar's validation gate.** The validation compares the receipt's`,
     `context IDs against the blueprint and will fail if any are missing.`,
     "",
-    "**The REQUIRED agents are:**",
+    "**The REQUIRED contexts are:**",
     personaListLines,
     "",
     `**Total**: ${personaCount} subagents MUST be created and executed in parallel.`,
     "",
+    renderDependencyGraph(blueprint.contexts),
+    "",
+    renderBlueprintMetaSections(blueprint),
     "---",
     // ── §2: Phase 1 — Create all subagents ──────────────────────────
     "### Phase 1 — Create ALL subagents in parallel",
     "",
     "You MUST now create all subagents listed above. **Do not proceed to Phase 2",
-    "until EVERY agent has returned its result.**",
+    "until EVERY context has returned its result.**",
     "",
-    renderSubagentCreationInstructions(personaCount),
+    renderExecutionInstructions(personaCount),
     "",
-    `**Expected in receipt**: exactly ${personaCount} agents with these IDs:`,
+    `**Expected in receipt**: exactly ${personaCount} contexts with these IDs:`,
     `  ${blueprint.contexts.map((a: any) => a.id).join(", ")}`,
     "",
     "**Reminder**: If you create fewer than all contexts,",
@@ -3060,27 +3300,27 @@ async function executeReview(
     "",
     "**Only after ALL subagents have completed**, construct the ExecutionReceipt:",
     "",
-    "1. Collect every agent's output (their `findings` array)",
-    "2. Build the `contexts` array with exactly one entry per agent — same ID",
-    "3. Build the `aggregation` with one `dimensions` entry per agent (same IDs)",
+    "1. Collect every context's output (their `findings` array)",
+    "2. Build the `contexts` array with exactly one entry per context — same ID",
+    "3. Build the `aggregation` with one `dimensions` entry per context (same IDs)",
     "4. Call `review_content_wizard_continue` with the complete receipt",
     "   (include sessionId, checkpoint, expectedRevision, and idempotencyKey as continuationId from the blueprint)",
     "",
-    `The receipt MUST contain exactly ${personaCount} agent entries — no more, no less.`,
+    `The receipt MUST contain exactly ${personaCount} context entries — no more, no less.`,
     "",
     "---",
     // ── §4: Anti-fabrication warning ──────────────────────────────
-    "### ⛔ DO NOT FABRICATE OR INVENT AGENT OUTPUTS",
+    "### ⛔ DO NOT FABRICATE OR INVENT CONTEXT OUTPUTS",
     "",
-    "You MUST NOT fabricate, invent, or make up any agent's findings.",
+    "You MUST NOT fabricate, invent, or make up any context's findings.",
     "Every finding in the receipt MUST come from the actual subagent's output.",
     "",
-    "**If an agent failed to execute or did not return results:**",
+    "**If a context failed to execute or did not return results:**",
     `- Set its \`status\` to \`"failed"\``,
     `- Set its \`output.findings\` to \`[]\` (empty array)`,
     `- In \`aggregation.dimensions\`, mark it as \`"⚠️ 未执行"\``,
     "",
-    "**Falsifying agent results will corrupt the audit output** and may cause",
+    "**Falsifying context results will corrupt the audit output** and may cause",
     "Kevlar to produce incorrect risk assessments. Always report truthfully.",
     "",
     "---",

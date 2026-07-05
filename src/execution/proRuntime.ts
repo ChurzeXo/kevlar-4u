@@ -117,5 +117,14 @@ export async function resolveStrategyProvider(
   // logger.warn("Falling back to Free tier", {
   //   event: "fallback_to_free",
   // });
+
+  // If user has Pro activated (credential, env var, etc.) but the Pro runtime
+  // package can't be dynamically imported, use the in-memory Pro provider.
+  // This ensures the pre-audit pipeline runs and persona selection uses Pro
+  // auto-recommend flow instead of Free manual pick-by-number.
+  if (isPro()) {
+    return new InMemoryProStrategyProvider();
+  }
+
   return new FreeStrategyProvider();
 }

@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
+import { invalidateCredentialCache } from "../subscription/tier.js";
 import {
   NullProRuntimeLoader,
   MockProRuntimeLoader,
@@ -55,7 +56,11 @@ describe("DynamicImportProRuntimeLoader", () => {
 });
 
 describe("resolveStrategyProvider", () => {
-  it("returns FreeStrategyProvider when loader returns null", async () => {
+  it("returns FreeStrategyProvider when loader returns null and no Pro activation", async () => {
+    // Reset credential cache to simulate a Free-tier environment
+    // (a previous test may have loaded ~/.kevlar-credentials and cached Pro=true)
+    invalidateCredentialCache();
+
     // Use temp skills dir to avoid cached bundle from real credential
     const tmpSkills = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-test-"));
     try {
@@ -64,6 +69,25 @@ describe("resolveStrategyProvider", () => {
       assert.equal(plan.tier, "free");
     } finally {
       fs.rmSync(tmpSkills, { recursive: true, force: true });
+    }
+  });
+
+  it("returns Pro provider when loader returns null but isPro() is true", async () => {
+    // Simulate Pro activation via env var
+    process.env.KEVLAR_TIER = "pro";
+    try {
+      const tmpSkills = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-test-"));
+      try {
+        const provider = await resolveStrategyProvider(new NullProRuntimeLoader(), tmpSkills);
+        const plan = await provider.getReviewPlan();
+        assert.equal(plan.tier, "pro",
+          `Expected Pro plan when isPro() is true, but got ${plan.tier}`);
+      } finally {
+        fs.rmSync(tmpSkills, { recursive: true, force: true });
+        delete process.env.KEVLAR_TIER;
+      }
+    } finally {
+      delete process.env.KEVLAR_TIER;
     }
   });
 

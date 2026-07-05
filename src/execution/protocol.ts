@@ -25,6 +25,16 @@ export interface ExecutionBlueprint {
     };
   };
 
+  /** Execution convention: how the Host AI should execute the blueprint.
+   *  Not a protocol — a semantic convention. */
+  convention?: {
+    executionMode: "background_silent";
+    /** Domain dialect baseline — standard terms and their banned synonyms.
+     *  All execution contexts must use the baseline terminology to prevent
+     *  "dialect drift" that causes aggregation failures. */
+    ubiquitousLanguageBaseline?: Record<string, string>;
+  };
+
   contexts: ContextDefinition[];
   aggregation: AggregationSpec;
   continuation: ContinuationSpec;
@@ -39,6 +49,16 @@ export interface ContextDefinition {
     policyRef?: string;
   };
   outputSchema: "kevlar.reviewer/v1"; // Individual reviewer schema
+  /** Optional tool whitelist for defensive context explosion prevention.
+   *  When present, the execution context should only see the listed tools.
+   *  When absent, the full tool registry is exposed (not recommended). */
+  requiredTools?: string[];
+  /** IDs of upstream contexts that must complete before this context starts.
+   *  Contexts with no dependencies execute immediately. */
+  dependencies?: string[];
+  /** Contexts in the same parallelGroup are launched together in one batch.
+   *  When absent, the context runs independently. */
+  parallelGroup?: string;
 }
 
 export interface AggregationSpec {
@@ -56,6 +76,10 @@ export interface ContinuationSpec {
   checkpoint: string;
   expectedRevision: number;
   idempotencyKey?: string;
+  /** Content hash for drift detection. Computed at blueprint creation,
+   *  validated on receipt submission. Mismatch = content was modified
+   *  while subagents were executing → results are potentially stale. */
+  contentFingerprint?: string;
   // Pro: slot-based per-agent result submission metadata
   contextSlots?: {
     total: number;
@@ -466,6 +490,39 @@ export function validateContinuationGate(
   }
 
   return validationResult;
+}
+
+// ── §0: Fuzzy Refusal Detection ────────────────────────────────────────────
+
+/**
+ * Detect verbal/fuzzy refusals from the Host AI that indicate it cannot
+ * create parallel execution contexts, even though it did not use the
+ * exact keyword `SEQUENTIAL_FALLBACK`.
+ *
+ * Catches patterns like:
+ *   "抱歉，我无法为您创建并行任务，但我可以直接分析..."
+ *   "I'm sorry, I cannot spawn parallel subagents..."
+ *   "当前环境不支持并行子代理..."
+ *
+ * Must be called BEFORE JSON parsing to avoid wasting retry rounds
+ * on text that will inevitably fail schema validation.
+ */
+export function isRefusalSemantics(text: string): boolean {
+  const refusalPatterns = [
+    /抱歉.*无法.*(?:创建|生成|并行|启动).*(?:任务|执行|上下文|子代理|subagent)/,
+    /I(?:'m|\s+am)\s+(?:sorry|unable).*cannot.*(?:create|spawn|parallel|subagent|task)/,
+    /can(?:'t|not)\s+(?:create|spawn|run)\s+(?:parallel|subagent)/i,
+    /直接.*(?:分析|处理|执行|在这里)/,
+    /(?:依次|逐个|挨个).*(?:分析|处理|执行)/,
+    /当前.*不支持.*(?:并行|子代理|subagent|Task)/,
+    /不支持.*(?:并行|子代理|subagent)/,
+    /not\s+supported.*(?:parallel|subagent)/i,
+    /(?:parallel|subagent).*not\s+supported/i,
+    /(?:doesn['']t|can['']t)\s+support.*(?:parallel|subagent|task)/i,
+    /无法.*并行.*(?:执行|创建|启动)/,
+    /lets?\s+(?:me\s+)?(?:analyze|review|audit).*(?:directly|myself|one\s+by\s+one)/i,
+  ];
+  return refusalPatterns.some((pattern) => pattern.test(text));
 }
 
 export function fallbackToStandardOrchestration(state: any, reason: string) {

@@ -84,7 +84,7 @@ Auditors execute via a **3-tier fallback chain**:
 | Tier | Mode | What happens |
 |------|------|-------------|
 | L1 | MCP Sampling / Direct API | 6 parallel LLM calls, one per auditor — maximum isolation (requires `sampling` capability or API key) |
-| L2 | Subagent dispatch (`mcp_subagent`) | Kevlar sends an **AgentBlueprint** with natural-language instructions. The Host AI creates independent subagents for each auditor, executes in parallel, and submits per-agent results via `review_content_wizard_continue`. Pro tier supports slot-based submission: each agent result submitted individually, server auto-aggregates when all slots filled. See [Execution Modes](#execution-modes). |
+| L2 | Subagent dispatch (`mcp_subagent`) | Kevlar sends an **ExecutionBlueprint** with natural-language instructions. The Host AI creates independent subagents for each auditor, executes in parallel, and submits per-agent results via `review_content_wizard_continue`. Pro tier supports slot-based submission: each agent result submitted individually, server auto-aggregates when all slots filled. See [Execution Modes](#execution-modes). |
 | L3 | Orchestration (host fallback) | Single-inference **matrix-filling protocol** — each dimension is a structured XML sandbox slot filled independently, then arbitrated. See [Protocol Comparison](#protocol-comparison-pseudo-parallel-vs-matrix-filling). |
 
 **Stage 2 — RST Review** (Free): User-created reviewers with RST personalities receive **Focus Topics** (filtered + translated from pre-audit findings based on each persona's RST triggers) and produce authentic user reactions, not dimension-scored reports.
@@ -222,7 +222,7 @@ Kevlar-4u operates on a **3-tier fallback chain** that automatically selects the
    │ L1: MCP Sampling  │ │ L1: Direct   │ │ L2: Subagent │
    │ (via createMessage)│ │ API          │ │ Dispatch     │
    │                   │ │              │ │ (mcp_subagent)│
-   │ Max isolation     │ │ API key      │ │ AgentBlueprint│
+    │ Max isolation     │ │ API key      │ │ ExecutionBlueprint│
    │ No API key needed │ │ required     │ │ → per-agent   │
    │                   │ │ Good isolation│ │   submission  │
    └────────┬──────────┘ └──────┬───────┘ └──────┬───────┘
@@ -254,7 +254,7 @@ Kevlar-4u operates on a **3-tier fallback chain** that automatically selects the
 | Tier | Mode | Identifier | Trigger | Pre-audit strategy | RST review strategy |
 |------|------|------------|---------|-------------------|-------------------|
 | L1 | MCP Sampling | `mcp_sampling` | Client declares `sampling` capability | 6 parallel agent calls via `sampling/createMessage` | Independent LLM call per persona |
-| L2 | Subagent dispatch | `mcp_subagent` | Host AI supports Task/Subagent tools | **AgentBlueprint dispatch** — Kevlar sends structured blueprint + natural-language guidance; host creates 6 isolated subagents, submits per-agent results; Pro: slot-based submission with server-side auto-aggregation | Sequential persona dispatch with per-persona subagent |
+| L2 | Subagent dispatch | `mcp_subagent` | Host AI supports Task/Subagent tools | **ExecutionBlueprint dispatch** — Kevlar sends structured blueprint + natural-language guidance; host creates 6 isolated subagents, submits per-agent results; Pro: slot-based submission with server-side auto-aggregation | Sequential persona dispatch with per-persona subagent |
 | L3 | Orchestration (fallback) | `orchestration` | Neither sampling nor subagent tools available | **V4 Matrix-filling protocol** — single prompt with 6 XML sandbox slots | **Reinforced role-play** — sequential persona execution with context reset gates |
 
 > **v2.1**: `direct_api` mode removed. Direct API calling has been superseded by MCP Sampling + Host AI's `samplingFn` injection.
@@ -267,9 +267,9 @@ Priority order (highest → lowest): `mcp_sampling` (10) → `mcp_subagent` (15)
 2. Falls back to `KEVLAR_MODE` environment variable
 3. Otherwise auto-selects by availability and priority
 
-### L2: Subagent Dispatch (AgentBlueprint protocol)
+### L2: Subagent Dispatch (ExecutionBlueprint protocol)
 
-When independent LLM access is unavailable, Kevlar sends a **natural-language-wrapped AgentBlueprint** to the Host AI. The blueprint contains:
+When independent LLM access is unavailable, Kevlar sends a **natural-language-wrapped ExecutionBlueprint** to the Host AI. The blueprint contains:
 - Executor mode flag (`ephemeral_agents`)
 - 6 fully self-contained agent definitions (auditor identity, content, decomposition, local findings, core reasoning framework)
 - A `ContinuationSpec` with sessionId, checkpoint, revision, and continuationId for result submission
@@ -296,7 +296,7 @@ When the first two tiers are unavailable:
 
 Kevlar-4u uses different execution protocols depending on the available LLM access tier. The following table compares all three protocols:
 
-| Aspect | AgentBlueprint Subagent (L2, pre-audit + RST) | Matrix-filling (L3, pre-audit) | Role-play with reset gates (L3, RST review) |
+| Aspect | ExecutionBlueprint Subagent (L2, pre-audit + RST) | Matrix-filling (L3, pre-audit) | Role-play with reset gates (L3, RST review) |
 |---|---|---|---|
 | Philosophy | "Create isolated subagents embedding full context" | "Fill structured slots with factual analysis" | "Act as persona, then reset context" |
 | Trigger | Host AI supports subagent/Task tools | No subagent tools, no sampling, no API key | Same as L3 pre-audit |
@@ -404,7 +404,7 @@ flowchart TD
 
   Tools --> Fallback["3-Tier Execution Fallback"]
   Fallback --> L1["L1: Sampling / Direct API"]
-  Fallback --> L2["L2: AgentBlueprint Subagent Dispatch"]
+  Fallback --> L2["L2: ExecutionBlueprint Subagent Dispatch"]
   Fallback --> L3["L3: Host Orchestration (Matrix-filling)"]
 
   L2 --> Cont["review_content_wizard_continue"]
@@ -434,7 +434,7 @@ flowchart TD
 Design principles:
 
 - **State machine-driven workflows**: Key flows are maintained by tool state machines, not dependent on the host AI remembering long prompts.
-- **3-tier adaptive execution**: MCP Sampling → AgentBlueprint subagent dispatch → Host orchestration. Each tier auto-detects capability and falls through on failure. Zero configuration needed.
+- **3-tier adaptive execution**: MCP Sampling → ExecutionBlueprint subagent dispatch → Host orchestration. Each tier auto-detects capability and falls through on failure. Zero configuration needed.
 - **Per-agent slot persistence (Pro)**: Each agent's raw findings are preserved in `agentSlots.received`, enabling audit trail, per-agent retry, and server-side deterministic aggregation.
 - **Safe confirmation**: High-risk operations like deletion, reset, and config writes all go through confirmation wizards.
 
@@ -484,7 +484,7 @@ kevlar-4u/
 │   │   ├── bundleStrategyProvider.ts      # Pro: server-backed strategy provider
 │   │   ├── proRuntime.ts                  # Pro: runtime loader (DynamicImport / Mock)
 │   │   ├── reviewSteps.ts                 # Pro: step type system & execution
-│   │   ├── protocol.ts                    # AgentBlueprint, ContinuationSpec, AgentSlotResult, receipt validation
+│   │   ├── protocol.ts                    # ExecutionBlueprint, ContinuationSpec, context slot metadata, receipt validation
 │   │   └── modes/
 │   │       ├── orchestration.ts
 │   │       ├── sampling.ts
@@ -507,7 +507,7 @@ kevlar-4u/
 │   │   ├── createPersonaWizardTool.ts     # Wizard with RST archetype selection
 │   │   ├── deletePersonaTool.ts
 │   │   ├── deletePersonaWizardTool.ts
-│   │   ├── reviewContentWizardTool.ts     # Main review wizard + AgentBlueprint builder
+│   │   ├── reviewContentWizardTool.ts     # Main review wizard + ExecutionBlueprint builder
 │   │   ├── continueWizardTool.ts          # Continuation contract tool (batch + Pro per-agent slot submission)
 │   │   ├── configureTool.ts
 │   │   ├── configureWizardTool.ts

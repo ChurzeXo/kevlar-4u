@@ -22,6 +22,7 @@ import {
   validateContinuationGate,
   validateReceipt,
   validateSingleAgentResult,
+  isRefusalSemantics,
   fallbackToStandardOrchestration,
   type ExecutionBlueprint,
   type ExecutionReceipt,
@@ -1190,5 +1191,53 @@ describe("validateSingleAgentResult", () => {
       result: { findings: [{ keyword: "risky" }] },
     });
     assert.ok(result.valid);
+  });
+});
+
+// ── §0 isRefusalSemantics Tests ──────────────────────────────────────────────
+
+describe("isRefusalSemantics", () => {
+  it("detects Chinese verbal refusal pattern", () => {
+    assert.ok(isRefusalSemantics("抱歉，我无法为您创建并行任务，但我可以直接在这里为您依次分析各个维度。"));
+  });
+
+  it("detects Chinese direct-do pattern", () => {
+    assert.ok(isRefusalSemantics("我明白了。由于当前环境不支持并行子代理，我将直接在这里依次分析。"));
+  });
+
+  it("detects 'unsupported' pattern", () => {
+    assert.ok(isRefusalSemantics("当前平台不支持子代理并行执行。"));
+  });
+
+  it("detects English refusal pattern", () => {
+    assert.ok(isRefusalSemantics("I'm sorry, I cannot create parallel subagents in this environment."));
+  });
+
+  it("detects English 'cannot spawn' pattern", () => {
+    assert.ok(isRefusalSemantics("I cannot spawn parallel tasks at this time. Let me analyze the content directly."));
+  });
+
+  it("detects 'not supported' pattern", () => {
+    assert.ok(isRefusalSemantics("Parallel subagent execution is not supported here."));
+  });
+
+  it("detects sequential fallback language", () => {
+    assert.ok(isRefusalSemantics("我将依次逐个维度进行分析处理。"));
+  });
+
+  it("does NOT flag valid receipt JSON", () => {
+    assert.ok(!isRefusalSemantics(JSON.stringify({ protocol: "kevlar.blueprint/v1", contexts: [], aggregation: { dimensions: [], summary: "ok" } })));
+  });
+
+  it("does NOT flag normal conversation", () => {
+    assert.ok(!isRefusalSemantics("好的，我已经按照要求完成了所有6个维度的审计。"));
+  });
+
+  it("does NOT flag SEQUENTIAL_FALLBACK keyword alone", () => {
+    assert.ok(!isRefusalSemantics("SEQUENTIAL_FALLBACK"));
+  });
+
+  it("detects '无法并行创建' pattern", () => {
+    assert.ok(isRefusalSemantics("当前环境无法并行创建多个执行上下文。"));
   });
 });
