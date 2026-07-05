@@ -67,3 +67,4 @@ skills/strategy-bundle-cache.enc
 # Upload bundle for server (one-time use)
 .kevlar_upload_bundle.json
 .kevlar_backend_task.md
+scripts/registry.*
