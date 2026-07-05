@@ -113,7 +113,7 @@ export async function executeReview(
     // Auto / mcp_subagent → route by plan strategy
     const strategy = planResult.plan.strategy as HostOrchestrationStrategy | undefined;
     const useStructured = resolved === "mcp_subagent"
-      || (resolved === "auto" && strategy === "structured");
+      || (mode === "auto" && strategy === "structured");
     const handler = useStructured ? subagentHandler : orchestrationHandler;
     result = await handler.execute(tracedCtx);
   }
