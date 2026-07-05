@@ -10,8 +10,9 @@ export function getLocalVersion(): string {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
     const repoRoot = join(__dirname, "..", "..");
-    _cachedVersion = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8")).version;
-    return _cachedVersion;
+    const version: string = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8")).version;
+    _cachedVersion = version;
+    return version;
   } catch {
     return "unknown";
   }
