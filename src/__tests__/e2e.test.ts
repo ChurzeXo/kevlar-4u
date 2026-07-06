@@ -262,8 +262,8 @@ describe("End-to-End integration test", () => {
         arguments: { sessionId, userMessage: "中国" },
       });
       const step2Text = (step2.content as any)[0].text;
-      assert.ok(step2Text.includes("六维风险检测已完成"), "Should show system audit results");
-      assert.ok(step2Text.includes("是否继续进行舆论仿真推演"), "Should ask for rst confirmation");
+      assert.ok(step2Text.includes("<!-- kevlar:verbatim-pre-audit:start -->"), "Should show pre-audit LEGACY format results");
+      assert.ok(step2Text.includes("目标平台风控模拟"), "Should ask for rst confirmation");
       assert.ok(step2Text.includes("currentStep: rstConfirmation"), "Should be in rstConfirmation step");
 
       // Step 3: "继续" → checkPersonaInventory → waitingForReviewDecision
@@ -517,9 +517,9 @@ describe("End-to-End integration test", () => {
 
       assert.ok(step3, "Step 3 response should exist");
       const step3Text = (step3.content as any)[0].text;
-      assert.ok(step3Text.includes("六维风险检测已完成"), "Should show pre-audit completion");
-      assert.ok(step3Text.includes("Subagent 并行模式"), "Should indicate subagent parallel mode");
-      assert.ok(step3Text.includes("是否继续进行舆论仿真推演"), "Should ask for rst continuation");
+      assert.ok(step3Text.includes("## 📌 类似先例"), "Should render LEGACY format precedents section");
+      assert.ok(step3Text.includes("<!-- kevlar:verbatim-pre-audit:start -->"), "Should render LEGACY format pre-audit block");
+      assert.ok(step3Text.includes("是否继续进行"), "Should ask for rst continuation");
       assert.ok(step3Text.includes("currentStep: rstConfirmation"), "Should be in rstConfirmation step");
 
       // Verify state was updated correctly

@@ -603,12 +603,15 @@ async function handleSystemAudit(
     state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
     if (state.step === "rstConfirmation") {
+      const prompts = await resolvePromptSegments();
       return toolResponse(
         state,
         [
-          "六维风险检测已完成（规则模式）。是否继续进行舆论仿真推演？",
+          buildPreAuditSummaryBlock(state, prompts),
           "",
+          "<!-- kevlar:verbatim-options:start -->",
           "回复「继续」或「是」进入评审，回复「否」结束。",
+          "<!-- kevlar:verbatim-options:end -->",
         ].join("\n"),
       );
     }
@@ -631,12 +634,15 @@ async function handleSystemAudit(
     state.step = state.tier === "pro" ? "rstConfirmation" : "checkPersonaInventory";
     await saveState(tmpDir, state);
     if (state.step === "rstConfirmation") {
+      const prompts = await resolvePromptSegments();
       return toolResponse(
         state,
         [
-          "六维风险检测已完成（本地回退模式）。是否继续进行舆论仿真推演？",
+          buildPreAuditSummaryBlock(state, prompts),
           "",
+          "<!-- kevlar:verbatim-options:start -->",
           "回复「继续」或「是」进入评审，回复「否」结束。",
+          "<!-- kevlar:verbatim-options:end -->",
         ].join("\n"),
       );
     }
@@ -1806,9 +1812,9 @@ async function handleContextAuditResult(
         [
           buildPreAuditSummaryBlock(state, prompts),
           "",
-          "六维风险检测已完成（Subagent 并行模式）。是否继续进行舆论仿真推演？",
-          "",
+          "<!-- kevlar:verbatim-options:start -->",
           "回复「继续」或「是」进入评审，回复「否」结束。",
+          "<!-- kevlar:verbatim-options:end -->",
         ].join("\n"),
       );
     }
@@ -1900,9 +1906,9 @@ async function handleOrchestrationFinalResult(
         [
           buildPreAuditSummaryBlock(state, prompts),
           "",
-          "六维风险检测已完成。是否继续进行舆论仿真推演？",
-          "",
+          "<!-- kevlar:verbatim-options:start -->",
           "回复「继续」或「是」进入评审，回复「否」结束。",
+          "<!-- kevlar:verbatim-options:end -->",
         ].join("\n"),
       );
     }
@@ -2156,37 +2162,154 @@ function summarizePreAuditResults(
   ].join("\n");
 }
 
-// ── 辅助：构建六维风险检测结果展示块 ─────────────────────────────────────────
+// ── 辅助：构建六维风险检测结果展示块（LEGACY_RENDERING_SECTION 格式）───────
 
+/**
+ * Render the pre-audit report in the LEGACY_RENDERING_SECTION format.
+ * Applied to mcp_subagent, mcp_sampling, and orchestration paths.
+ *
+ * Four blocks:
+ *   1. # [等级Emoji] [等级文字]
+ *   2. Markdown 扫描结果表格
+ *   3. 深度推演（attackChain → 次要风险 → 无风险 → synergy → precedents → worstCase）
+ *   4. 尾部状态询问
+ */
 function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSegments): string {
-  const segs = prompts ?? loadPromptSegments("free");
-  const lines: string[] = ["<!-- kevlar:verbatim-pre-audit:start -->", "六维风险检测结果"];
-  if (state.preAuditReport?.summary) {
-    lines.push(state.preAuditReport.summary);
-  } else {
-    lines.push("", "未找到系统审查员，跳过六维风险检测");
+  const report = state.preAuditReport;
+
+  if (!report) {
+    return [
+      "<!-- kevlar:verbatim-pre-audit:start -->",
+      "# ⚪ 跳过检测",
+      "",
+      "未找到系统审查员，跳过六维风险检测。",
+      "",
+      "<!-- kevlar:verbatim-pre-audit:end -->",
+    ].join("\n");
   }
 
-  // 类似先例：始终渲染此段（无则输出"无"），保证链路完整
-  if (state.preAuditReport) {
-    const precedents = state.preAuditReport.precedents;
-    lines.push("");
-    lines.push(`${segs.precedentSectionHeader}：`);
-    if (isPro()) {
-      if (precedents && precedents.length > 0) {
-        for (const p of precedents) {
-          lines.push(`• ${p.event}${p.date ? `（${p.date}）` : ""}`);
-        }
-      } else {
-        lines.push(segs.precedentNoneMessage);
-      }
-    } else {
-      lines.push(segs.precedentLockedMessage);
+  const dimensions: Array<{ id?: string; name: string; findings: any[]; level?: string }> =
+    report.dimensions ?? [];
+
+  // ── Block 1: 风险等级标题 ──────────────────────────────────────
+  const overallLevel = getOverallLevel(dimensions);
+
+  // ── Block 2: 扫描结果表格 ──────────────────────────────────────
+  const tableRows = dimensions.map((d) => {
+    const level = d.level || getFindingsLevel(d.findings);
+    const keywords = d.findings && d.findings.length > 0
+      ? d.findings.map((f: any) => f.keyword || f.trigger || "").filter(Boolean).join("、")
+      : "无";
+    return `| ${escapeMarkdownTableCell(d.name)} | ${level} | ${escapeMarkdownTableCell(keywords)} |`;
+  });
+  const table = [
+    "| 维度 | 等级 | 关键发现 |",
+    "| --- | --- | --- |",
+    ...tableRows,
+  ].join("\n");
+
+  // ── Block 3: 深度推演 ──────────────────────────────────────────
+  const analysisLines: string[] = [];
+
+  // 🔴 核心风险
+  const redFindings = dimensions.filter((d) => {
+    const l = d.level || getFindingsLevel(d.findings);
+    return l === "🔴" && d.findings.length > 0;
+  });
+  if (redFindings.length > 0) {
+    analysisLines.push("## 🔴 核心风险");
+    if (report.attackChainAnalysis) {
+      analysisLines.push(report.attackChainAnalysis);
     }
+    for (const d of redFindings) {
+      for (const f of d.findings) {
+        analysisLines.push(`- **${escapeMarkdownTableCell(d.name)}**｜${f.keyword || "未命名风险"}：${f.riskDescription || f.description || ""}`);
+        if (f.propagationPath) {
+          const pp = f.propagationPath;
+          if (typeof pp === "string") {
+            analysisLines.push(`  → ${pp}`);
+          } else if (pp.step1) {
+            analysisLines.push(`  → ${pp.step1} → ${pp.step2 || ""} → ${pp.step3 || ""} → ${pp.step4 || ""}`);
+          }
+        }
+      }
+    }
+    analysisLines.push("");
   }
 
-  lines.push("<!-- kevlar:verbatim-pre-audit:end -->");
-  return lines.join("\n");
+  // 🟡 次要风险
+  const yellowFindings = dimensions.filter((d) => {
+    const l = d.level || getFindingsLevel(d.findings);
+    return l === "🟡" && d.findings.length > 0;
+  });
+  if (yellowFindings.length > 0) {
+    analysisLines.push("## 🟡 次要风险");
+    for (const d of yellowFindings) {
+      for (const f of d.findings) {
+        analysisLines.push(`- **${escapeMarkdownTableCell(d.name)}**｜${f.keyword || "未命名风险"}：${f.riskDescription || f.description || ""}`);
+      }
+    }
+    analysisLines.push("");
+  }
+
+  // 🟢 无风险维度
+  const greenDimensions = dimensions.filter((d) => {
+    const l = d.level || getFindingsLevel(d.findings);
+    return (l === "🟢" || !l) && d.findings.length === 0;
+  });
+  if (greenDimensions.length > 0) {
+    analysisLines.push(`## 🟢 无风险维度（${greenDimensions.length}/${dimensions.length}）`);
+    analysisLines.push(greenDimensions.map((d) => `- ${d.name}`).join("、"));
+    analysisLines.push("");
+  }
+
+  // ⚡ 协同放大效应
+  const synergy = report.synergyFlags;
+  if (synergy && (synergy.triggered?.length > 0 || (synergy.overallMultiplier ?? 1) > 1)) {
+    analysisLines.push("## ⚡ 协同放大效应");
+    if (synergy.triggered?.length > 0) {
+      analysisLines.push(`- 触发规则：${synergy.triggered.join("、")}`);
+    }
+    if (synergy.overallMultiplier && synergy.overallMultiplier > 1) {
+      analysisLines.push(`- 整体放大系数：${synergy.overallMultiplier}x`);
+    }
+    if (report.synergyFlags?.levelUpgrades?.length > 0) {
+      for (const upgrade of report.synergyFlags.levelUpgrades) {
+        analysisLines.push(`- ${upgrade.dimension}: ${upgrade.from} → ${upgrade.to}（${upgrade.reason || ""}）`);
+      }
+    }
+    analysisLines.push("");
+  }
+
+  // 📌 类似先例
+  const precedents = report.precedents;
+  analysisLines.push("## 📌 类似先例（供自行检索）");
+  if (precedents && precedents.length > 0) {
+    for (const p of precedents) {
+      analysisLines.push(`- ${p.event}${p.date ? `（${p.date}）` : ""}`);
+    }
+  } else {
+    analysisLines.push("（无相关先例记录）");
+  }
+  analysisLines.push("");
+
+  // 🚨 最坏情况推演
+  if (report.worstCaseNarrative) {
+    analysisLines.push("## 🚨 最坏情况推演");
+    analysisLines.push(report.worstCaseNarrative);
+    analysisLines.push("");
+  }
+
+  return [
+    "<!-- kevlar:verbatim-pre-audit:start -->",
+    `# ${overallLevel}`,
+    "",
+    table,
+    "",
+    analysisLines.join("\n"),
+    "是否继续进行「舆论仿真推演」或「目标平台风控模拟」？",
+    "<!-- kevlar:verbatim-pre-audit:end -->",
+  ].join("\n");
 }
 
 
@@ -2714,8 +2837,6 @@ async function handleRstConfirmation(
   if (wantsRst) {
     transitionState(state, "checkPersonaInventory", "rst_confirmed");
     await saveState(tmpDir, state);
-    // Pre-audit results are in state.preAuditReport; they flow into
-    // Focus Topics when RST runs via handleInventoryCheck → executeReview.
     return handleInventoryCheck(tmpDir, state, personas, samplingFn);
   }
 
@@ -2726,12 +2847,15 @@ async function handleRstConfirmation(
     return toolResponse(state, "六维风险检测已完成，未进入舆论仿真推演。需要评测新内容时，请重新开始。");
   }
 
+  const prompts = await resolvePromptSegments();
   return toolResponse(
     state,
     [
-      "六维风险检测已完成。是否继续进行舆论仿真推演？",
+      buildPreAuditSummaryBlock(state, prompts),
       "",
+      "<!-- kevlar:verbatim-options:start -->",
       "回复「继续」或「是」进入评审，回复「否」结束。",
+      "<!-- kevlar:verbatim-options:end -->",
     ].join("\n"),
   );
 }

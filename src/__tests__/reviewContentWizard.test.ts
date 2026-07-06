@@ -275,8 +275,8 @@ const startText = textOf(started);
     writePrdRules();
 
     const started = await startWizardWithRegion("盒马菌菇星球，贵妇粉耳，颜值粉嫩，耳片肥厚，质地柔软，鲜香清脆");
-const text = textOf(started);
-    assert.ok(text.includes("综合风险等级：🔴 红色高危"));
+    const text = textOf(started);
+    assert.ok(text.includes("# 🔴 红色高危"));
     assert.ok(text.includes("规则引擎"));
     assert.ok(text.includes("| 规则引擎 | 🔴"));
     assert.ok(text.includes("<!-- kevlar:verbatim-pre-audit:start -->"));
@@ -302,7 +302,7 @@ const text = textOf(started);
 
     const started = await startWizardWithRegion("盒马菌菇星球，贵妇粉耳，颜值粉嫩，耳片肥厚，质地柔软，鲜香清脆");
 const text = textOf(started);
-    assert.ok(text.includes("综合风险等级：🔴 红色高危"));
+    assert.ok(text.includes("# 🔴 红色高危"));
     assert.ok(text.includes("暗语破译"));
     assert.ok(text.includes("| 暗语破译 | 🔴"));
 
