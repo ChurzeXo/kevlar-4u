@@ -1336,12 +1336,19 @@ function buildOrchestrationPreAuditContext(
   };
 }
 
+/** Cached result of resolvePromptSegments() — subscription prompts change rarely,
+ *  so we cache after first fetch and reuse for the process lifetime. */
+let _cachedPromptSegments: PromptSegments | null = null;
+
 async function resolvePromptSegments(): Promise<PromptSegments> {
+  if (_cachedPromptSegments) return _cachedPromptSegments;
   if (isPro()) {
     const serverPrompts = await SaaSClient.fetchSubscriptionPrompts();
-    return serverPrompts ?? loadPromptSegments("free");
+    _cachedPromptSegments = serverPrompts ?? loadPromptSegments("free");
+    return _cachedPromptSegments;
   }
-  return loadPromptSegments("free");
+  _cachedPromptSegments = loadPromptSegments("free");
+  return _cachedPromptSegments;
 }
 
 /**
@@ -1719,8 +1726,14 @@ async function handleContextAuditResult(
     );
 
     // ── Phase 2: LLM cross-validation (Step 6) ──
+    // Only for slot-based auto-aggregation (Pro per-agent submission).
+    // In batch mode, the Host AI has already done cross-validation +
+    // final arbitration during its own aggregation phase — skipping
+    // avoids 2-10s of redundant server-side LLM latency.
     let dimensionsForSynergy = mergedDimensions;
-    if (samplingFn) {
+    const isAutoAggregated = state.contextSlots
+      && Object.keys(state.contextSlots.received).length > 0;
+    if (isAutoAggregated && samplingFn) {
       try {
         dimensionsForSynergy = await crossValidateRiskyDimensions(
           content,
@@ -1729,8 +1742,8 @@ async function handleContextAuditResult(
           samplingFn,
         );
       } catch (err) {
-        logger.warn("Cross-validation failed, using merged dimensions", {
-          event: "cross_validation_failed",
+        logger.warn("Slot cross-validation failed, using merged dimensions", {
+          event: "slot_cross_validation_failed",
           error: getErrorInfo(err).message,
         });
       }
@@ -1755,8 +1768,11 @@ async function handleContextAuditResult(
     }
 
     // ── Phase 5: Step 8 — LLM final arbitration ──
+    // Same optimization as Step 6: skip for batch mode — the Host AI
+    // already produced worstCaseNarrative, attackChainAnalysis, and
+    // riskProfile during its own aggregation phase.
     let finalReport: PreAuditReport | null = null;
-    if (samplingFn) {
+    if (isAutoAggregated && samplingFn) {
       try {
         const step8Prompts = await resolvePromptSegments();
         finalReport = await finalizePreAuditReport(
@@ -1772,8 +1788,8 @@ async function handleContextAuditResult(
           step8Prompts,
         );
       } catch (err) {
-        logger.warn("Final arbitration failed, using synergy result", {
-          event: "final_arbitration_failed",
+        logger.warn("Slot final arbitration failed, using synergy result", {
+          event: "slot_final_arbitration_failed",
           error: getErrorInfo(err).message,
         });
       }
@@ -3602,6 +3618,10 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
 async function saveState(tmpDir: string, state: ReviewWizardState, backup = true): Promise<void> {
   await fs.promises.mkdir(tmpDir, { recursive: true });
   const statePath = getStatePath(tmpDir, state.sessionId);
+
+  // Refresh activity timestamp so the 10-min TTL is from last interaction,
+  // not from session creation. Prevents session loss during long audits.
+  state.createdAt = Date.now();
 
   // Create backup before overwriting (MECP §6.3 state rollback)
   if (backup && fs.existsSync(statePath)) {
