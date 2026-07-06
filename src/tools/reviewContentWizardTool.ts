@@ -45,6 +45,8 @@ import {
 } from "../prompts/reviewWizard.js";
 import { isSamplingSupported } from "../execution/client.js";
 import { validateReceipt, isRefusalSemantics, fallbackToStandardOrchestration } from "../execution/protocol.js";
+import { degraded, formatStatusMessage } from "../execution/continuationStatus.js";
+import { progressForStep } from "../execution/progress.js";
 import {
   resolveExecutionPlan,
   type ExecutionPlan,
@@ -256,6 +258,7 @@ interface ReviewWizardState {
     };
     deltaRisks: { bareOnly: string[]; fullOnly: string[]; stable: string[] };
   };
+  _sessionResetReason?: "ttl_expired" | "continuation_expired";
 }
 
 interface Recommendation {
@@ -397,7 +400,10 @@ export async function handleReviewContentWizard(
       await saveState(tmpDir, state);
     }
 
-    return await advanceWizard(
+    const sessionResetReason = state._sessionResetReason;
+    delete state._sessionResetReason;
+
+    const result = await advanceWizard(
       skillsDir,
       tmpDir,
       state,
@@ -409,6 +415,27 @@ export async function handleReviewContentWizard(
       plan,
       strategyProvider,
     );
+
+    if (sessionResetReason && result.content?.[0]?.type === "text") {
+      const resetLabel = sessionResetReason === "ttl_expired"
+        ? "10 分钟无活动"
+        : "延续请求超时（30 分钟）";
+      const statusEnvelope = formatStatusMessage(
+        degraded("session_expired", {
+          sessionId: state.sessionId,
+          resetReason: sessionResetReason,
+          preservedContent: true,
+          suggestedAction: "请重新选择目标市场，原始评测内容已保留。",
+        }),
+        `⏰ **会话已过期**（${resetLabel}）— 评测进度已丢失，但原始内容已保留，请重新开始。`,
+      );
+      result.content[0] = {
+        type: "text",
+        text: statusEnvelope + "\n\n" + result.content[0].text,
+      };
+    }
+
+    return result;
   } catch (err) {
     const info = getErrorInfo(err);
     logger.error("Review content wizard failed", {
@@ -2296,6 +2323,38 @@ function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSeg
     analysisLines.push("");
   }
 
+  // 📊 裸审 vs 深度审计 Delta 对比
+  const delta = report.deltaRisks;
+  if (delta && (delta.bareOnly?.length > 0 || delta.fullOnly?.length > 0)) {
+    const hasBare = delta.bareOnly?.length > 0;
+    const hasFull = delta.fullOnly?.length > 0;
+    const divergence = (hasBare && hasFull) ? "high"
+      : (hasBare || hasFull) ? "medium" : "low";
+
+    analysisLines.push("## 📊 裸审 vs 深度审计对比");
+    analysisLines.push(`**差异度**：${divergence === "high" ? "🔴 高" : "🟡 中"} — 裸审与深度审计结果存在显著分歧`);
+
+    if (hasFull) {
+      analysisLines.push(`- **仅在深度审计中暴露**（${delta.fullOnly.length} 项）：裸审未加载文化语境，漏检以下风险关键词`);
+      for (const kw of delta.fullOnly) {
+        analysisLines.push(`  - ${escapeMarkdownTableCell(kw as string)}`);
+      }
+    }
+    if (hasBare) {
+      analysisLines.push(`- **仅在裸审中发现**（${delta.bareOnly.length} 项）：去语境化后放大的孤立风险点`);
+      for (const kw of delta.bareOnly) {
+        analysisLines.push(`  - ${escapeMarkdownTableCell(kw as string)}`);
+      }
+    }
+    if (delta.stable?.length > 0) {
+      analysisLines.push(`- **双重确认风险**（${delta.stable.length} 项）：裸审与深度审计均检出——风险高度可信`);
+      for (const kw of delta.stable) {
+        analysisLines.push(`  - ${escapeMarkdownTableCell(kw as string)}`);
+      }
+    }
+    analysisLines.push("");
+  }
+
   // 📌 类似先例
   const precedents = report.precedents;
   analysisLines.push("## 📌 类似先例（供自行检索）");
@@ -3569,6 +3628,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         dimensions: { ...DEFAULT_DIMENSIONS_CONFIG },
         usedPersonaIds: [],
         pendingPersonaIds: [],
+        _sessionResetReason: "ttl_expired",
       };
     }
 
@@ -3582,12 +3642,14 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
         restoredState.activeContinuation = undefined;
         restoredState.revision = (restoredState.revision ?? 0) + 1;
         restoredState.step = "waitingForRegionSelection";
+        restoredState._sessionResetReason = "continuation_expired";
         return restoredState;
       }
       // If rollback failed, still preserve state with content intact
       state.activeContinuation = undefined;
       state.revision = (state.revision ?? 0) + 1;
       state.step = "waitingForRegionSelection";
+      state._sessionResetReason = "continuation_expired";
       return state;
     }
     if (!state.systemAuditorIds) {
@@ -3670,11 +3732,14 @@ function getStatePath(tmpDir: string, sessionId: string): string {
 }
 
 function toolResponse(state: ReviewWizardState, assistantMessage: string): ToolResult {
+  const dimCount = state.systemAuditorIds?.length || 6;
   return {
     content: [
       {
         type: "text",
         text: [
+          progressForStep(state.step, dimCount),
+          "",
           assistantMessage,
           "",
           "```kevlar-state",
