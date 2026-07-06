@@ -174,7 +174,7 @@ export const reviewContentWizardContinueModule: ToolModule = {
               return `- \`${id}\`${agentDef ? ` (${agentDef.role})` : ""}`;
             }).join("\n");
             const totalExpected = blueprintAgents.length > 0 ? blueprintAgents.length : 6;
-            const currentCount = (receipt?.agents || []).length;
+            const currentCount = (receipt?.contexts || []).length;
 
             const errMsg = [
               "⛔ **Receipt 被拒绝** — 你提交的 ExecutionReceipt 缺少必需的 context。",

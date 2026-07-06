@@ -1460,7 +1460,6 @@ async function handleOrchestrationStep0Result(
     );
   } catch (err) {
     const info = getErrorInfo(err);
-    await rollbackState(tmpDir, state.sessionId);
     const errMsg = formatErrorWithReportPrompt(
       [
         "❌ 无法解析宿主 AI 返回的 Turn 1 JSON。",
