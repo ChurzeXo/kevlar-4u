@@ -66,7 +66,7 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
       step0Result: { wildTranslations: [], blackAtoms: ["测试"], attackCandidates: [], precedents: [] },
     });
     const hash = sha256(msg);
-    assert.equal(hash, "d45712e519c22a96467aebaceb43f9998dade6f450ad463f0943988c208e1343", "Auditor message hash changed");
+    assert.equal(hash, "5a53231b029b3a60ba0732024ad8683df9389065e36132b4ae2af8e77912891a", "Auditor message hash changed");
   });
 
   it("buildOrchestrationFinalizerPrompt with Free segments (loaded from file)", () => {

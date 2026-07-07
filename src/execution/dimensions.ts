@@ -352,6 +352,36 @@ export const DIMENSION_SAFETY_RISK: Record<string, SafetyRiskConfig> = {
 	factual_integrity:        { risk: "LOW" },
 };
 
+// ── Per-dimension Step 0 field access level ──────────────────────────────────
+// Reduces instruction length by trimming fields irrelevant to each dimension.
+//   "all"     → include the full field
+//   "summary" → include a condensed version (first N items, with count hint)
+//   "skip"    → omit entirely
+//
+// Fields in Step0Result: wildTranslations, blackAtoms, attackCandidates, precedents
+//
+// Rationale:
+//   cross_lingual_distortion / network_culture_risk: wildTranslations is primary input
+//   legal / social / factual / context: attackCandidates is sufficient; wildTranslations adds noise
+
+export type Step0FieldAccess = "all" | "summary" | "skip";
+
+export interface DimensionFieldAccess {
+	wildTranslations: Step0FieldAccess;
+	blackAtoms: Step0FieldAccess;
+	attackCandidates: Step0FieldAccess;
+	precedents: Step0FieldAccess;
+}
+
+export const DIMENSION_FIELD_ACCESS: Record<string, DimensionFieldAccess> = {
+	cross_lingual_distortion: { wildTranslations: "all", blackAtoms: "all", attackCandidates: "all", precedents: "all" },
+	network_culture_risk:     { wildTranslations: "all", blackAtoms: "skip", attackCandidates: "all", precedents: "all" },
+	social_risk_ethics:       { wildTranslations: "summary", blackAtoms: "all", attackCandidates: "all", precedents: "all" },
+	legal_compliance:         { wildTranslations: "summary", blackAtoms: "skip", attackCandidates: "all", precedents: "summary" },
+	context_distortion:       { wildTranslations: "skip", blackAtoms: "skip", attackCandidates: "all", precedents: "summary" },
+	factual_integrity:        { wildTranslations: "summary", blackAtoms: "skip", attackCandidates: "all", precedents: "summary" },
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Get all active dimension IDs (always includes defensive + configured offensive) */

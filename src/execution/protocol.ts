@@ -118,6 +118,47 @@ export interface Finding {
   [key: string]: unknown;
 }
 
+// ── ExecutionReceipt JSON Schema (for host AI pre-validation) ────────────────
+
+export const EXECUTION_RECEIPT_JSON_SCHEMA = {
+  type: "object",
+  required: ["protocol", "execution", "contexts", "aggregation"],
+  properties: {
+    protocol: { type: "string", const: "kevlar.blueprint/v1" },
+    execution: {
+      type: "object",
+      required: ["requestedMode", "actualMode", "requestedConcurrency", "actualConcurrency", "contextIsolation", "parallelism", "evidenceLevel"],
+    },
+    contexts: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "role", "status", "output"],
+        properties: {
+          id: { type: "string" },
+          role: { type: "string" },
+          status: { type: "string", enum: ["completed", "failed"] },
+          output: {
+            type: "object",
+            required: ["findings"],
+            properties: {
+              findings: { type: "array" },
+            },
+          },
+        },
+      },
+    },
+    aggregation: {
+      type: "object",
+      required: ["dimensions", "summary"],
+      properties: {
+        dimensions: { type: "array" },
+        summary: { type: "string" },
+      },
+    },
+  },
+};
+
 // ── 3.2 Execution Receipt ────────────────────────────────────────────────────
 
 /**
@@ -248,13 +289,40 @@ export function runAggregationValidation(
   };
 
   if (!receipt || typeof receipt !== "object") {
-    risk.reasons.push("Execution receipt is missing or not a valid object");
+    risk.reasons.push(
+      "Execution receipt is missing or not a valid object. " +
+      "Expected an object with protocol, execution, contexts, and aggregation fields. " +
+      "If you wrapped the receipt inside a 'result' or 'output' field, unwrap it so the receipt is the top-level value."
+    );
     return {
       protocol: "kevlar.blueprint/v1",
       status: "invalid",
       checks,
       risk,
     };
+  }
+
+  // Detect common wrapping mistakes
+  if (typeof receipt === "object" && !receipt.protocol && !receipt.execution && !receipt.contexts) {
+    if (receipt.result) {
+      risk.reasons.push(
+        "Receipt appears to be wrapped inside a 'result' field. " +
+        "The receipt object itself must directly contain protocol, execution, contexts, and aggregation — " +
+        "it should NOT be nested under a wrapper key."
+      );
+    }
+    if (receipt.output) {
+      risk.reasons.push(
+        "Receipt appears to be wrapped inside an 'output' field. " +
+        "The receipt object itself must directly contain protocol, execution, contexts, and aggregation."
+      );
+    }
+    if (!receipt.result && !receipt.output) {
+      risk.reasons.push(
+        "Receipt is missing all required top-level fields: protocol, execution, contexts, aggregation. " +
+        `Received keys: ${Object.keys(receipt).join(", ") || "(empty object)"}`
+      );
+    }
   }
 
   if (receipt.protocol !== "kevlar.blueprint/v1") {

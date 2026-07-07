@@ -1061,13 +1061,13 @@ describe("validateReceipt", () => {
     assert.ok(result.errors.some((e) => e.includes("字符串")));
   });
 
-  it("warns on unknown status value", () => {
+  it("errors on unknown status value", () => {
     const receipt = makeValidReceipt({
       contexts: [{ id: "a", status: "invalid_status", output: { findings: [] } }],
     });
     const result = validateReceipt(receipt);
-    assert.equal(result.valid, true);
-    assert.ok(result.warnings.some((w) => w.includes("未知的 status")));
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes("未知的 status")));
   });
 
   it("errors when aggregation is missing", () => {

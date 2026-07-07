@@ -2,7 +2,8 @@ import type { Persona } from "../utils/parser.js";
 import type { StrippedContent } from "../utils/stripContext.js";
 import type { PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
-import { sanitizeStep0Results, sanitizeStep0ResultsGlobal } from "../utils/sanitizeStep0Results.js";
+import { sanitizeStep0Results, sanitizeStep0ResultsGlobal, filterStep0Fields } from "../utils/sanitizeStep0Results.js";
+import { DIMENSION_FIELD_ACCESS } from "../execution/dimensions.js";
 
 // ── Step 0 output types ──────────────────────────────────────────────────────
 
@@ -830,8 +831,13 @@ export function buildIsolatedSystemAuditorMessage(
 
   // Pre-computed Step 0 result injected as facts (Turn 1 output)
   // Sanitized for HIGH-risk dimensions to avoid triggering LLM safety filters.
+  // Then trimmed per-dimension to reduce instruction length (S4).
   const safeStep0 = step0Result
-    ? sanitizeStep0Results(step0Result, auditor.meta.id).step0Result
+    ? filterStep0Fields(
+        sanitizeStep0Results(step0Result, auditor.meta.id).step0Result,
+        DIMENSION_FIELD_ACCESS[auditor.meta.id] ??
+          { wildTranslations: "all", blackAtoms: "all", attackCandidates: "all", precedents: "all" },
+      )
     : null;
 
   const step0Section = safeStep0
@@ -933,7 +939,12 @@ export function buildIsolatedSystemAuditorMessage(
     `3. 确认最终发现列表中没有包含任何修改建议或文案优化意见。`,
     ``,
     `### Step 3：最终 JSON 输出`,
-    `请输出以下格式的纯 JSON，不包含 Markdown 标记或额外解释：`,
+    `请输出以下格式的纯 JSON，不包含 Markdown 标记、代码块包裹、表格或任何额外解释：`,
+    ``,
+    `⚠️ 【硬性约束】只输出原始 JSON——不要包裹在 \`\`\`json \`\`\` 或 \`\`\` \`\`\` 代码块中，`,
+    `不要添加 Markdown 表格、列表、标题或任何非 JSON 的前言/后记文字。`,
+    `如果输出中包含任何非 JSON 字符（包括代码块包裹），系统将无法解析你的 findings，`,
+    `该维度的审计结果将被标记为 degraded 并丢失。`,
     ``,
     JSON.stringify(
       {
@@ -957,7 +968,7 @@ export function buildIsolatedSystemAuditorMessage(
     `- suggestedLevel 只能使用 🔴 或 🟡`,
     `- 只要 Step 0 attackCandidates 或当前沙盒能推演出完整攻击链，必须进入 findings`,
     ``,
-    `请严格执行以上流程并输出 JSON：`,
+    `请严格执行以上流程，只输出 JSON：`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1094,16 +1105,18 @@ export function buildSubagentDispatchPrompt(params: {
     ``,
     `## 每个 Subagent 的输出格式`,
     ``,
-    `每个 subagent 必须返回以下 JSON 格式的结果：`,
+    `每个 subagent 必须返回以下格式的纯 JSON（无 Markdown、无代码块包裹、无额外文字）：`,
     ``,
-    `\`\`\`json`,
     `{`,
     `  "id": "legal_compliance",  // 维度 ID`,
     `  "name": "合规哨兵",`,
     `  "findings": [],  // 该维度的发现列表`,
     `  "level": "🟢"  // 🟢/🟡/🔴`,
     `}`,
-    `\`\`\``,
+    ``,
+    `⚠️ 重要：如果某个 subagent 返回了非 JSON 内容（如 Markdown 表格、文本摘要、代码块包裹等），`,
+    `你必须自行将其转换为 JSON 格式（将其分析摘要放入 findings[].riskDescription 字段），`,
+    `而不是原样塞入 receipt 的 output 字段。非 JSON 的 output 会被系统拒绝。`,
     ``,
     `## 结果聚合`,
     ``,
@@ -1114,7 +1127,7 @@ export function buildSubagentDispatchPrompt(params: {
     `注意：除了 dimensions、attackChainAnalysis 和 worstCaseNarrative 外，其余字段均为可选字段，如果不可用则设为 null 或省略。`,
     `特别注意：【attackChainAnalysis】和【worstCaseNarrative】是必须由你（宿主AI）在这里汇总填写的字段，不要留空！`,
     ``,
-    `重要：请直接返回 JSON，不要包含 Markdown 代码块标记（\`\`\`json）或解释文字。`,
+    `重要：最终输出必须为纯 JSON，不包含 Markdown 代码块标记（\`\`\`json）或解释文字。`,
     ``,
     `## 重要提示`,
     ``,

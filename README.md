@@ -483,6 +483,7 @@ kevlar-4u/
 │   │   ├── strategyBundle.ts              # Pro: bundle signature & verification
 │   │   ├── bundleStrategyProvider.ts      # Pro: server-backed strategy provider
 │   │   ├── proRuntime.ts                  # Pro: runtime loader (DynamicImport / Mock)
+│   │   ├── progress.ts                    # Session progress metadata & delta comparison
 │   │   ├── reviewSteps.ts                 # Pro: step type system & execution
 │   │   ├── protocol.ts                    # ExecutionBlueprint, ContinuationSpec, context slot metadata, receipt validation
 │   │   └── modes/
@@ -519,12 +520,14 @@ kevlar-4u/
 │   │   ├── index.ts                       # DAO entry point
 │   │   └── types.ts                       # Rule data types
 │   ├── prompts/
+│   │   ├── reviewWizard.ts                # Orchestration & subagent prompt builders (step 0, audit, dispatch, fallback)
 │   │   └── reviewDispatcherPrompt.ts      # Internal design reference
 │   └── utils/
 │       ├── errors.ts                      # Error codes & formatting
 │       ├── logger.ts                      # Structured logging
 │       ├── parser.ts                      # Multi-file JSON persona parsing & writing
 │       ├── sanitize.ts                    # Credential scanning, prompt boundary handling
+│       ├── sanitizeStep0Results.ts        # LLM safety filter sanitization (wild translations, black atoms, attack candidates, web context)
 │       └── ...
 └── package.json
 ```

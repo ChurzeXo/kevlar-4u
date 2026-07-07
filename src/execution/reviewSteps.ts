@@ -198,6 +198,92 @@ export function getFindingsLevel(findings: any[]): string {
   return level;
 }
 
+/**
+ * Level priority for dedup: 🔴 > 🟡 > 🟢 > undefined
+ */
+function levelPriority(level?: string): number {
+  if (level === "🔴") return 3;
+  if (level === "🟡") return 2;
+  if (level === "🟢") return 1;
+  return 0;
+}
+
+/**
+ * Deduplicate findings across dimensions:
+ * When the same keyword appears in ≥2 dimensions, keep only the one with the
+ * highest risk level. The retained finding gets a cross-dimension annotation.
+ * Others are removed from their source dimension.
+ */
+export function deduplicateDimensionFindings(
+  dimensions: PreAuditDimensionResult[],
+): PreAuditDimensionResult[] {
+  // Collect all findings with their dimension context
+  const keywordGroups = new Map<string, Array<{ dimIdx: number; finding: any; level: string }>>();
+
+  for (let dimIdx = 0; dimIdx < dimensions.length; dimIdx++) {
+    const dim = dimensions[dimIdx];
+    if (!dim.findings) continue;
+    for (const finding of dim.findings) {
+      const keyword = (finding.keyword || "").toLowerCase().trim();
+      if (!keyword) continue;
+      if (!keywordGroups.has(keyword)) {
+        keywordGroups.set(keyword, []);
+      }
+      keywordGroups.get(keyword)!.push({
+        dimIdx,
+        finding,
+        level: finding.suggestedLevel || "🟢",
+      });
+    }
+  }
+
+  // Only process keywords appearing in ≥2 dimensions
+  const duplicateKeywords = new Map(
+    Array.from(keywordGroups.entries()).filter(([, group]) => {
+      const uniqueDims = new Set(group.map((g) => g.dimIdx));
+      return uniqueDims.size >= 2;
+    }),
+  );
+
+  if (duplicateKeywords.size === 0) return dimensions;
+
+  // Deep clone
+  const result: PreAuditDimensionResult[] = dimensions.map((d) => ({
+    ...d,
+    findings: [...(d.findings || [])],
+  }));
+
+  for (const [, group] of duplicateKeywords) {
+    // Sort by level priority descending, pick highest
+    group.sort((a, b) => levelPriority(b.level) - levelPriority(a.level));
+    const keeper = group[0];
+    const others = group.slice(1);
+
+    // Add cross-dimension note to keeper
+    const otherDims = others.map((o) => result[o.dimIdx]?.name || result[o.dimIdx]?.id || `#${o.dimIdx}`);
+    keeper.finding.trigger =
+      (keeper.finding.trigger || "") +
+      `（此风险点在 ${otherDims.join("、")} 维度也得到确认，此处保留最高等级）`;
+
+    // Remove duplicates from other dimensions
+    for (const other of others) {
+      const otherDim = result[other.dimIdx];
+      if (!otherDim) continue;
+      const idx = otherDim.findings.indexOf(other.finding);
+      if (idx !== -1) {
+        otherDim.findings.splice(idx, 1);
+      }
+    }
+  }
+
+  // Recalculate levels after removal
+  for (const dim of result) {
+    dim.level = getFindingsLevel(dim.findings);
+  }
+
+  return result;
+}
+
 function normalizeFinding(finding: Record<string, unknown>): Record<string, unknown> {
   const normalized: Record<string, unknown> = { ...finding };
   const suggestedLevel = String(finding.suggestedLevel || "").trim();
@@ -651,6 +737,8 @@ export async function finalizePreAuditReport(
 ): Promise<PreAuditReport> {
   const segs = prompts ?? loadPromptSegments("free");
   const fallbackDimensions = normalizePreAuditDimensions(crossValidatedResults, systemAuditors);
+  // Step 3a: code-level dedup — same keyword in ≥2 dimensions keeps highest level
+  const dedupedCrossValidatedResults = deduplicateDimensionFindings(crossValidatedResults);
   try {
     const response = await caller({
       systemPrompt: buildPreAuditFinalizerPrompt(systemAuditors, precedents, segs),
@@ -661,7 +749,7 @@ export async function finalizePreAuditReport(
             content,
             localFindings,
             mergedResults,
-            crossValidatedResults,
+            crossValidatedResults: dedupedCrossValidatedResults,
             synergy,
             deltaRisks,
           }),
