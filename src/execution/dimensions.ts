@@ -336,8 +336,15 @@ export const DEFAULT_DIMENSIONS_CONFIG: DimensionsConfig = {
 //   MEDIUM = may trigger (discrimination/hate speech analysis)
 //   LOW    = unlikely to trigger (legal/factual analysis)
 
-export const DIMENSION_SAFETY_RISK: Record<string, { risk: "HIGH" | "MEDIUM" | "LOW" }> = {
-	cross_lingual_distortion: { risk: "HIGH" },
+export interface SafetyRiskConfig {
+	risk: "HIGH" | "MEDIUM" | "LOW";
+	/** True → strip Step 0 results entirely for this dimension's subagent
+	 *  instead of sanitizing. Used when even sanitized data triggers filters. */
+	stripOnFallback?: boolean;
+}
+
+export const DIMENSION_SAFETY_RISK: Record<string, SafetyRiskConfig> = {
+	cross_lingual_distortion: { risk: "HIGH", stripOnFallback: true },
 	network_culture_risk:     { risk: "MEDIUM" },
 	social_risk_ethics:       { risk: "LOW" },
 	legal_compliance:         { risk: "LOW" },

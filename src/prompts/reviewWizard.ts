@@ -2,6 +2,7 @@ import type { Persona } from "../utils/parser.js";
 import type { StrippedContent } from "../utils/stripContext.js";
 import type { PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
+import { sanitizeStep0Results, sanitizeStep0ResultsGlobal } from "../utils/sanitizeStep0Results.js";
 
 // ── Step 0 output types ──────────────────────────────────────────────────────
 
@@ -557,11 +558,15 @@ export function buildOrchestrationAuditPrompt(
         preAuditContext.localFindings.length > 0 ? JSON.stringify(preAuditContext.localFindings, null, 2) : `[]`,
         ``,
         `### Pipeline Step 0b：LLM 全局解码结果（Turn 1 已完成）`,
-        preAuditContext.step0Result ? JSON.stringify(preAuditContext.step0Result, null, 2) : `{}`,
+        preAuditContext.step0Result
+          ? JSON.stringify(sanitizeStep0ResultsGlobal(preAuditContext.step0Result).step0Result, null, 2)
+          : `{}`,
         ``,
         `### 联网验证上下文（Turn 1 已完成）`,
         preAuditContext.webContextMap && Object.keys(preAuditContext.webContextMap).length > 0
-          ? Object.entries(preAuditContext.webContextMap)
+          ? Object.entries(
+              sanitizeStep0ResultsGlobal(preAuditContext.step0Result!, preAuditContext.webContextMap).webContextMap ?? {},
+            )
               .map(([kw, ctx]) => `#### 关键词「${kw}」的联网参考\n${ctx}`)
               .join("\n\n")
           : `（无联网验证结果）`,
@@ -824,7 +829,12 @@ export function buildIsolatedSystemAuditorMessage(
   const step0Result = options?.step0Result;
 
   // Pre-computed Step 0 result injected as facts (Turn 1 output)
-  const step0Section = step0Result
+  // Sanitized for HIGH-risk dimensions to avoid triggering LLM safety filters.
+  const safeStep0 = step0Result
+    ? sanitizeStep0Results(step0Result, auditor.meta.id).step0Result
+    : null;
+
+  const step0Section = safeStep0
     ? [
         `## 【全局解码结果（Turn 1 已完成，必须作为事实输入）】`,
         `以下是系统 Turn 1 已完成的全局逆向解码结果。你无需重新执行 Step 0，直接将 attackCandidates 作为当前沙盒的推理基础：`,
@@ -1042,10 +1052,10 @@ export function buildSubagentDispatchPrompt(params: {
     bareText,
     ``,
     `### Step 0 全局解码结果`,
-    JSON.stringify(step0Result, null, 2),
+    JSON.stringify(sanitizeStep0ResultsGlobal(step0Result).step0Result, null, 2),
     ``,
     `### 联网验证结果`,
-    JSON.stringify(webContextMap, null, 2),
+    JSON.stringify(sanitizeStep0ResultsGlobal(step0Result, webContextMap).webContextMap ?? {}, null, 2),
     ``,
     localFindings && localFindings.length > 0 ? [
       `### 规则引擎预警`,
