@@ -624,7 +624,7 @@ export function validateReceipt(receipt: any): ReceiptValidation {
       if (!agent.status) {
         errors.push(`${prefix}: 缺少必填字段 "status" (应为 "completed" 或 "failed")`);
       } else if (!["completed", "failed"].includes(agent.status)) {
-        warnings.push(`${prefix}: 未知的 status 值 "${agent.status}"（仅允许 "completed" / "failed"）`);
+        errors.push(`${prefix}: 未知的 status 值 "${agent.status}"（仅允许 "completed" / "failed"）`);
       }
       if (!agent.output) {
         errors.push(`${prefix}: 缺少必填字段 "output"`);

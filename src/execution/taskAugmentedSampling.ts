@@ -1,6 +1,7 @@
 import type { Persona } from "../utils/parser.js";
 import type { PreAuditDimensionResult } from "./reviewSteps.js";
 import { buildIsolatedSystemAuditorPrompt, buildIsolatedSystemAuditorMessage } from "../prompts/reviewWizard.js";
+import { clampInt } from "./limiter.js";
 import { log } from "../utils/logCategories.js";
 import { getErrorInfo } from "../utils/observability.js";
 import { internalError } from "../utils/errors.js";
@@ -37,9 +38,9 @@ export async function executeTaskAugmentedSampling(
   timingContext?: string,
   maxConcurrency: number = 6,
 ): Promise<PreAuditDimensionResult[]> {
-  const DEFAULT_POLL_MS = Math.max(200, Number(process.env.KEVLAR_TASK_POLL_MS) || 1000);
-  const TASK_TTL_MS = Math.max(60000, Number(process.env.KEVLAR_TASK_TTL_MS) || 300000);
-  const MAX_TOTAL_TIMEOUT_MS = Math.max(120000, Number(process.env.KEVLAR_TASK_TOTAL_TIMEOUT_MS) || 600000);
+  const DEFAULT_POLL_MS = clampInt("KEVLAR_TASK_POLL_MS", 1000, 200, 30000);
+  const TASK_TTL_MS = clampInt("KEVLAR_TASK_TTL_MS", 300000, 60000, 3600000);
+  const MAX_TOTAL_TIMEOUT_MS = clampInt("KEVLAR_TASK_TOTAL_TIMEOUT_MS", 600000, 120000, 7200000);
 
   log.sampling.info("Starting task-augmented sampling", {
     event: "task_augmented_sampling_start",

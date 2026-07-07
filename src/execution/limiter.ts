@@ -8,7 +8,7 @@ import { logger, getErrorInfo } from "../utils/observability.js";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-function clampInt(envKey: string, fallback: number, min: number, max: number): number {
+export function clampInt(envKey: string, fallback: number, min: number, max: number): number {
   const raw = Number(process.env[envKey]);
   if (isNaN(raw)) return fallback;
   return Math.max(min, Math.min(max, raw));
@@ -21,7 +21,7 @@ interface RateLimitConfig {
 
 const DEFAULT_CONFIG: RateLimitConfig = {
   maxConcurrent: clampInt("KEVLAR_MAX_CONCURRENT", 3, 1, 10),
-  minDelayMs: Math.max(0, Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000),
+  minDelayMs: clampInt("KEVLAR_MIN_DELAY_MS", 1000, 0, 30000),
 };
 
 // ── Semaphore ─────────────────────────────────────────────────────────────────

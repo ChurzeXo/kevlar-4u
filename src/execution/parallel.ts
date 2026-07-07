@@ -11,7 +11,7 @@ import type { DimensionsConfig } from "./dimensions.js";
 import { DEFAULT_DIMENSIONS_CONFIG, buildDefensiveSystemDirective, buildOffensiveSystemDirective, buildPersonaContextDirective, buildToneDirective, buildReviewUserMessage, RST_ARCHETYPES, RST_TRIGGERS, RST_REGIONAL_PACKS, RST_PLATFORM_CULTURES } from "./dimensions.js";
 import { transformFindingsToFocusTopics, formatFocusTopicsForPrompt } from "./focusTopicTransform.js";
 import { readConfig } from "./config.js";
-import { getRateLimiter, withRetry } from "./limiter.js";
+import { getRateLimiter, withRetry, clampInt } from "./limiter.js";
 import { ResultAggregator, checkBudget, generateAggregatedReport } from "./aggregator.js";
 import { logger } from "../utils/logger.js";
 import { getErrorInfo } from "../utils/observability.js";
@@ -38,7 +38,7 @@ export async function executePersonasInParallel(
 
   const limiter = getRateLimiter({
     maxConcurrent: config.multiAgent.maxConcurrency,
-    minDelayMs: Number(process.env.KEVLAR_MIN_DELAY_MS) || 1000,
+    minDelayMs: clampInt("KEVLAR_MIN_DELAY_MS", 1000, 0, 30000),
   });
 
   const aggregator = new ResultAggregator();
