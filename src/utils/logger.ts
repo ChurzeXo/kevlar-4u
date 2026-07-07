@@ -1,5 +1,3 @@
-import fs from "fs";
-
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface LogContext {
@@ -14,28 +12,8 @@ interface Logger {
   error(msg: string, ctx?: LogContext): void;
 }
 
-let _ttyFd: number | null | undefined;
-
-function getTtyFd(): number | null {
-  if (_ttyFd !== undefined) return _ttyFd;
-  try {
-    _ttyFd = fs.openSync("/dev/tty", "w");
-  } catch {
-    _ttyFd = null;
-  }
-  return _ttyFd;
-}
-
 function writeLog(line: string): void {
   process.stderr.write(line + "\n");
-  const ttyFd = getTtyFd();
-  if (ttyFd !== null) {
-    try {
-      fs.writeSync(ttyFd, line + "\n");
-    } catch {
-      _ttyFd = null;
-    }
-  }
 }
 
 function createLogger(): Logger {
