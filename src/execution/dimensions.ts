@@ -325,6 +325,26 @@ export const DEFAULT_DIMENSIONS_CONFIG: DimensionsConfig = {
 	offensive: [...OFFENSIVE_DIMENSION_IDS],
 };
 
+// ── Dimension-level LLM safety filter risk assessment ───────────────────────
+// Some LLM providers enforce content safety policies that may reject subagent
+// prompts containing explicit descriptions of internet slang / vulgar content.
+// This table is used to:
+//   1. Pre-warn Host AI in the blueprint dispatch text
+//   2. Sanitize Step 0 results before injecting into HIGH-risk subagent contexts
+//
+//   HIGH   = likely to trigger (explicit sexual/vulgar analysis required)
+//   MEDIUM = may trigger (discrimination/hate speech analysis)
+//   LOW    = unlikely to trigger (legal/factual analysis)
+
+export const DIMENSION_SAFETY_RISK: Record<string, { risk: "HIGH" | "MEDIUM" | "LOW" }> = {
+	cross_lingual_distortion: { risk: "HIGH" },
+	network_culture_risk:     { risk: "MEDIUM" },
+	social_risk_ethics:       { risk: "LOW" },
+	legal_compliance:         { risk: "LOW" },
+	context_distortion:       { risk: "LOW" },
+	factual_integrity:        { risk: "LOW" },
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Get all active dimension IDs (always includes defensive + configured offensive) */

@@ -15,6 +15,7 @@ import {
   buildToneDirective,
   buildReviewUserMessage,
   DIMENSIONS,
+  DIMENSION_SAFETY_RISK,
 } from "../execution/dimensions.js";
 import { recommendRSTPersonas } from "../execution/rstRecommender.js";
 import { logger, getErrorInfo } from "../utils/observability.js";
@@ -950,6 +951,17 @@ function renderBlueprintDispatchText(
     "**Falsifying context results will corrupt the audit output** and may cause",
     "Kevlar to produce incorrect risk assessments. Always report truthfully.",
     "",
+    "### ⚠️ LLM 安全过滤器 — 已知触发风险",
+    "某些审计维度（如 cross_lingual_distortion）的分析可能涉及",
+    "非标准网络用语，容易触发 LLM 预扫描安全过滤器，导致子智能体",
+    "返回空白结果或被拒绝执行。",
+    "",
+    "你**仍应按调度执行所有上下文**，但如果某个上下文返回",
+    `\`status: "failed"\` 或空 findings，如实记录并继续聚合。`,
+    "Kevlar 会通过日志标记此类降级事件。",
+    "",
+    "受影响的维度已在各自上下文 instructions 中标记安全处理提示。",
+    "",
     "---",
     // ── §5: Receipt schema ──────────────────────────────────────────
     "### ExecutionReceipt Structure (kevlar.blueprint/v1)",
@@ -1201,6 +1213,99 @@ function guessLevelFromFindings(findings: any[]): string | undefined {
   return undefined;
 }
 
+// ── Step 0 result sanitization for LLM safety filter compliance ────────────
+// Some LLM providers reject prompts containing explicit sexual/vulgar terms
+// during pre-tokenize scanning. These functions replace sensitive descriptions
+// with academic euphemisms before injection into HIGH-risk subagent contexts.
+
+const EXPLICIT_PATTERNS = [
+  /\b性\s*行\s*为\b/, /\b性\s*暗\s*示\b/, /\b性\s*关\s*系\b/, /\b性\s*骚\s*扰\b/,
+  /\b性\s*交\b/, /\b性\s*爱\b/, /\b性\s*感\b/, /\b色\s*情\b/, /\b低\s*俗\b/,
+  /\b淫\s*秽\b/, /\b卖\s*淫\b/, /\b嫖\b/, /\b约\s*炮\b/, /\b上\s*床\b/,
+  /\b开\s*房\b/, /\b处\s*女\b/, /\b鸡\b(?![A-Za-z])/, /\b鸭\b(?![A-Za-z])/,
+  /\b生\s*殖\s*器\b/, /\b阴\s*茎\b/, /\b阴\s*道\b/, /\b乳\s*房\b/,
+  /\bfuck\b/i, /\bshit\b/i, /\bdick\b/i, /\bcock\b/i, /\bcunt\b/i,
+  /\bwhore\b/i, /\bslut\b/i, /\bporn\b/i, /\bsex\b/i, /\berotic\b/i,
+  /\bvulgar\b/i, /\bobscene\b/i,
+  // Conservative additions: catch variations with non-ASCII chars
+  /性行[为爲]/, /性暗[示⽰]/, /色情/, /低俗/, /淫[秽穢]/, /卖[淫婬]/,
+  /[嫖闝]/, /[约約][炮砲]/, /上床/, /开[房房]/, /处女/,
+  /生[殖植]器/, /[阴陰][茎莖]/, /[阴陰][道導]/, /[乳r][房房]/
+];
+
+function isLikelyExplicit(text: string): boolean {
+  return EXPLICIT_PATTERNS.some((re) => re.test(text));
+}
+
+function sanitizeText(text: string): string {
+  if (!isLikelyExplicit(text)) return text;
+  return "(语义已去敏) 非标准网络用法 — 需 Host 兜底解码";
+}
+
+/**
+ * Deep-clone and sanitize Step 0 results for HIGH-risk subagent contexts.
+ *
+ * Replaces explicit descriptions (sexual/vulgar slang) with academic labels
+ * so the subagent can still do its YES/NO classification without triggering
+ * the LLM's content safety filter. The original unsanitized data remains
+ * available for Host AI fallback in its own context.
+ */
+function sanitizeStep0Results(
+  step0Result: Step0Result,
+  auditorId: string,
+  webContextMap?: Record<string, string>,
+): { step0Result: Step0Result; webContextMap?: Record<string, string> } {
+  const riskLevel = DIMENSION_SAFETY_RISK[auditorId]?.risk;
+  if (riskLevel !== "HIGH") {
+    return { step0Result, webContextMap };
+  }
+
+  const sanitized: Step0Result = JSON.parse(JSON.stringify(step0Result));
+  let sanitizedWeb: Record<string, string> | undefined;
+
+  // Sanitize wildTranslations — replace explicit wild translations with labels
+  if (sanitized.wildTranslations) {
+    for (const wt of sanitized.wildTranslations) {
+      if (isLikelyExplicit(wt.wildTranslation)) {
+        wt.wildTranslation = sanitizeText(wt.wildTranslation);
+      }
+    }
+  }
+
+  // Sanitize blackAtoms — replace explicit atom descriptions
+  if (sanitized.blackAtoms) {
+    sanitized.blackAtoms = sanitized.blackAtoms.map((atom) =>
+      isLikelyExplicit(atom) ? sanitizeText(atom) : atom,
+    );
+  }
+
+  // Sanitize attackCandidates — explicit keywords and attack chains
+  if (sanitized.attackCandidates) {
+    for (const ac of sanitized.attackCandidates) {
+      if (isLikelyExplicit(ac.keyword)) {
+        ac.keyword = sanitizeText(ac.keyword);
+      }
+      if (isLikelyExplicit(ac.attackChain)) {
+        ac.attackChain = sanitizeText(ac.attackChain);
+      }
+    }
+  }
+
+  // Sanitize web context map entries for explicit keywords
+  if (webContextMap && Object.keys(webContextMap).length > 0) {
+    sanitizedWeb = {};
+    for (const [keyword, ctx] of Object.entries(webContextMap)) {
+      const sanitizedKeyword = isLikelyExplicit(keyword) ? sanitizeText(keyword) : keyword;
+      const sanitizedCtx = isLikelyExplicit(ctx)
+        ? "(搜索内容已去敏) 搜索结果涉及非标准网络用法上下文，相关细节需在 Host 安全上下文中解码。"
+        : ctx;
+      sanitizedWeb[sanitizedKeyword] = sanitizedCtx;
+    }
+  }
+
+  return { step0Result: sanitized, webContextMap: sanitizedWeb ?? webContextMap };
+}
+
 /**
  * Build fully self-contained instructions for a single system auditor subagent.
  *
@@ -1249,46 +1354,74 @@ function buildIsolatedContextInstructions(
   // from pure reasoning alone. This includes: wild translations,
   // black atoms, attack candidates, and web search context from
   // the host AI's own web search tools.
+  //
+  // For HIGH-risk dimensions (those whose audit may trigger LLM safety
+  // filters), Step 0 results are sanitized — explicit descriptions of
+  // sexual/vulgar slang are replaced with academic euphemisms — so the
+  // subagent can still classify risk without triggering content filters.
   if (step0Result) {
+    // ── Safety wrapper for HIGH-risk auditors ──────────────────────
+    // Some LLMs enforce pre-tokenize content scanning that may reject
+    // prompts containing explicit terms. This wrapper frames the task
+    // as legitimate security research and instructs euphemistic output.
+    const auditorRisk = DIMENSION_SAFETY_RISK[auditor.meta.id]?.risk;
+    if (auditorRisk === "HIGH" || auditorRisk === "MEDIUM") {
+      const riskLabel = auditorRisk === "HIGH" ? "⚠️ 安全策略注意" : "ℹ️ 内容合规提示";
+      parts.push("---");
+      parts.push(`### ${riskLabel}`);
+      parts.push("以下部分包含前置步骤对文案的网络黑话分析结果，可能涉及非标准网络用语。");
+      parts.push("你的任务是基于这些事实锚点判断风险等级，");
+      parts.push("**不需要复述、扩散或讨论具体的不当内容**。");
+      parts.push("如果某个分析方向涉及敏感内容，在输出中使用委婉的学术化表述");
+      parts.push("（如「非标准网络用法」「特定圈层隐语」「非正式语义扩展」等），");
+      parts.push("避免直接引用不当词汇。");
+      parts.push("");
+    }
+
+    // Apply sanitization for HIGH-risk auditors
+    const safe = sanitizeStep0Results(step0Result, auditor.meta.id, webContextMap);
+    const safeStep0 = safe.step0Result;
+    const safeWeb = safe.webContextMap;
+
     parts.push("## 【Step 0b 全局解码结果（职业黑粉逆向分析 + 联网搜索已完成）】");
     parts.push("以下结果是前置步骤中 Host AI 对本文案执行的全局逆向解码和联网验证。");
     parts.push("请将这些结果作为当前维度审计的**事实锚点**（而非凭空推理）：");
     parts.push("");
 
-    if (step0Result.blackAtoms.length > 0) {
+    if (safeStep0.blackAtoms.length > 0) {
       parts.push("### 黑料原子（已提取的武器化片段）");
       parts.push("Host AI 从原文中提取的能被「恶意武器化」的片段：");
-      parts.push(JSON.stringify(step0Result.blackAtoms, null, 2));
+      parts.push(JSON.stringify(safeStep0.blackAtoms, null, 2));
       parts.push("");
     }
 
-    if (step0Result.attackCandidates.length > 0) {
+    if (safeStep0.attackCandidates.length > 0) {
       parts.push("### 攻击候选（可推演的完整攻击链）");
       parts.push("Host AI 对每个黑料原子推演的攻击传播路径：");
-      parts.push(JSON.stringify(step0Result.attackCandidates, null, 2));
+      parts.push(JSON.stringify(safeStep0.attackCandidates, null, 2));
       parts.push("");
     }
 
-    if (step0Result.wildTranslations.length > 0) {
+    if (safeStep0.wildTranslations.length > 0) {
       parts.push("### 野生翻译（外文词组的恶意谐音/歧义翻译）");
-      parts.push(JSON.stringify(step0Result.wildTranslations, null, 2));
+      parts.push(JSON.stringify(safeStep0.wildTranslations, null, 2));
       parts.push("");
     }
-  }
 
-  if (webContextMap && Object.keys(webContextMap).length > 0) {
-    parts.push("### 联网搜索验证结果");
-    parts.push("Host AI 针对黑料原子关键词执行了联网搜索，以下为搜索结果参考：");
-    parts.push("");
-    for (const [keyword, context] of Object.entries(webContextMap)) {
-      if (context.length > 3000) {
-        parts.push(`🔍 搜索 "${keyword}" 结果摘要：${context.slice(0, 3000)}...（截断）`);
-      } else {
-        parts.push(`🔍 搜索 "${keyword}"：${context}`);
+    if (safeWeb && Object.keys(safeWeb).length > 0) {
+      parts.push("### 联网搜索验证结果");
+      parts.push("Host AI 针对黑料原子关键词执行了联网搜索，以下为搜索结果参考：");
+      parts.push("");
+      for (const [keyword, context] of Object.entries(safeWeb)) {
+        if (context.length > 3000) {
+          parts.push(`🔍 搜索 "${keyword}" 结果摘要：${context.slice(0, 3000)}...（截断）`);
+        } else {
+          parts.push(`🔍 搜索 "${keyword}"：${context}`);
+        }
+        parts.push("");
       }
       parts.push("");
     }
-    parts.push("");
   }
 
   // ── 5. Content to audit ───────────────────────────────────────────
@@ -1727,6 +1860,30 @@ async function handleContextAuditResult(
       "format_verified",
       "kevlar_result_schema_matched",
     );
+
+    // ── Degraded agent detection: log failed / empty contexts ────────────
+    // When subagents trigger LLM safety filters, they may return with
+    // status: "failed", empty findings, or refusal-like messages. Log
+    // these events for debugging and telemetry.
+    if (parsed.contexts && Array.isArray(parsed.contexts)) {
+      for (const ctx of parsed.contexts) {
+        const isFailed = ctx.status === "failed";
+        const isEmpty = ctx.status === "completed" && (!ctx.output?.findings || ctx.output.findings.length === 0);
+        const rawText = typeof ctx.output === "string" ? ctx.output
+          : ctx.output?.rawText || ctx.output?.error || "";
+
+        if (isFailed || (isEmpty && rawText.length > 0)) {
+          logger.warn("Subagent returned degraded result", {
+            event: "subagent_degraded_result",
+            contextId: ctx.id,
+            status: ctx.status,
+            refusalMessage: rawText.slice(0, 500),
+            hostFallbackEnabled: false,
+            sessionId: state.sessionId,
+          });
+        }
+      }
+    }
 
     const localFindings = state.orchestrationPreAuditContext?.localFindings ?? [];
     const content = state.content;
