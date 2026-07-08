@@ -329,7 +329,7 @@ const text = textOf(started);
     // Turn 1: first call → returns waitingForOrchestrationStep0 with Step 0 prompt
     const started = await startWizardWithRegion("盒马菌菇星球，贵妇粉耳，颜值粉嫩");
 const text = textOf(started);
-    assert.ok(text.includes("[SYSTEM PROTOCOL] 职业黑粉逆向解码协议"));
+    assert.ok(text.includes("[SYSTEM PROTOCOL] 风险模拟逆向解码协议"));
     assert.ok(text.includes("待测文案"));
     assert.ok(text.includes("currentStep: waitingForOrchestrationStep0"));
 
@@ -423,7 +423,7 @@ const text = textOf(started);
     assert.equal(calls.length, 0);
     const responseText = result.content[0]?.text || "";
     // Should contain Step 0 instructions + web search + precedents requirements
-    assert.ok(responseText.includes("职业黑粉逆向解码"));
+    assert.ok(responseText.includes("风险模拟逆向解码"));
     assert.ok(responseText.includes("类似事件先例检索"));
     // State should be waitingForOrchestrationStep0
     assert.ok(responseText.includes("waitingForOrchestrationStep0"));

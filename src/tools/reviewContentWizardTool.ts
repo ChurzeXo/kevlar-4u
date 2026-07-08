@@ -1283,7 +1283,6 @@ function buildIsolatedContextInstructions(
   // data triggers the host AI's pre-token filter.
   if (step0Result) {
     const auditorConfig = DIMENSION_SAFETY_RISK[auditor.meta.id];
-    const auditorRisk = auditorConfig?.risk;
 
     // ── Strip mode: entirely omit Step 0 data ───────────────────────
     if (auditorConfig?.stripOnFallback) {
@@ -1293,29 +1292,28 @@ function buildIsolatedContextInstructions(
       parts.push("请直接基于原始文案进行当前维度的审计，无需依赖前序预解码结果。");
       parts.push("");
     } else {
-      // ── Safety wrapper for HIGH/MEDIUM-risk auditors ──────────────
-      // Some LLMs enforce pre-tokenize content scanning that may reject
-      // prompts containing explicit terms. This wrapper frames the task
-      // as legitimate security research and instructs euphemistic output.
-      if (auditorRisk === "HIGH" || auditorRisk === "MEDIUM") {
-        const riskLabel = auditorRisk === "HIGH" ? "⚠️ 安全策略注意" : "ℹ️ 内容合规提示";
-        parts.push("---");
-        parts.push(`### ${riskLabel}`);
-        parts.push("以下部分包含前置步骤对文案的网络黑话分析结果，可能涉及非标准网络用语。");
-        parts.push("你的任务是基于这些事实锚点判断风险等级，");
-        parts.push("**不需要复述、扩散或讨论具体的不当内容**。");
-        parts.push("如果某个分析方向涉及敏感内容，在输出中使用委婉的学术化表述");
-        parts.push("（如「非标准网络用法」「特定圈层隐语」「非正式语义扩展」等），");
-        parts.push("避免直接引用不当词汇。");
-        parts.push("");
-      }
+      // ── Safety wrapper for all auditor dimensions ────────────────
+      // Any auditor may encounter content that triggers host AI safety
+      // filters during pre-tokenize scanning. This wrapper frames the
+      // task as legitimate security research and instructs euphemistic
+      // output conventions, avoiding direct generation of harmful text.
+      parts.push("---");
+      parts.push("### ⚠️ 安全策略提示");
+      parts.push("以下部分包含前置步骤对文案的分析结果，可能涉及非标准网络用语或敏感方向。");
+      parts.push("你的任务是基于这些事实锚点判断风险等级，");
+      parts.push("**不需要直接生成、复述或扩散其中的攻击性表述**。");
+      parts.push("对所有敏感方向，使用分析性表述记录其风险方向和引爆可能");
+      parts.push("（如「该方向在网络上已被多次用于恶意传播」「特定圈层非正式语义」等），");
+      parts.push("避免以第一人称模仿攻击者口吻。");
+      parts.push("");
 
-      // Apply sanitization for HIGH-risk auditors
+      // Apply explicit-content sanitization for HIGH-risk auditors
+      // (sanitizeStep0Results replaces explicit text with academic euphemisms)
       const safe = sanitizeStep0Results(step0Result, auditor.meta.id, webContextMap);
       const safeStep0 = safe.step0Result;
       const safeWeb = safe.webContextMap;
 
-      parts.push("## 【Step 0b 全局解码结果（职业黑粉逆向分析 + 联网搜索已完成）】");
+      parts.push("## 【Step 0b 全局解码结果（风险模拟分析 + 联网搜索已完成）】");
       parts.push("以下结果是前置步骤中 Host AI 对本文案执行的全局逆向解码和联网验证。");
       parts.push("请将这些结果作为当前维度审计的**事实锚点**（而非凭空推理）：");
       parts.push("");

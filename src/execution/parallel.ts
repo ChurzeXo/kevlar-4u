@@ -155,7 +155,7 @@ export function augmentSystemPrompt(
   const dimsConfig = dimensions ?? DEFAULT_DIMENSIONS_CONFIG;
   const parts: string[] = [];
 
-  // ① Core reasoning framework (职业黑粉/最恶毒评论区模拟模式) - semantic baseline
+  // ① Core reasoning framework (攻防风险模拟模式) - semantic baseline
   parts.push(buildCoreReasoningFramework());
 
   // ①.5 Common risk rules (semantic baseline)

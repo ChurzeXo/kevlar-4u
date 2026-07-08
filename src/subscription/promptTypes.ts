@@ -26,7 +26,7 @@ export interface PromptSegments {
   /** Free-tier upgrade hint shown during persona selection (early stage) */
   freeTierUpgradeHint: string;
 
-  /** Core reasoning framework: 职业黑粉 identity (buildCoreReasoningFramework) */
+  /** Core reasoning framework: 攻防风险模拟分析角色 (buildCoreReasoningFramework) */
   coreReasoningFramework: string;
   /** Cold-read protocol steps (buildCoreFrameworkSteps) */
   coreFrameworkSteps: string;
