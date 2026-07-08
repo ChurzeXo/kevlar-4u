@@ -1319,15 +1319,15 @@ function buildIsolatedContextInstructions(
       parts.push("");
 
       if (safeStep0.blackAtoms.length > 0) {
-        parts.push("### 黑料原子（已提取的武器化片段）");
-        parts.push("Host AI 从原文中提取的能被「恶意武器化」的片段：");
+        parts.push("### 风险原子（已提取的高危片段）");
+        parts.push("Host AI 从原文中提取的存在传播风险的高危片段：");
         parts.push(JSON.stringify(safeStep0.blackAtoms, null, 2));
         parts.push("");
       }
 
       if (safeStep0.attackCandidates.length > 0) {
         parts.push("### 攻击候选（可推演的完整攻击链）");
-        parts.push("Host AI 对每个黑料原子推演的攻击传播路径：");
+        parts.push("Host AI 对每个风险原子推演的攻击传播路径：");
         parts.push(JSON.stringify(safeStep0.attackCandidates, null, 2));
         parts.push("");
       }
@@ -1340,7 +1340,7 @@ function buildIsolatedContextInstructions(
 
       if (safeWeb && Object.keys(safeWeb).length > 0) {
         parts.push("### 联网搜索验证结果");
-        parts.push("Host AI 针对黑料原子关键词执行了联网搜索，以下为搜索结果参考：");
+        parts.push("Host AI 针对风险原子关键词执行了联网搜索，以下为搜索结果参考：");
         parts.push("");
         for (const [keyword, context] of Object.entries(safeWeb)) {
           if (context.length > 3000) {
@@ -1381,8 +1381,8 @@ function buildIsolatedContextInstructions(
   parts.push("");
   parts.push("### Step 1：当前维度沙盒推理");
   parts.push(`从 **${auditor.meta.name}** 的专业角度，对上述内容进行独立风险分析。`);
-  parts.push("你必须假设这段内容遭遇了最恶劣的网络环境、最恶意的断章取义和带节奏。");
-  parts.push("只要存在被恶意曲解的空间，即视为实质性风险。");
+  parts.push("你必须假设这段内容处于最不利的传播环境，被断章取义和情绪化解读。");
+  parts.push("只要存在被曲解或误读的空间，即视为实质性风险。");
   parts.push("");
   parts.push("### Step 2：单沙盒仲裁与噪音过滤");
   parts.push("1. 逐一审查 Step 1 的发现，标记哪些属于过度联想（Noise）。");

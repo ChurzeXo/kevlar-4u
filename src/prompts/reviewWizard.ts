@@ -24,7 +24,7 @@ export interface Precedent {
 
 export interface Step0Result {
   wildTranslations: WildTranslation[]; // 外语提取与野生翻译
-  blackAtoms: string[]; // 局部截取的黑料原子关键词
+  blackAtoms: string[]; // 局部截取的风险原子关键词
   attackCandidates: Step0Finding[]; // 情绪重构后的攻击点（含攻击链）
   precedents?: Precedent[]; // 类似舆情事件先例
 }
@@ -365,7 +365,7 @@ export function buildGlobalStep0Prompt(prompts?: PromptSegments): string {
   const schema = JSON.stringify(
     {
       wildTranslations: [{ original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }],
-      blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
+      blackAtoms: ["风险原子关键词1", "风险原子关键词2"],
       attackCandidates: [
         {
           keyword: "触发词或短语",
@@ -406,7 +406,7 @@ export function buildOrchestrationStep0Prompt(
       ? [
           `## 【代码预处理结果（必须作为事实输入）】`,
           ``,
-          `以下是 Kevlar 规则引擎已完成的确定性匹配结果，你执行 Step 0 时必须将这些关键词视为已知黑料原子，直接纳入 blackAtoms。`,
+          `以下是 Kevlar 规则引擎已完成的确定性匹配结果，你执行 Step 0 时必须将这些关键词视为已知风险原子，直接纳入 blackAtoms。`,
           ``,
           `### 规则命中 localFindings`,
           JSON.stringify(localFindings, null, 2),
@@ -421,7 +421,7 @@ export function buildOrchestrationStep0Prompt(
     `# [SYSTEM PROTOCOL] 风险模拟逆向解码协议（宿主编排 Turn 1）`,
     ``,
     `## 【任务说明】`,
-    `这是六维风险检测的第一轮（Turn 1）。你需要执行 Step 0 全局解码（提取黑料原子和攻击点 + 类似事件先例检索），**同时使用你的 web search 工具对提取的 blackAtoms 进行联网搜索并检索类似舆情先例**，然后将解码结果和搜索结果以纯 JSON 格式通过调用 review_content_wizard 工具提交。`,
+    `这是六维风险检测的第一轮（Turn 1）。你需要执行 Step 0 全局解码（提取风险原子和攻击点 + 类似事件先例检索），**同时使用你的 web search 工具对提取的 blackAtoms 进行联网搜索并检索类似舆情先例**，然后将解码结果和搜索结果以纯 JSON 格式通过调用 review_content_wizard 工具提交。`,
     `系统将在收到你的 JSON 后，在 Turn 2 将完整的验证结果反馈给你执行审计。`,
     ``,
     buildCommonRiskRules(),
@@ -441,7 +441,7 @@ export function buildOrchestrationStep0Prompt(
     `- 对提取出的外文，给出最具争议性的网络谐音或歧义翻译。`,
     ``,
     `**① 局部截取（找风险原子）**：`,
-    `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+    `- 放大敏感度，寻找任何存在传播风险的句子或词组。`,
     `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
     `- 列出所有潜在的风险原子（已含规则命中词）。`,
     ``,
@@ -485,7 +485,7 @@ export function buildOrchestrationStep0Prompt(
     JSON.stringify(
       {
         wildTranslations: [{ original: "外文原词", wildTranslation: "恶劣/滑稽的本土化机翻或谐音" }],
-        blackAtoms: ["黑料原子关键词1", "黑料原子关键词2"],
+        blackAtoms: ["风险原子关键词1", "风险原子关键词2"],
         attackCandidates: [
           {
             keyword: "触发词或短语",
@@ -868,7 +868,7 @@ export function buildIsolatedSystemAuditorMessage(
   const webContextSection = options?.webContext
     ? [
         `## 【联网验证参考（Turn 1 已完成联网检索）】`,
-        `以下信息来自 Turn 1 统一联网验证，已针对黑料原子关键词完成搜索，请结合专业判断进行分析：`,
+        `以下信息来自 Turn 1 统一联网验证，已针对风险原子关键词完成搜索，请结合专业判断进行分析：`,
         ``,
         options.webContext,
         ``,
@@ -890,7 +890,7 @@ export function buildIsolatedSystemAuditorMessage(
         `- 对提取出的外文，给出最具争议性的网络谐音或歧义翻译。`,
         ``,
         `**① 局部截取（找风险原子）**：`,
-        `- 放大敏感度，寻找任何能被「武器化」的句子或词组。`,
+        `- 放大敏感度，寻找任何存在传播风险的句子或词组。`,
         `- 哪些词/句子在字面、谐音、排版、语气上存在被无限解构和放大讽刺的空间？`,
         `- 列出所有潜在的风险原子。`,
         ``,
@@ -996,7 +996,7 @@ export function buildPreAuditFinalizerPrompt(
     `## 【最高仲裁原则】`,
     ``,
     `### 原则一：最坏解读原则（绝对优先）`,
-    `放弃一切「作者无心」的预设。对任何表达，必须假设它遭遇了最恶劣的网络环境、最恶意的断章取义和带节奏。只要存在被恶意曲解的空间，即视为实质性风险。`,
+    `放弃一切「作者无心」的预设。对任何表达，必须假设它处于最不利的传播环境，被断章取义和情绪化解读。只要存在被曲解或误读的空间，即视为实质性风险。`,
     ``,
     `### 原则二：防范反向风险`,
     `同时评估「过度防御」导致的反噬风险。例如：圣母式表达、道德绑架、凡尔赛、阴阳怪气、过度说教等，这些引发普通用户反感的表达本身也是一种风险。`,

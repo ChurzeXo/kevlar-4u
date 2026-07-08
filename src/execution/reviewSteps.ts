@@ -398,7 +398,7 @@ export async function runSystemAuditors(
           .filter(([, ctx]) => ctx.length > 0)
           .map(([kw, ctx]) => `### 关键词「${kw}」\n${ctx}`);
         if (relevantEntries.length > 0) {
-          webContext = `以下是针对本文案黑料原子的联网验证结果（Turn 1 已完成检索）：\n\n${relevantEntries.join("\n\n")}`;
+          webContext = `以下是针对本文案风险原子的联网验证结果（Turn 1 已完成检索）：\n\n${relevantEntries.join("\n\n")}`;
         }
       }
 
