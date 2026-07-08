@@ -36,6 +36,29 @@ export interface ExecutionBlueprint {
   };
 
   contexts: ContextDefinition[];
+
+  /**
+   * Shared input block — common to all execution contexts.
+   *
+   * When present, Host AI prepends sharedInput to each agent's instructions,
+   * eliminating redundant data duplication across parallel subagents.
+   *
+   * Build pattern:
+   *   agent_full_prompt = serialize(sharedInput) + "\n---\n" + agent.instructions
+   *
+   * Optional for backward compatibility: clients that don't understand sharedInput
+   * fall back to reading the full inline instructions.
+   */
+  sharedInput?: {
+    coreReasoningFramework?: string;
+    coreFrameworkSteps?: string;
+    content: string;
+    bareText: string;
+    localFindings: any[];
+    step0Decoding?: Record<string, any>;
+    webContextMap?: Record<string, string>;
+  };
+
   aggregation: AggregationSpec;
   continuation: ContinuationSpec;
 }

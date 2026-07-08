@@ -35,7 +35,10 @@ export const reviewContentWizardContinueDefinition: Tool = {
     "提交宿主编排执行结果并继续审计流程。" +
     "与 review_content_wizard 不同，此工具使用 session checkpoint + revision 协议确保结果一致性，" +
     "防止旧回合覆盖新状态。当 Kevlar 返回 continuation contract 时，必须使用此工具提交结果。" +
-    "Pro 用户可通过 contextId 逐 context 提交结果，Kevlar 自动聚合。",
+    "Pro 用户可通过 contextId 逐 context 提交结果，Kevlar 自动聚合。" +
+    " 通过 DeferExecuteTool 调用时，所有参数需包裹在 params 对象中: " +
+    '{toolName: "mcp__kevlar-4u__review_content_wizard_continue", params: {sessionId, checkpoint, expectedRevision, continuationId, receipt: {...}}}',
+
 
   inputSchema: {
     type: "object",

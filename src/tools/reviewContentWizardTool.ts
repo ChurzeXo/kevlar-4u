@@ -892,6 +892,28 @@ function renderBlueprintDispatchText(
   return [
     "## Kevlar-4u Subagent Dispatch Request",
     "",
+    // ── §0: Phase 0 — sharedInput splicing (when present) ────────────
+    ...(blueprint.sharedInput
+      ? [
+          "### Phase 0 — Build each agent's full prompt",
+          "",
+          "Each agent's `instructions` field contains ONLY agent-specific content.",
+          "The shared block (core framework, original text, Step 0 decoding results,",
+          "rule engine findings) lives in `sharedInput` below. **Do NOT embed sharedInput",
+          "into each agent — prepend it once per agent via string concatenation:**",
+          "",
+          "  agent_full_prompt = format(sharedInput) + \"\\n---\\n\" + agent.instructions",
+          "",
+          ...(blueprint.sharedInput.localFindings.length === 0
+            ? [
+                "**⚠️ 规则引擎覆盖说明**：代码层规则引擎主要覆盖中文关键词。",
+                "当前未命中规则库 ≠ 无风险，请完全依据维度的 LLM 分析进行判断。",
+                "",
+              ]
+            : []),
+          "---",
+        ]
+      : []),
     // ── §1: Explicit mandatory requirement ──────────────────────────
     "### ⚠️ CRITICAL — You MUST create ALL subagents below",
     "",
@@ -1065,9 +1087,10 @@ function buildExecutionBlueprint(
     return {
       id: auditor.meta.id,
       role,
-      instructions: buildIsolatedContextInstructions(
-        auditor, content, bareText, localFindings, segs,
-        step0Result, webContextMap,
+      // Agent delta: only auditor-specific parts. Host AI prepends sharedInput
+      // to form the full prompt, avoiding ~45% token duplication across 6 agents.
+      instructions: buildIsolatedAgentDelta(
+        auditor, segs, step0Result, webContextMap,
       ),
       input: {
         contentRef: "content",
@@ -1101,6 +1124,15 @@ function buildExecutionBlueprint(
       },
     },
     contexts: contexts,
+    sharedInput: {
+      coreReasoningFramework: segs.coreReasoningFramework,
+      coreFrameworkSteps: segs.coreFrameworkSteps,
+      content,
+      bareText,
+      localFindings,
+      step0Decoding: step0Result,
+      webContextMap,
+    },
     convention: {
       executionMode: "background_silent",
       ubiquitousLanguageBaseline: {
@@ -1387,6 +1419,127 @@ function buildIsolatedContextInstructions(
   parts.push("### Step 2：单沙盒仲裁与噪音过滤");
   parts.push("1. 逐一审查 Step 1 的发现，标记哪些属于过度联想（Noise）。");
   parts.push("   判断标准：能否推演出完整攻击链？不能则为 Noise。");
+  parts.push("2. 确认最终发现列表中不含任何修改建议或文案优化意见。");
+  parts.push("");
+  parts.push("### Step 3：最终 JSON 输出");
+  parts.push("请输出以下格式的纯 JSON，不包含 Markdown 标记或额外解释：");
+  parts.push("");
+  parts.push(JSON.stringify({
+    findings: [{
+      keyword: "风险词汇",
+      trigger: "触发原因",
+      riskDescription: "风险说明",
+      propagationRisk: "传播风险",
+      suggestedLevel: "🔴 或 🟡",
+      propagationPath: "可选：原始表达 → 去语境化呈现 → 评论区反应 → 舆情走向",
+    }],
+  }, null, 2));
+  parts.push("");
+  parts.push("规则：");
+  parts.push("- 无发现时 findings 必须为空数组");
+  parts.push("- suggestedLevel 只能使用 🔴 或 🟡");
+  parts.push("- 只要能推演出完整攻击链，必须进入 findings");
+
+  return parts.join("\n");
+}
+
+/**
+ * Build per-agent delta instructions — only the auditor-specific parts,
+ * without the shared content block (core reasoning, content, Step 0 results).
+ *
+ * Used by ExecutionBlueprint.sharedInput mode. The Host AI prepends
+ * `sharedInput` to each agent's delta to form the full prompt.
+ *
+ * This reduces token duplication by ~45% (shared blocks are embedded once
+ * instead of 6 times).
+ */
+function buildIsolatedAgentDelta(
+  auditor: Persona,
+  segs: PromptSegments,
+  step0Result?: Step0Result,
+  webContextMap?: Record<string, string>,
+): string {
+  const parts: string[] = [];
+
+  // ── 1. Auditor identity ─────────────────────────────────────────────
+  parts.push(`你是 **${auditor.meta.name}**（${auditor.meta.id}）。`);
+  parts.push(auditor.meta.description);
+  parts.push("");
+
+  // ── 2. Auditor's system prompt (persona-specific rules) ────────────
+  if (auditor.systemPrompt) {
+    parts.push("## 【审查员角色规则】");
+    parts.push(auditor.systemPrompt);
+    parts.push("");
+  }
+
+  // ── 3. Safety wrapper + Step 0b results (shared data in sharedInput, wrapper here) ──
+  if (step0Result) {
+    const auditorConfig = DIMENSION_SAFETY_RISK[auditor.meta.id];
+
+    if (auditorConfig?.stripOnFallback) {
+      parts.push("---");
+      parts.push("### ⚠️ 安全策略提示");
+      parts.push("前置共享解码结果已根据安全策略省略（stripOnFallback）。");
+      parts.push("请直接基于原始文案进行当前维度的审计。");
+      parts.push("");
+    } else {
+      parts.push("---");
+      parts.push("### ⚠️ 安全策略提示");
+      parts.push("共享输入块中包含前置步骤对文案的解码结果。");
+      parts.push("你的任务是基于这些事实锚点判断风险等级，");
+      parts.push("使用分析性表述记录风险方向，避免模仿攻击者口吻。");
+      parts.push("");
+
+      // Apply explicit-content sanitization for HIGH-risk auditors
+      const safe = sanitizeStep0Results(step0Result, auditor.meta.id, webContextMap);
+      const safeStep0 = safe.step0Result;
+      const safeWeb = safe.webContextMap;
+
+      parts.push("## 【维度专属解码引用】");
+      parts.push("以下是从共享数据中提取的、经本维度安全策略过滤后的结果：");
+      parts.push("");
+
+      if (safeStep0.blackAtoms.length > 0) {
+        parts.push("### 风险原子（已提取的高危片段）");
+        parts.push(JSON.stringify(safeStep0.blackAtoms, null, 2));
+        parts.push("");
+      }
+
+      if (safeStep0.attackCandidates.length > 0) {
+        parts.push("### 攻击候选（可推演的完整攻击链）");
+        parts.push(JSON.stringify(safeStep0.attackCandidates, null, 2));
+        parts.push("");
+      }
+
+      if (safeStep0.wildTranslations.length > 0) {
+        parts.push("### 歧义翻译（外文词组的谐音/歧义翻译）");
+        parts.push(JSON.stringify(safeStep0.wildTranslations, null, 2));
+        parts.push("");
+      }
+
+      if (safeWeb && Object.keys(safeWeb).length > 0) {
+        parts.push("### 联网搜索验证结果");
+        for (const [keyword, context] of Object.entries(safeWeb)) {
+          const truncated = context.length > 3000 ? context.slice(0, 3000) + "...（截断）" : context;
+          parts.push(`🔍 搜索 "${keyword}"：${truncated}`);
+          parts.push("");
+        }
+      }
+    }
+  }
+
+  // ── 4. Audit execution protocol ────────────────────────────────────
+  parts.push("## 【审计执行协议】");
+  parts.push("");
+  parts.push("### Step 1：当前维度沙盒推理");
+  parts.push(`从 **${auditor.meta.name}** 的专业角度，对上述内容进行独立风险分析。`);
+  parts.push("你必须假设这段内容处于最不利的传播环境，被断章取义和情绪化解读。");
+  parts.push("只要存在被曲解或误读的空间，即视为实质性风险。");
+  parts.push("");
+  parts.push("### Step 2：单沙盒仲裁与噪音过滤");
+  parts.push("1. 逐一审查 Step 1 的发现，标记哪些属于过度联想。");
+  parts.push("   判断标准：能否推演出完整攻击链？不能则排除。");
   parts.push("2. 确认最终发现列表中不含任何修改建议或文案优化意见。");
   parts.push("");
   parts.push("### Step 3：最终 JSON 输出");
@@ -1776,8 +1929,10 @@ async function handleContextAuditResult(
         [
           "⚠️ **内容被修改 — 检测到工作区漂移**",
           "",
-          "在 Subagent 并行执行期间，待评测内容发生了变更。",
-          "之前生成的审计结果已失效，已自动降级为标准宿主编排模式重新执行。",
+          "原因：在 Subagent 并行执行期间，待评测内容发生了变更",
+          "（可能由重试 DeferExecuteTool 调用时的参数修正引起）。",
+          "之前生成的审计结果已失效，已自动降级为标准宿主编排模式，",
+          "从 Step 0 全局解码重新开始执行。",
         ].join("\n") + "\n\n" + ORCHESTRATION_STEP0_GUIDANCE + buildOrchestrationStep0Prompt(state.content, localFindings, stripped),
       );
     }
