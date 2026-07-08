@@ -420,7 +420,7 @@ export async function handleReviewContentWizard(
 
     if (sessionResetReason && result.content?.[0]?.type === "text") {
       const resetLabel = sessionResetReason === "ttl_expired"
-        ? "10 分钟无活动"
+        ? "30 分钟无活动"
         : "延续请求超时（30 分钟）";
       const statusEnvelope = formatStatusMessage(
         degraded("session_expired", {
@@ -1000,7 +1000,7 @@ function renderBlueprintDispatchText(
     '  ],',
     '  "aggregation": {',
     '    "dimensions": [',
-    '      { "id": "<same agent id>", "level": "🟢/🟡/🔴", "findings": [] }',
+    '      { "id": "<same agent id>", "level": "🟢/🟡/🔴", "findings": [<copy raw findings from this agent context above>] }',
     '    ],',
     '    "summary": "一句话总评"',
     '  }',
@@ -1014,6 +1014,7 @@ function renderBlueprintDispatchText(
     "- `aggregation.dimensions` MUST be an array with one entry per context (use same `id`)",
     "- `aggregation.summary` MUST be a string",
     "- Each context's `output.findings` should contain the raw findings from that subagent's audit",
+    "- `dimensions[].level` is authoritative when that subagent flagged a risk with few/no keyword-level findings (e.g. 🔴 on structural concern). The backend takes max(receipt level, findings-based level).",
     "",
     perAgentGuidance,
     "### If you CANNOT execute subagent dispatch",
@@ -3648,7 +3649,7 @@ async function executeReview(
     '  ],',
     '  "aggregation": {',
     '    "dimensions": [',
-    '      { "id": "<same persona id>", "level": "🟢/🟡/🔴", "findings": [] }',
+    '      { "id": "<same persona id>", "level": "🟢/🟡/🔴", "findings": [<copy raw findings from this persona agent above>] }',
     '    ],',
     '    "summary": "一句话总评"',
     '  }',
@@ -3662,6 +3663,7 @@ async function executeReview(
     "- Each persona already outputs a `findings` array — extract it directly as `agents[].output.findings`",
     "- `aggregation.dimensions` MUST be an array with one entry per persona (use same `id`)",
     "- `aggregation.summary` MUST be a string",
+    "- `dimensions[].level` is authoritative for persona-level risk judgments that may not map to specific keyword findings. The backend takes max(receipt level, findings-based level).",
     "",
     perAgentGuidance,
     "### If you CANNOT execute subagent dispatch",
@@ -3702,7 +3704,7 @@ async function loadOrCreateState(tmpDir: string, input: ReviewWizardInput): Prom
     }
     if (state.usedPersonaIds === undefined) state.usedPersonaIds = [];
     if (state.pendingPersonaIds === undefined) state.pendingPersonaIds = [];
-    if (Date.now() - state.createdAt > 10 * 60 * 1000) {
+    if (Date.now() - state.createdAt > 30 * 60 * 1000) {
       await cleanupState(tmpDir, sessionId);
       return {
         sessionId,

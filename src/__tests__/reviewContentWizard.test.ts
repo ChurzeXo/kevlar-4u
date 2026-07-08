@@ -821,4 +821,91 @@ describe("ExecutionBlueprint structure validation", () => {
       `Expected invalid agent fields error, got: ${resultText.substring(0, 300)}`
     );
   });
+
+  // ── Session TTL tests ──────────────────────────────────────────────────
+
+  it("resets session when createdAt is older than 30 minutes (TTL expiry)", async () => {
+    await writePersona("ttl_tester", "TTL测试者", ["小红书"]);
+    // Start a wizard and get sessionId
+    const r1 = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "测试文案：今天天气真好。",
+    });
+    const sid = extractSessionId(textOf(r1));
+
+    // Write state file with old createdAt (31 min ago)
+    const statePath = path.join(tmpDir, `${sid}_review_wizard.json`);
+    const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    state.createdAt = Date.now() - 31 * 60 * 1000;
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+
+    // Re-call with same sessionId — should detect TTL expiry
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId: sid,
+      userMessage: "全球",
+    });
+    const resultText = textOf(result);
+
+    // Should indicate session expired and preserve content
+    assert.ok(resultText.includes("会话已过期"), `Expected session expired message, got: ${resultText.substring(0, 300)}`);
+    assert.ok(
+      resultText.includes("30 分钟无活动") || resultText.includes("30 分钟"),
+      `Expected 30 min inactivity label, got: ${resultText.substring(0, 300)}`
+    );
+    assert.ok(resultText.includes("原始内容已保留"), `Expected preserved content note, got: ${resultText.substring(0, 300)}`);
+
+    // Content is preserved in state, not rendered in the expired-session UI
+    const expiredState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    assert.ok(
+      (expiredState.content || "").includes("测试文案"),
+      `Expected content in expired state, got: ${JSON.stringify(expiredState).substring(0, 200)}`
+    );
+  });
+
+  it("rolls back and resets state when continuation expires", async () => {
+    await writePersona("cont_tester", "Continuation测试者", ["知乎"]);
+    // Start a wizard and get sessionId
+    const r1 = await handleReviewContentWizard(skillsDir, tmpDir, {
+      userMessage: "延续过期测试文案。",
+    });
+    const sid = extractSessionId(textOf(r1));
+
+    // Write state file with activeContinuation that has already expired
+    const statePath = path.join(tmpDir, `${sid}_review_wizard.json`);
+    const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    state.createdAt = Date.now(); // keep recent so session TTL doesn't fire first
+    state.step = "waitingForSubagentAudit";
+    state.activeContinuation = {
+      continuationId: `cont-${sid}-test`,
+      checkpoint: "preaudit_completed",
+      expiresAt: Date.now() - 1, // already expired
+      retryCount: 0,
+    };
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+
+    // Re-call with same sessionId — should detect continuation expiry
+    const result = await handleReviewContentWizard(skillsDir, tmpDir, {
+      sessionId: sid,
+      userMessage: "全球",
+    });
+    const resultText = textOf(result);
+
+    // Should indicate session expired due to continuation timeout
+    assert.ok(resultText.includes("会话已过期"), `Expected session expired message, got: ${resultText.substring(0, 300)}`);
+    assert.ok(
+      resultText.includes("延续请求超时") || resultText.includes("30 分钟"),
+      `Expected continuation timeout label, got: ${resultText.substring(0, 300)}`
+    );
+    assert.ok(resultText.includes("原始内容已保留"), `Expected preserved content note, got: ${resultText.substring(0, 300)}`);
+
+    // Content is preserved in state even after rollback
+    const rolledState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    assert.ok(
+      (rolledState.content || "").includes("延续过期测试文案"),
+      `Expected content in rolled-back state, got: ${JSON.stringify(rolledState).substring(0, 200)}`
+    );
+
+    // Verify state was rolled back (continuation cleared)
+    const newState = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    assert.ok(!newState.activeContinuation, "activeContinuation should be cleared after expiry rollback");
+  });
 });

@@ -16,6 +16,7 @@ import {
   buildEmptyDeltaRisks,
   normalizePreAuditDimensions,
   mergeLocalFindingsIntoAudits,
+  deduplicateDimensionFindings,
   computeDeltaAnalysis,
   crossValidateRiskyDimensions,
   finalizePreAuditReport,
@@ -233,6 +234,45 @@ describe("normalizePreAuditDimensions", () => {
     const result = normalizePreAuditDimensions(input, auditors);
     assert.equal(result[0].findings[0].suggestedLevel, "🟡");
   });
+
+  test("prefers receipt level over computed findings level when findings is empty", () => {
+    // Bug scenario: receipt says 🔴 but findings is empty → getFindingsLevel returns 🟢
+    // resolveDimensionLevel should keep receipt's explicit 🔴
+    const input = [
+      { id: "legal", name: "Legal", level: "🔴", findings: [] },
+    ];
+    const result = normalizePreAuditDimensions(input, auditors);
+    assert.equal(result[0].level, "🔴");
+    assert.equal(result[1].id, "social");
+    assert.equal(result[1].level, "🟢");
+  });
+
+  test("takes max of receipt level and findings level when both present", () => {
+    // receipt 🟡 + findings 🔴 → should be 🔴 (findings higher)
+    const input = [
+      { id: "legal", name: "Legal", level: "🟡", findings: [{ keyword: "x", suggestedLevel: "🔴" }] },
+    ];
+    const result = normalizePreAuditDimensions(input, auditors);
+    assert.equal(result[0].level, "🔴");
+  });
+
+  test("receipt level wins when receipt level is higher than findings", () => {
+    // receipt 🔴 + findings 🟡 → should be 🔴 (receipt higher)
+    const input = [
+      { id: "legal", name: "Legal", level: "🔴", findings: [{ keyword: "x", suggestedLevel: "🟡" }] },
+    ];
+    const result = normalizePreAuditDimensions(input, auditors);
+    assert.equal(result[0].level, "🔴");
+  });
+
+  test("ignores invalid receipt level values", () => {
+    // receipt has "high" (invalid) + findings 🟡 → should be 🟡
+    const input: any = [
+      { id: "legal", name: "Legal", level: "high", findings: [{ keyword: "x", suggestedLevel: "🟡" }] },
+    ];
+    const result = normalizePreAuditDimensions(input, auditors);
+    assert.equal(result[0].level, "🟡");
+  });
 });
 
 // ── mergeLocalFindingsIntoAudits tests ────────────────────────────────────────
@@ -266,6 +306,60 @@ describe("mergeLocalFindingsIntoAudits", () => {
     const lre = result.find((a) => a.id === "local_rule_engine");
     assert.ok(lre);
     assert.equal(lre?.findings.length, 1);
+  });
+});
+
+// ── deduplicateDimensionFindings tests ────────────────────────────────────────
+
+describe("deduplicateDimensionFindings", () => {
+  test("removes duplicate keyword from lower-priority dimension", () => {
+    const input: PreAuditDimensionResult[] = [
+      {
+        id: "social_risk", name: "社伦判官", level: "🟡",
+        findings: [{ keyword: "risky" }],
+      },
+      {
+        id: "network_culture_risk", name: "暗语破译", level: "🟢",
+        findings: [{ keyword: "risky" }],
+      },
+    ];
+    const result = deduplicateDimensionFindings(input);
+    // Only one dimension should retain "risky", the other should be empty
+    const social = result.find((d) => d.id === "social_risk");
+    const network = result.find((d) => d.id === "network_culture_risk");
+    assert.ok(social);
+    assert.ok(network);
+    const totalFindings = (social!.findings?.length || 0) + (network!.findings?.length || 0);
+    assert.equal(totalFindings, 1);
+  });
+
+  test("preserves explicit receipt level even after dedup removes all findings", () => {
+    // ER-1: receipt says 🔴 but dedup removes all findings → resolveDimensionLevel must keep 🔴
+    const input: PreAuditDimensionResult[] = [
+      {
+        id: "network_culture_risk", name: "暗语破译", level: "🔴",
+        findings: [{ keyword: "shared" }],
+      },
+      {
+        id: "context_distortion", name: "语境猎手", level: "🟢",
+        findings: [{ keyword: "shared", suggestedLevel: "🟡" }], // higher suggestedLevel wins
+      },
+    ];
+    const result = deduplicateDimensionFindings(input);
+    const nc = result.find((d) => d.id === "network_culture_risk");
+    // "shared" keyword goes to context_distortion (higher suggestedLevel 🟡),
+    // so network_culture_risk findings becomes empty but level must stay 🔴
+    assert.ok(nc);
+    assert.equal(nc!.level, "🔴", "Receipt-level 🔴 must survive dedup that empties findings");
+  });
+
+  test("returns input unchanged when no duplicate keywords", () => {
+    const input: PreAuditDimensionResult[] = [
+      { id: "social_risk", name: "社伦判官", findings: [{ keyword: "x" }] },
+      { id: "legal", name: "Legal", findings: [{ keyword: "y" }] },
+    ];
+    const result = deduplicateDimensionFindings(input);
+    assert.deepEqual(result, input);
   });
 });
 
@@ -418,6 +512,49 @@ describe("crossValidateRiskyDimensions — LLM failure handling", () => {
     );
 
     assert.deepEqual(result, phase1Results);
+  });
+
+  test("preserves explicit receipt level after cross-validation (ER-2)", async () => {
+    // ER-2: receipt 🔴 + cross-val adds no new findings → resolveDimensionLevel keeps 🔴
+    const auditors = [
+      makePersona("network_culture_risk", "暗语破译"),
+      makePersona("context_distortion", "语境猎手"),
+    ];
+
+    const samplingFn: AuditLlmCaller = async () => {
+      return {
+        content: JSON.stringify({
+          findings: [{ keyword: "confirmed", status: "confirmed", reason: "valid" }],
+        }),
+      };
+    };
+
+    // sourceDim has 🔴 receipt level, cross-val confirms existing finding
+    // it should not drop to 🟡 just because findings only has 🟡 items
+    const phase1Results: PreAuditDimensionResult[] = [
+      {
+        id: "network_culture_risk", name: "暗语破译", level: "🔴",
+        findings: [{ keyword: "risky", suggestedLevel: "🟡" }],
+      },
+      {
+        id: "context_distortion", name: "语境猎手", level: "🟡",
+        findings: [{ keyword: "risky", suggestedLevel: "🟡" }],
+      },
+    ];
+
+    const result = await crossValidateRiskyDimensions(
+      "test content",
+      phase1Results,
+      auditors,
+      samplingFn,
+    );
+
+    const nc = result.find((d) => d.id === "network_culture_risk");
+    assert.ok(nc);
+    // 🔴 receipt must survive — cross-val confirmed the finding, level should
+    // be at least 🔴 (receipt-level takes priority over findings-based)
+    assert.equal(nc!.level, "🔴",
+      "🔴 receipt level must not be degraded by cross-validation");
   });
 });
 

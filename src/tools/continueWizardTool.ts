@@ -275,9 +275,13 @@ export const reviewContentWizardContinueModule: ToolModule = {
           };
         }
       } catch (err: any) {
+        const isStaleContinuation = String(err.message || "").includes("stale_continuation_revision_locked");
+        const recoveryHint = isStaleContinuation
+          ? "\n\n💡 会话已过期（并行审核耗时过长）。请用相同 sessionId 重新调用 review_content_wizard，系统将从断点自动恢复。"
+          : "";
         const msg = formatStatusMessage(
           rejected("gate_validation_failed", { error: err.message }),
-          `❌ 门禁验证失败：${err.message}`,
+          `❌ 门禁验证失败：${err.message}${recoveryHint}`,
         );
         return {
           content: [{ type: "text", text: formatErrorWithReportPrompt(msg, "review_content_wizard_continue") }],

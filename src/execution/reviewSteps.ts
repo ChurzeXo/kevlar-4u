@@ -208,6 +208,13 @@ function levelPriority(level?: string): number {
   return 0;
 }
 
+/** Resolve a dimension's risk level: prefer the receipt's explicit level, then fall back to findings-based. */
+function resolveDimensionLevel(explicitLevel: unknown, findingsLevel: string): string {
+  const explicit = typeof explicitLevel === "string" ? explicitLevel.trim() : "";
+  if (!explicit || (explicit !== "🔴" && explicit !== "🟡" && explicit !== "🟢")) return findingsLevel;
+  return levelPriority(explicit) >= levelPriority(findingsLevel) ? explicit : findingsLevel;
+}
+
 /**
  * Deduplicate findings across dimensions:
  * When the same keyword appears in ≥2 dimensions, keep only the one with the
@@ -276,9 +283,9 @@ export function deduplicateDimensionFindings(
     }
   }
 
-  // Recalculate levels after removal
+  // Recalculate levels after removal, preserving any explicit receipt level
   for (const dim of result) {
-    dim.level = getFindingsLevel(dim.findings);
+    dim.level = resolveDimensionLevel(dim.level, getFindingsLevel(dim.findings));
   }
 
   return result;
@@ -309,7 +316,7 @@ export function normalizePreAuditDimensions(raw: unknown, systemAuditors: Person
     const cleanedFindings = findings
       .filter((finding: any) => finding && typeof finding === "object")
       .map((finding: any) => normalizeFinding(finding as Record<string, unknown>));
-    normalized.push({ id, name, findings: cleanedFindings, level: getFindingsLevel(cleanedFindings) });
+    normalized.push({ id, name, findings: cleanedFindings, level: resolveDimensionLevel(record.level, getFindingsLevel(cleanedFindings)) });
     seen.add(id);
   }
 
@@ -342,7 +349,7 @@ export function mergeLocalFindingsIntoAudits(
   }
 
   for (const audit of merged) {
-    audit.level = getFindingsLevel(audit.findings || []);
+    audit.level = resolveDimensionLevel(audit.level, getFindingsLevel(audit.findings || []));
   }
 
   return merged;
@@ -678,9 +685,9 @@ export async function crossValidateRiskyDimensions(
       }
     }
 
-    sourceDim.level = getFindingsLevel(sourceDim.findings);
+    sourceDim.level = resolveDimensionLevel(sourceDim.level, getFindingsLevel(sourceDim.findings));
     if (validatorDim) {
-      validatorDim.level = getFindingsLevel(validatorDim.findings);
+      validatorDim.level = resolveDimensionLevel(validatorDim.level, getFindingsLevel(validatorDim.findings));
     }
   }
 

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.6.19] - 2026-07-08
+
+### Fixed
+
+- **Pre-audit aggregation: receipt `level` authoritative over computed level**. Before this fix, `getFindingsLevel` was used in 4 critical pipeline points (`mergeLocalFindingsIntoAudits`, `deduplicateDimensionFindings`, `crossValidateRiskyDimensions`) — directly computing risk level from findings while ignoring the Host AI's explicit `level` declaration on the receipt. When Host AI flagged 🔴 on a structural concern but `findings` was empty, the pipeline silently downgraded to 🟢. All 4 points now use `resolveDimensionLevel`, which takes `max(receipt level, findings-based level)`.
+- **Receipt templates**: Added authoritative guidance clarifying that `dimensions[].level` is treated as authoritative judgment (backend takes max with findings-based level). Host AI now has clear instructions when filling receipts.
+- **Session TTL**: Expired-session message corrected from "10 分钟无活动" to "30 分钟无活动" to match the actual TTL value.
+
+### Added
+
+- **TTL tests**: Session expiration and continuation timeout rollback are now covered by unit tests in `reviewContentWizard.test.ts`.
+- **Defensive test coverage**: `deduplicateDimensionFindings` now tested for receipt-level preservation; `crossValidateRiskyDimensions` tested for post-validation level integrity; `normalizePreAuditDimensions` tested for the exact bug scenario (receipt 🔴 + empty findings).
+
+---
+
 ## [1.5.0] - 2026-06-21
 
 ### Added

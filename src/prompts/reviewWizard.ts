@@ -845,7 +845,7 @@ export function buildIsolatedSystemAuditorMessage(
         `## 【全局解码结果（Turn 1 已完成，必须作为事实输入）】`,
         `以下是系统 Turn 1 已完成的全局逆向解码结果。你无需重新执行 Step 0，直接将 attackCandidates 作为当前沙盒的推理基础：`,
         ``,
-        JSON.stringify(step0Result, null, 2),
+        JSON.stringify(safeStep0, null, 2),
         ``,
       ].join("\n")
     : [`## 【说明】`, `Turn 1 全局解码不可用（降级模式），当前沙盒需自行执行 Step 0 全局解码。`, ``].join("\n");
