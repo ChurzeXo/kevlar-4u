@@ -12,7 +12,7 @@ Step 0a: 本地规则引擎
   │
   │  输出：localFindings[]
   ▼
-Step 0b + 联网搜索: 职业黑粉逆向全局解码 + 宿主搜索
+Step 0b + 联网搜索: 风险模拟逆向全局解码 + 宿主搜索
 ═══════════════════════════════════════════════════════════════════
   │  宿主 AI 执行（所有执行模式），合并 Step 0b 解码 + 联网搜索
   │  │
@@ -115,7 +115,7 @@ Step 9: 结果展示
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
 | 0a | 代码 | 本地规则匹配 (localFindings) |
-| 0b+搜索 | 宿主 AI | 职业黑粉逆向全局解码 + 联网搜索 + 类似事件先例检索（宿主 AI 合并执行，输出 step0Result + webContextMap） |
+| 0b+搜索 | 宿主 AI | 风险模拟逆向全局解码 + 联网搜索 + 类似事件先例检索（宿主 AI 合并执行，输出 step0Result + webContextMap） |
 | 1 | 代码 | 文本脱嵌处理 (stripContext: original/bare/replacements) |
 | 2 | LLM | 裸文审计（3个维度，含跨语言曲解，注入 Turn 1 联网上下文） |
 | 3 | LLM | 全文审计（**6 个维度**，含新增跨界判官，注入 Turn 1 联网上下文） |
@@ -148,7 +148,7 @@ Step 9: 结果展示
 ### Step 0b+搜索：宿主 AI 合并执行
 
 在 Step 0a (本地规则引擎) 完成后，工具返回给宿主 AI，宿主 AI 同时执行：
-1. **职业黑粉逆向解码**（Step 0b）：提取 `wildTranslations`、`blackAtoms`、`attackCandidates`。
+1. **风险模拟逆向解码**（Step 0b）：提取 `wildTranslations`、`riskAtoms`、`attackCandidates`。
 2. **联网搜索**：宿主 AI 使用自己的 web search 工具对每个 `blackAtoms` 搜索中文网络语境。
 3. **类似事件先例检索**：基于 localFindings 和 blackAtoms 推断风险方向，用风险关键词（非品牌名）搜索历史翻车案例，输出 `precedents`。
 4. **合并返回**：宿主 AI 在一次调用中返回 `step0Result` + `webContextMap`。

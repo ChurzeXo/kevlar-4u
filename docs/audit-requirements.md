@@ -160,7 +160,7 @@ Host AI 收到后有三种合法响应：
 - Multi-hop 模式匹配（组合规则）
 - 输出命中规则的 `localFindings[]`
 
-#### Step 0b+搜索 — 职业黑粉逆向解码
+#### Step 0b+搜索 — 风险模拟逆向解码
 
 **函数**: `buildOrchestrationStep0Prompt()` → `src/prompts/reviewWizard.ts`
 

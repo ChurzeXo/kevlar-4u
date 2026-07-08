@@ -36,9 +36,9 @@
     "precedentLockedCn": "",
     "precedentLockedEn": "",
     "freeTierUpgradePrompt": "",
-    "coreReasoningFramework": "## 【核心思维框架切换：职业黑粉 / 最恶毒评论区模拟模式】\n...",
-    "coreFrameworkSteps": "【第一步：职业黑粉冷读（必须先于一切具体检查执行）】\n...",
-    "globalStep0Protocol": "# [SYSTEM PROTOCOL] 职业黑粉逆向解码协议（Turn 1 全局解码）\n...",
+    "coreReasoningFramework": "## 【核心思维框架切换：攻防风险模拟分析模式】\n...",
+    "coreFrameworkSteps": "【第一步：风险冷读（必须先于一切具体检查执行）】\n...",
+    "globalStep0Protocol": "# [SYSTEM PROTOCOL] 风险模拟逆向解码协议（Turn 1 全局解码）\n...",
     "globalStep0Message": "## 【待测文案】\n...\n请严格执行并输出纯 JSON："
   }
 }

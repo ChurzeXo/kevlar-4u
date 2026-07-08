@@ -89,7 +89,7 @@ Phase B ────────────────────────
   │  Step 0b (subagent) ← 需要 0a 的 localFindings
   │  产出: step0Result { wildTranslations, blackAtoms, attackCandidates }
   │       + webContextMap + precedents
-  │  包含：语言边界判定 → 黑料原子提取 → 情绪重构 → 联网搜索
+  │  包含：语言边界判定 → 风险原子提取 → 情绪重构 → 联网搜索
   │  ⚠️  联网搜索必须保留：宿主 subagent 使用自己的 web search 工具
   │      对每个 blackAtom 搜索中文网络语境 + 检索类似舆情翻车先例
   │

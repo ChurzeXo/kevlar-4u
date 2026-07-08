@@ -426,7 +426,7 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 | Step | 执行者 | 主要操作 |
 |------|--------|----------|
 | 0a | 代码 | 规则引擎匹配 — 时机节点检测、n-gram 滑动窗口、L2 结构模式、Multi-hop patterns → `findings[]` |
-| 0b+搜索 | 宿主 AI | 职业黑粉逆向全局解码 + 联网搜索 + 类似事件先例检索（合并为宿主 AI 单轮调用）→ `step0Result` + `webContextMap`。DuckDuckGo 依赖已移除 |
+| 0b+搜索 | 宿主 AI | 风险模拟逆向全局解码 + 联网搜索 + 类似事件先例检索（合并为宿主 AI 单轮调用）→ `step0Result` + `webContextMap`。DuckDuckGo 依赖已移除 |
 | 1 | 代码 | 物理脱嵌 — `stripContext(raw, knownEntities?)` 生成 original、bare（裸文）和 replacements |
 | 2 | LLM | 裸文审计 — `context_distortion` + `network_culture_risk` + `cross_lingual_distortion` 三个维度，注入联网上下文 |
 | 3 | LLM | 全文审计 — 所有 6 个维度并行，每个维度独立推理，注入联网上下文 |
@@ -453,7 +453,7 @@ V4 矩阵填空协议是为解决系统初审兜底路径中的 **角色漂移 (
 
 ### 联网验证说明
 
-联网搜索不再由 kevlar 服务器自行调用。Step 0b 与联网搜索**合并**为宿主 AI 的一轮交互：宿主 AI 在执行职业黑粉逆向解码的同时，使用自己的 web search 工具对 blackAtoms 搜索中文网络语境，并基于风险方向检索类似舆情翻车先例，输出 `step0Result` + `webContextMap`。
+联网搜索不再由 kevlar 服务器自行调用。Step 0b 与联网搜索**合并**为宿主 AI 的一轮交互：宿主 AI 在执行风险模拟逆向解码的同时，使用自己的 web search 工具对风险原子搜索中文网络语境，并基于风险方向检索类似舆情翻车先例，输出 `step0Result` + `webContextMap`。
 
 - **Step 2-3 联网上下文注入**：`runSystemAuditors()` 根据宿主 AI 返回的 `webContextMap`，为每个系统审计员构建 `webContext` 文本并注入审计提示词。
 - **Step 5 纯内存合并**：无需发起任何网络请求。
