@@ -55,8 +55,8 @@ export interface ExecutionBlueprint {
     content: string;
     bareText: string;
     localFindings: any[];
-    step0Decoding?: Record<string, any>;
-    webContextMap?: Record<string, string>;
+    // step0Decoding and webContextMap are removed from sharedInput —
+    // they are injected per-dimension via buildIsolatedAgentDelta().
   };
 
   aggregation: AggregationSpec;

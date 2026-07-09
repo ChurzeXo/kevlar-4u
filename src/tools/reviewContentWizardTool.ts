@@ -899,8 +899,7 @@ function renderBlueprintDispatchText(
           "### Phase 0 — Build each agent's full prompt",
           "",
           "Each agent's `instructions` field contains ONLY agent-specific content.",
-          "The shared block (core framework, original text, Step 0 decoding results,",
-          "rule engine findings) lives in `sharedInput` below. **Do NOT embed sharedInput",
+          "The shared block (core framework, original text, rule engine findings) lives in `sharedInput` below. **Do NOT embed sharedInput",
           "into each agent — prepend it once per agent via string concatenation:**",
           "",
           "  agent_full_prompt = format(sharedInput) + \"\\n---\\n\" + agent.instructions",
@@ -1131,8 +1130,7 @@ function buildExecutionBlueprint(
       content,
       bareText,
       localFindings,
-      step0Decoding: step0Result,
-      webContextMap,
+      // step0Decoding 和 webContextMap 已在各 agent delta 中 per-dimension 注入，不在此重复
     },
     convention: {
       executionMode: "background_silent",
