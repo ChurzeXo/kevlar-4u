@@ -2500,44 +2500,65 @@ function buildPreAuditSummaryBlock(state: ReviewWizardState, prompts?: PromptSeg
   // ── Block 3: 深度推演 ──────────────────────────────────────────
   const analysisLines: string[] = [];
 
-  // 🔴 核心风险
-  const redFindings = dimensions.filter((d) => {
-    const l = d.level || getFindingsLevel(d.findings);
-    return l === "🔴" && d.findings.length > 0;
-  });
-  if (redFindings.length > 0) {
-    analysisLines.push("## 🔴 核心风险");
-    if (report.attackChainAnalysis) {
-      analysisLines.push(report.attackChainAnalysis);
-    }
-    for (const d of redFindings) {
+  // ── 核心风险：按 severity 排序，Top 3 高危 finding 展开，其余折叠 ──
+  // 收集所有维度中的 🔴/🟡 finding，按 severity 排序（🔴 优先）
+  interface AnnotatedFinding {
+    dimensionName: string;
+    finding: any;
+    isRed: boolean;
+  }
+  const allRiskFindings: AnnotatedFinding[] = [];
+  for (const d of dimensions) {
+    if (d.findings && d.findings.length > 0) {
+      const dimLevel = d.level || getFindingsLevel(d.findings);
       for (const f of d.findings) {
-        analysisLines.push(`- **${escapeMarkdownTableCell(d.name)}**｜${f.keyword || "未命名风险"}：${f.riskDescription || f.description || ""}`);
-        if (f.propagationPath) {
-          const pp = f.propagationPath;
-          if (typeof pp === "string") {
-            analysisLines.push(`  → ${pp}`);
-          } else if (pp.step1) {
-            analysisLines.push(`  → ${pp.step1} → ${pp.step2 || ""} → ${pp.step3 || ""} → ${pp.step4 || ""}`);
-          }
+        const fLevel = String(f.suggestedLevel || f.level || dimLevel || "");
+        const isRed = fLevel.includes("🔴") || fLevel === "high" || fLevel === "高" || fLevel === "高危";
+        const isYellow = fLevel.includes("🟡") || fLevel === "medium" || fLevel === "中" || fLevel === "中危";
+        if (isRed || isYellow) {
+          allRiskFindings.push({ dimensionName: d.name, finding: f, isRed });
         }
       }
     }
-    analysisLines.push("");
   }
 
-  // 🟡 次要风险
-  const yellowFindings = dimensions.filter((d) => {
-    const l = d.level || getFindingsLevel(d.findings);
-    return l === "🟡" && d.findings.length > 0;
+  // 🔴 优先，🟡 次之
+  allRiskFindings.sort((a, b) => {
+    if (a.isRed && !b.isRed) return -1;
+    if (!a.isRed && b.isRed) return 1;
+    return 0;
   });
-  if (yellowFindings.length > 0) {
-    analysisLines.push("## 🟡 次要风险");
-    for (const d of yellowFindings) {
-      for (const f of d.findings) {
-        analysisLines.push(`- **${escapeMarkdownTableCell(d.name)}**｜${f.keyword || "未命名风险"}：${f.riskDescription || f.description || ""}`);
+
+  const totalFindingCount = allRiskFindings.length;
+  const EXPAND_LIMIT = 3;
+  const shouldCollapse = totalFindingCount > EXPAND_LIMIT;
+  const expandedFindings = shouldCollapse ? allRiskFindings.slice(0, EXPAND_LIMIT) : allRiskFindings;
+  const collapsedCount = totalFindingCount - expandedFindings.length;
+
+  if (expandedFindings.length > 0) {
+    const hasRed = expandedFindings.some((f) => f.isRed);
+    analysisLines.push(hasRed ? "## 🔴 核心风险" : "## 🟡 次要风险");
+
+    if (report.attackChainAnalysis && hasRed) {
+      analysisLines.push(report.attackChainAnalysis);
+    }
+
+    for (const { dimensionName, finding: f } of expandedFindings) {
+      analysisLines.push(`- **${escapeMarkdownTableCell(dimensionName)}**｜${f.keyword || "未命名风险"}：${f.riskDescription || f.description || ""}`);
+      if (f.propagationPath) {
+        const pp = f.propagationPath;
+        if (typeof pp === "string") {
+          analysisLines.push(`  → ${pp}`);
+        } else if (pp.step1) {
+          analysisLines.push(`  → ${pp.step1} → ${pp.step2 || ""} → ${pp.step3 || ""} → ${pp.step4 || ""}`);
+        }
       }
     }
+
+    if (collapsedCount > 0) {
+      analysisLines.push(`\n📋 还有 ${collapsedCount} 条风险发现，详见维度明细...\n`);
+    }
+
     analysisLines.push("");
   }
 

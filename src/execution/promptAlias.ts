@@ -23,6 +23,7 @@ import * as fs from "fs";
 import { fileURLToPath } from "url";
 import { getCurrentLanguage, type SupportedLanguage } from "../i18n/index.js";
 import { logger } from "../utils/observability.js";
+import { verifyAliasMapIntegrity as hashGuardVerifyAliasMap } from "./promptHashGuard.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -91,6 +92,18 @@ function loadAliasMapUncached(locale: string): PromptAliasMap | null {
       });
       return null;
     }
+
+    // Runtime integrity check: embedded baseline + internal hash
+    if (!hashGuardVerifyAliasMap(map)) {
+      logger.error("Alias map failed runtime integrity check — possible tampering", {
+        event: "alias_map_integrity_failed",
+        locale,
+        path: mapPath,
+      });
+      // Return the map anyway — hash guard already logged details.
+      // Callers decide tier-appropriate fallback behavior.
+    }
+
     return map;
   } catch {
     return null;
