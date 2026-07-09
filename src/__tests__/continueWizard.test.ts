@@ -641,11 +641,12 @@ describe("reviewContentWizardContinue — edge cases", () => {
 describe("reviewContentWizardContinue — slot-based agent submission", () => {
   function proSlotState(sessionId: string, overrides: Record<string, unknown> = {}) {
     const contextIds = ["context-1", "agent-2"];
+    const tier = (overrides.tier as string) ?? "pro";
     return baseState({
       sessionId,
       step: "waitingForSubagentAudit",
       revision: 1,
-      tier: "pro",
+      tier,
       blueprint: {
         protocol: "kevlar.blueprint/v1",
         contexts: contextIds.map((id) => ({ id, role: "safety_reviewer" })),
@@ -653,7 +654,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
           contextSlots: {
             total: 2,
             contextIds,
-            allowPartialSubmit: true,
+            allowPartialSubmit: tier === "pro",
           },
         },
       },
@@ -701,7 +702,7 @@ describe("reviewContentWizardContinue — slot-based agent submission", () => {
     });
 
     assert.ok(result.isError);
-    assert.ok(textOf(result).includes("仅限 Pro"));
+    assert.ok(textOf(result).includes("逐 context 提交未启用"));
   });
 
   it("rejects invalid continuationId format in slot path", async () => {

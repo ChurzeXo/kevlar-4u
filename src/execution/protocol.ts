@@ -103,11 +103,11 @@ export interface ContinuationSpec {
    *  validated on receipt submission. Mismatch = content was modified
    *  while subagents were executing → results are potentially stale. */
   contentFingerprint?: string;
-  // Pro: slot-based per-agent result submission metadata
+  // Slot-based per-agent result submission metadata (all tiers)
   contextSlots?: {
     total: number;
     contextIds: string[];
-    allowPartialSubmit: true;
+    allowPartialSubmit: boolean;
   };
 }
 

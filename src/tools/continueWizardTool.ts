@@ -2,7 +2,8 @@
  * Continuation Tool (v3)
  *
  * Provides a safe, versioned submission channel for host orchestration results.
- * Supports both batch (full receipt) and Pro per-agent slot-based submission.
+ * Supports both batch (full receipt) and per-agent slot-based submission
+ * (currently Pro-only, designed for progressive rollout).
  */
 
 import { Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -25,7 +26,7 @@ import {
   buildSyntheticReceipt,
 } from "./reviewContentWizardTool.js";
 import { buildOrchestrationAuditPrompt, buildOrchestrationStep0Prompt } from "../prompts/reviewWizard.js";
-import { validateSingleAgentResult } from "../execution/protocol.js";
+import { validateSingleAgentResult, type ExecutionBlueprint } from "../execution/protocol.js";
 
 // ── Tool Definition ───────────────────────────────────────────────────────────
 
@@ -507,10 +508,12 @@ async function handleContextSlot(
     };
   }
 
-  // ── Tier check (Pro only) ───────────────────────────────────────────────
-  if (state.tier !== "pro") {
+  // ── Partial submit gate: check blueprint's allowPartialSubmit flag ──────
+  const blueprintPartial = (state as any).blueprint as ExecutionBlueprint | undefined;
+  const allowPartialSubmit = blueprintPartial?.continuation?.contextSlots?.allowPartialSubmit ?? false;
+  if (!allowPartialSubmit) {
     return {
-      content: [{ type: "text", text: formatStatusMessage(rejected("pro_only"), "❌ 逐 context 提交仅限 Pro 用户。请使用 batch 方式（全量 receipt）提交。") }],
+      content: [{ type: "text", text: formatStatusMessage(rejected("pro_only"), "❌ 逐 context 提交未启用。请使用 batch 方式（全量 receipt）提交。") }],
       isError: true,
     };
   }

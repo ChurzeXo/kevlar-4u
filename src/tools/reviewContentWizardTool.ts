@@ -1161,16 +1161,14 @@ function buildExecutionBlueprint(
       expectedRevision: state.revision ?? 1,
       idempotencyKey: activeCont?.continuationId,
       contentFingerprint: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
-      // Pro: context slot metadata for per-agent result submission
-      ...(state.tier === "pro"
-        ? {
-            contextSlots: {
-              total: contexts.length,
-              contextIds: contexts.map((a) => a.id),
-              allowPartialSubmit: true,
-            } satisfies import("../execution/protocol.js").ContinuationSpec["contextSlots"],
-          }
-        : {}),
+      // Context slot metadata (all tiers): provides context IDs and total count.
+      // allowPartialSubmit gates per-agent submission — currently Pro-only,
+      // designed for progressive rollout to Free tier.
+      contextSlots: {
+        total: contexts.length,
+        contextIds: contexts.map((a) => a.id),
+        allowPartialSubmit: state.tier === "pro",
+      } satisfies import("../execution/protocol.js").ContinuationSpec["contextSlots"],
     },
   };
 }
@@ -3381,16 +3379,12 @@ function buildPersonaExecutionBlueprint(
       expectedRevision: state.revision ?? 1,
       idempotencyKey: state.activeContinuation?.continuationId,
       contentFingerprint: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
-      // Pro: context slot metadata for per-agent result submission
-      ...(state.tier === "pro"
-        ? {
-            contextSlots: {
-              total: contexts.length,
-              contextIds: contexts.map((a) => a.id),
-              allowPartialSubmit: true,
-            } satisfies import("../execution/protocol.js").ContinuationSpec["contextSlots"],
-          }
-        : {}),
+      // Context slot metadata (all tiers): provides context IDs and total count.
+      contextSlots: {
+        total: contexts.length,
+        contextIds: contexts.map((a) => a.id),
+        allowPartialSubmit: state.tier === "pro",
+      } satisfies import("../execution/protocol.js").ContinuationSpec["contextSlots"],
     },
   };
 }
