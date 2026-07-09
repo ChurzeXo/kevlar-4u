@@ -499,9 +499,8 @@ describe("End-to-End integration test", () => {
         aggregation: {
           dimensions: [
             {
-              id: "legal_compliance",
+              id: auditorId,
               name: "合规审查",
-              findings: [],
               level: "🟢",
               reasoning: "内容合规，未发现违规风险",
             },

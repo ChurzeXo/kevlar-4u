@@ -1022,7 +1022,7 @@ function renderBlueprintDispatchText(
     '  ],',
     '  "aggregation": {',
     '    "dimensions": [',
-    '      { "id": "<same agent id>", "level": "🟢/🟡/🔴", "findings": [<copy raw findings from this agent context above>] }',
+    '      { "id": "<same agent id>", "level": "🟢/🟡/🔴", "findings": [<optional — auto-extracted from contexts above>] }',
     '    ],',
     '    "summary": "一句话总评"',
     '  }',
@@ -1035,8 +1035,8 @@ function renderBlueprintDispatchText(
     "- `contexts[].output.findings` MUST be an array (use `[]` if no findings)",
     "- `aggregation.dimensions` MUST be an array with one entry per context (use same `id`)",
     "- `aggregation.summary` MUST be a string",
-    "- Each context's `output.findings` should contain the raw findings from that subagent's audit",
-    "- `dimensions[].level` is authoritative when that subagent flagged a risk with few/no keyword-level findings (e.g. 🔴 on structural concern). The backend takes max(receipt level, findings-based level).",
+    "- `aggregation.dimensions[].findings` is auto-extracted from `contexts[].output.findings` — you do NOT need to copy findings into aggregation",
+    "- `dimensions[].level` is authoritative: set a level per dimension; backend auto-fills findings from contexts",
     "",
     perAgentGuidance,
     "### If you CANNOT execute subagent dispatch",
@@ -1982,7 +1982,27 @@ async function handleContextAuditResult(
       throw internalError("Missing aggregation report in ExecutionReceipt");
     }
 
-    const crossValidatedDimensions = aggregation.dimensions || [];
+    // ── Auto-extract dimensions from contexts (primary source for findings) ──
+    // Aggregation.dimensions provides level metadata; findings are read from
+    // contexts[].output.findings to eliminate double-filling by Host AI.
+    // normalizePreAuditDimensions resolves level from record.level first,
+    // falling back to inference from findings.
+    const aggDimLevels = new Map<string, string>();
+    if (Array.isArray(aggregation.dimensions)) {
+      for (const dim of aggregation.dimensions) {
+        if (dim.id && dim.level) {
+          aggDimLevels.set(dim.id, dim.level);
+        }
+      }
+    }
+    const crossValidatedDimensions = (parsed.contexts || []).map((ctx: any) => ({
+      id: ctx.id,
+      name: ctx.role || ctx.id,
+      findings: ctx.status === "completed" && Array.isArray(ctx.output?.findings)
+        ? ctx.output.findings
+        : [],
+      level: aggDimLevels.get(ctx.id), // optional — normalizePreAuditDimensions resolves
+    }));
     const worstCaseNarrative = aggregation.worstCaseNarrative || "";
     const attackChainAnalysis = aggregation.attackChainAnalysis || "";
     const riskProfile = aggregation.riskProfile || {};
