@@ -2,6 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath } from "url";
 import type { PromptSegments } from "./promptTypes.js";
+import { resolvePromptAliases } from "../execution/promptAlias.js";
 
 export type PromptTier = "free" | "pro";
 
@@ -26,7 +27,11 @@ export function loadPromptSegments(tier: PromptTier): PromptSegments {
   }
 
   const raw = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(raw) as PromptSegments;
+  const segments = JSON.parse(raw) as PromptSegments;
+
+  // Resolve Evidence Aliases — Plan A (80%): client expands aliases → LLM gets full text
+  // Plan B aliases (reserved for Pro core IP) pass through to LLM as-is.
+  return resolvePromptAliases(segments as unknown as Record<string, string>) as unknown as PromptSegments;
 }
 
 export function loadPromptSegmentsOrNull(tier: PromptTier): PromptSegments | null {

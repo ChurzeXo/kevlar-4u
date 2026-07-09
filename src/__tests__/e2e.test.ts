@@ -23,8 +23,14 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kevlar-e2e-"));
   const tmpTemplates = path.join(tmpDir, "templates");
   fs.mkdirSync(tmpTemplates, { recursive: true });
-  for (const file of fs.readdirSync(REAL_TEMPLATES_DIR)) {
-    fs.copyFileSync(path.join(REAL_TEMPLATES_DIR, file), path.join(tmpTemplates, file));
+  for (const entry of fs.readdirSync(REAL_TEMPLATES_DIR, { withFileTypes: true })) {
+    const src = path.join(REAL_TEMPLATES_DIR, entry.name);
+    const dest = path.join(tmpTemplates, entry.name);
+    if (entry.isDirectory()) {
+      fs.cpSync(src, dest, { recursive: true });
+    } else {
+      fs.copyFileSync(src, dest);
+    }
   }
   process.env.KEVLAR_SKILLS_DIR = tmpDir;
 });

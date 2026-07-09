@@ -44,7 +44,7 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
   it("buildPreAuditFinalizerPrompt with Free segments (loaded from file)", () => {
     const prompt = buildPreAuditFinalizerPrompt(SAMPLE_AUDITORS, [], FREE_SEGMENTS);
     const hash = sha256(prompt);
-    assert.equal(hash, "7d8e861c036f4408365368410682f146a577493eb2084c337b2947d1caac0e05", "Free finalizer prompt hash changed — template content drift detected");
+    assert.equal(hash, "d0247c9aa2aab4ac98b9e47719ad258d2e9dae3fb5ca7a8af410fac28521edcf", "Free finalizer prompt hash changed — template content drift detected");
   });
 
   it("buildPreAuditFinalizerPrompt with Pro segments (falls back to Free tier)", () => {
@@ -57,7 +57,7 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
   it("buildIsolatedSystemAuditorPrompt", () => {
     const prompt = buildIsolatedSystemAuditorPrompt(SAMPLE_AUDITORS[0]);
     const hash = sha256(prompt);
-    assert.equal(hash, "5aa2f1e6dbe3c96b9423589de7ffbb6132e0430f2f5ed52bdc445c0166663bf8", "Auditor prompt hash changed");
+    assert.equal(hash, "6182477e4b3b6dd145a0c429b93de2589a8f334dca092bd4d260feeb3b3bf44f", "Auditor prompt hash changed");
   });
 
   it("buildIsolatedSystemAuditorMessage", () => {
@@ -66,7 +66,7 @@ describe("Prompt expansion hash baselines (Step 1)", () => {
       step0Result: { wildTranslations: [], blackAtoms: ["测试"], attackCandidates: [], precedents: [] },
     });
     const hash = sha256(msg);
-    assert.equal(hash, "e4f2c69ba6c45278468271cd9ca02e5300dae5f8d07ea0dc92d796308be8e8e9", "Auditor message hash changed");
+    assert.equal(hash, "9b583f35d7be4d29105d4df6006131f5b767e5701ec113bc95e2bc5681414771", "Auditor message hash changed");
   });
 
   it("buildOrchestrationFinalizerPrompt with Free segments (loaded from file)", () => {

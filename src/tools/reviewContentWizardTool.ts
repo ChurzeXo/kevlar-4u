@@ -31,6 +31,7 @@ import { SaaSClient } from "../utils/saasClient.js";
 import { checkForUpdate } from "./checkUpdateTool.js";
 import { type PromptSegments } from "../subscription/promptTypes.js";
 import { loadPromptSegments } from "../subscription/promptTemplates.js";
+import { resolvePromptAliases } from "../execution/promptAlias.js";
 import type { StrategyProvider, ReviewPlan } from "../execution/strategy.js";
 import { calculateSynergy } from "../execution/synergyCalculator.js";
 import { stripContext } from "../utils/stripContext.js";
@@ -1588,7 +1589,10 @@ async function resolvePromptSegments(): Promise<PromptSegments> {
   if (_cachedPromptSegments) return _cachedPromptSegments;
   if (isPro()) {
     const serverPrompts = await SaaSClient.fetchSubscriptionPrompts();
-    _cachedPromptSegments = serverPrompts ?? loadPromptSegments("free");
+    const raw = serverPrompts ?? loadPromptSegments("free");
+    // Apply alias resolution to server prompts too — server may return
+    // alias references in a future protocol version.
+    _cachedPromptSegments = resolvePromptAliases(raw as unknown as Record<string, string>) as unknown as PromptSegments;
     return _cachedPromptSegments;
   }
   _cachedPromptSegments = loadPromptSegments("free");

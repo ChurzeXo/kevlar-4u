@@ -30,8 +30,14 @@ let FREE_SEGMENTS: PromptSegments;
 function copyTemplatesTo(tmpDir: string): void {
   const tmpTemplates = path.join(tmpDir, "templates");
   fs.mkdirSync(tmpTemplates, { recursive: true });
-  for (const file of fs.readdirSync(REAL_TEMPLATES_DIR)) {
-    fs.copyFileSync(path.join(REAL_TEMPLATES_DIR, file), path.join(tmpTemplates, file));
+  for (const entry of fs.readdirSync(REAL_TEMPLATES_DIR, { withFileTypes: true })) {
+    const src = path.join(REAL_TEMPLATES_DIR, entry.name);
+    const dest = path.join(tmpTemplates, entry.name);
+    if (entry.isDirectory()) {
+      fs.cpSync(src, dest, { recursive: true });
+    } else {
+      fs.copyFileSync(src, dest);
+    }
   }
 }
 
