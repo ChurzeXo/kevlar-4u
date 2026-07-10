@@ -33,7 +33,7 @@ export function loadPromptSegments(tier: PromptTier): PromptSegments {
 
   // Resolve Evidence Aliases — Plan A (80%): client expands aliases → LLM gets full text
   // Plan B aliases (reserved for Pro core IP) pass through to LLM as-is.
-  const resolved = resolvePromptAliases(segments as unknown as Record<string, string>) as unknown as PromptSegments;
+  const resolved = resolvePromptAliases(segments as unknown as Record<string, string>, undefined, tier) as unknown as PromptSegments;
 
   // P0 Runtime hash integrity check
   const integrity = verifyPromptIntegrity(resolved as unknown as Record<string, string>);

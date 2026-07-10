@@ -1588,7 +1588,7 @@ async function resolvePromptSegments(): Promise<PromptSegments> {
     const raw = serverPrompts ?? loadPromptSegments("free");
     // Apply alias resolution to server prompts too — server may return
     // alias references in a future protocol version.
-    _cachedPromptSegments = resolvePromptAliases(raw as unknown as Record<string, string>) as unknown as PromptSegments;
+    _cachedPromptSegments = resolvePromptAliases(raw as unknown as Record<string, string>, undefined, "pro") as unknown as PromptSegments;
     return _cachedPromptSegments;
   }
   _cachedPromptSegments = loadPromptSegments("free");

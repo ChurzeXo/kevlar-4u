@@ -79,7 +79,7 @@ export function invalidateAliasCache(): void {
 
 // ── Loader ───────────────────────────────────────────────────────────
 
-function loadAliasMapUncached(locale: string): PromptAliasMap | null {
+function loadAliasMapUncached(locale: string, tier?: "free" | "pro"): PromptAliasMap | null {
   const mapPath = resolveAliasMapPath(locale);
   try {
     const raw = fs.readFileSync(mapPath, "utf-8");
@@ -99,9 +99,19 @@ function loadAliasMapUncached(locale: string): PromptAliasMap | null {
         event: "alias_map_integrity_failed",
         locale,
         path: mapPath,
+        tier: tier ?? "unknown",
       });
-      // Return the map anyway — hash guard already logged details.
-      // Callers decide tier-appropriate fallback behavior.
+
+      // Pro: reject compromised map — upstream may fall back to zh-CN or raw aliases.
+      // Free / unknown tier: best-effort, return map anyway.
+      if (tier === "pro") {
+        logger.error("Pro alias map integrity failed — rejecting compromised map", {
+          event: "alias_map_integrity_pro_reject",
+          locale,
+          path: mapPath,
+        });
+        return null;
+      }
     }
 
     return map;
@@ -110,11 +120,11 @@ function loadAliasMapUncached(locale: string): PromptAliasMap | null {
   }
 }
 
-function loadAliasMap(locale: string): PromptAliasMap | null {
+function loadAliasMap(locale: string, tier?: "free" | "pro"): PromptAliasMap | null {
   if (_aliasCache.has(locale)) {
     return _aliasCache.get(locale)!;
   }
-  const map = loadAliasMapUncached(locale);
+  const map = loadAliasMapUncached(locale, tier);
   _aliasCache.set(locale, map);
   return map;
 }
@@ -221,14 +231,16 @@ function resolveSegment(aliasId: string, map: PromptAliasMap, rawValue: string):
 export function resolvePromptAliases(
   segments: Record<string, string>,
   locale?: string,
+  tier?: "free" | "pro",
 ): Record<string, string> {
   const loc = locale ?? getCurrentLanguage();
-  const map = loadAliasMap(loc);
+  const map = loadAliasMap(loc, tier);
 
   if (!map) {
     logger.debug("No alias map for locale, returning raw segments", {
       event: "alias_map_missing",
       locale: loc,
+      tier: tier ?? "unknown",
     });
     return segments;
   }
